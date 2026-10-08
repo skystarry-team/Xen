@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module guide.view;
+import guide.model;
+
+fn show(user: guide.model.User) {
+    let user_role: guide.model.Role = user.role;
+    let role = match user_role {
+        guide.model.Role.Admin => "admin",
+        guide.model.Role.Guest => "guest",
+    };
+    println(user.name + ": " + role);
+}

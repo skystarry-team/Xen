@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module key_values;
+use std.convert as convert;
+use std.env as env;
+use std.fs as fs;
+use std.io as io;
+use std.option as option;
+use std.result as result;
+use std.string as string;
+
+enum AppError {
+    Io(io.IoError),
+    MissingEquals(Int),
+    EmptyKey(Int),
+    Bounds(string.BoundsError),
+}
+
+fn from_io(error: io.IoError) -> AppError {
+    return AppError.Io(error);
+}
+
+fn from_bounds(error: string.BoundsError) -> AppError {
+    return AppError.Bounds(error);
+}
+
+fn part(text: String, start: Int, end: Int) -> Result<String, AppError> {
+    return result.map_err(string.slice_bytes(text, start, end), from_bounds);
+}
+
+fn entry_parts(line: String, separator: Int) -> Result<(String, String), AppError> {
+    return Result.Ok((part(line, 0, separator)?, part(line, separator + 1, line.len())?));
+}
+
+// LF separates records; blank lines are ignored. Spaces and value bytes are
+// preserved, empty values are valid, and only the first '=' separates the key.
+fn describe_entries(text: String) -> Result<String, AppError> {
+    let lines = string.split_byte(text, u8(10));
+    let mut output = "";
+    for index in 0..lines.len() {
+        let line = lines.get(index);
+        if line.len() == 0 { continue; }
+        let separator = option.unwrap_or(string.find(line, "="), line.len());
+        if separator == line.len() { return Result.Err(AppError.MissingEquals(index + 1)); }
+        if separator == 0 { return Result.Err(AppError.EmptyKey(index + 1)); }
+        let (key, value) = entry_parts(line, separator)?;
+        output = output + key + ": " + value + "\n";
+    }
+    return Result.Ok(output);
+}
+
+fn read_entries(loaded: Result<String, io.IoError>) -> Result<String, AppError> {
+    let text = result.map_err(loaded, from_io)?;
+    return describe_entries(text);
+}
+
+fn describe_error(error: AppError) -> String {
+    return match error {
+        AppError.Io(problem) => io.describe_error(problem),
+        AppError.MissingEquals(line) => "missing '=' at line " + convert.format_int(line),
+        AppError.EmptyKey(line) => "empty key at line " + convert.format_int(line),
+        AppError.Bounds(_) => "invalid byte range",
+    };
+}
+
+fn main() {
+    let arguments = env.args();
+    if arguments.len() > 1 { panic("usage: key_values [path]"); }
+    let loaded = if arguments.len() == 0 {
+        io.read_stdin()
+    } else {
+        fs.read(arguments.get(0))
+    };
+    let output = match read_entries(loaded) {
+        Result.Ok(value) => value,
+        Result.Err(error) => { panic(describe_error(error)); },
+    };
+    match io.write_stdout(output) {
+        Result.Ok(_) => (),
+        Result.Err(error) => { panic(io.describe_error(error)); },
+    };
+}

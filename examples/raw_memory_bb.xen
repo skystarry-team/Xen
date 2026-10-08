@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+struct Pair { tag: U8, value: I64 }
+
+fn main() {
+    #scope[bb] {
+        let pointer: Ptr<Int> = raw_alloc_int(2);
+        raw_store_int(pointer, 0, 21);
+        raw_store_int(pointer, 1, 21);
+        println(raw_load_int(pointer, 0) + raw_load_int(pointer, 1));
+        raw_free_int(pointer);
+
+        let bytes = raw_alloc<U8>(3);
+        raw_store(bytes, 0, u8(79));
+        raw_store(bytes, 1, u8(75));
+        raw_store(bytes, 2, u8(10));
+        syscall3(1, 1, ptr_addr(bytes), 3);
+        raw_free(bytes);
+
+        let pair = raw_alloc<Pair>(1);
+        raw_store(pair, 0, Pair { tag: u8(7), value: 35 });
+        println(raw_load(pair, 0).tag + u8(0));
+        raw_free(pair);
+    }
+}

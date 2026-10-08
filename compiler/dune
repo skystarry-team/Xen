@@ -1,0 +1,29 @@
+; SPDX-License-Identifier: Apache-2.0
+(library
+ (name xen_compiler)
+ (wrapped false)
+ (modules ast core_modules type_desc lexer parser prelude semantic_ir typed_ast semantic_lower semantic_analysis semantic_opt monomorph checker project_loader machine_ir jit_runtime elf_writer native_backend test_runner)
+ (libraries unix))
+
+(executable
+ (name main)
+ (modules main build_version)
+ (libraries unix xen_compiler))
+
+(executable
+ (name version_gen)
+ (modules version_gen))
+
+(rule
+ (targets build_version.ml)
+ (deps ../VERSION)
+ (action
+  (with-stdout-to build_version.ml
+   (run %{exe:version_gen.exe} %{dep:../VERSION} %{env:XEN_BUILD_VERSION=}))))
+
+(rule
+ (alias release)
+ (targets xen)
+ (deps main.exe)
+ (mode (promote (into dist) (until-clean)))
+ (action (copy main.exe xen)))

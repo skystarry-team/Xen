@@ -1,0 +1,21 @@
+; SPDX-License-Identifier: MIT OR Apache-2.0
+(test
+ (name native_core_test)
+ (modules native_core_test)
+ (deps (source_tree ../examples) (source_tree ../stdlib))
+ (libraries unix xen_compiler))
+
+(test
+ (name semantic_ir_test)
+ (modules semantic_ir_test)
+ (libraries unix xen_compiler))
+
+(test
+ (name semantic_opt_test)
+ (modules semantic_opt_test)
+ (libraries unix xen_compiler))
+
+(test
+ (name jit_ir_test)
+ (modules jit_ir_test)
+ (libraries unix xen_compiler))

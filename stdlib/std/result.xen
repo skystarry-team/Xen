@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.result;
+
+fn map_err<T, E, F>(value: Result<T, E>, convert: fn(E) -> F) -> Result<T, F> {
+    return match value {
+        Result.Ok(item) => Result<T, F>.Ok(item),
+        Result.Err(error) => Result<T, F>.Err(convert(error)),
+    };
+}

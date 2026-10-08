@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+enum Message<T> { Quit, Data((T, Bool)) }
+
+fn describe(result: Result<Int, String>) -> String {
+    return match result {
+        Result.Ok(value) => "value=" + int_to_str(value),
+        Result.Err(error) => error,
+    };
+}
+
+fn main() {
+    let message: Message<Int> = Message.Data((7, true));
+    let label = match message {
+        Message.Data((value, true)) => "enabled " + int_to_str(value),
+        Message.Data((value, false)) => "disabled " + int_to_str(value),
+        Message.Quit => "quit",
+    };
+    let option: Option<String> = Option.Some(label);
+    println(match option {
+        Option.Some(text) => text,
+        Option.None => "none",
+    });
+    println(describe(Result.Ok(9)));
+    println(describe(Result.Err("recoverable error")));
+}

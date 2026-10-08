@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+enum Expr {
+    Integer(Int),
+    Name(String),
+    Binary(BinaryExpr),
+}
+
+struct BinaryExpr {
+    left: Box<Expr>,
+    right: Box<Expr>,
+}
+
+// Evaluation consumes the tree. Unvisited children are dropped with their owner.
+fn evaluate(expr: Expr) -> Int {
+    return match expr {
+        Expr.Integer(value) => value,
+        Expr.Name(name) => len(name),
+        Expr.Binary(binary) =>
+            evaluate(binary.left.into_inner()) + evaluate(binary.right.into_inner()),
+    };
+}
+
+fn main() {
+    let tree = Expr.Binary(BinaryExpr {
+        left: box(Expr.Binary(BinaryExpr {
+            left: box(Expr.Integer(3)),
+            right: box(Expr.Name("xen")),
+        })),
+        right: box(Expr.Integer(4)),
+    });
+    println(evaluate(tree));
+
+    #scope[explc] {
+        let mut owned = box(7);
+        let shared = owned.as_ref();
+        println(*shared);
+        let mutable = owned.as_mut();
+        *mutable = 9;
+        println(owned.into_inner());
+    }
+}

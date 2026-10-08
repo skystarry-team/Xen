@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Expected diagnostic: recursive value layout involving
+struct Left { right: Right }
+struct Right { left: Left }
+fn main() {}

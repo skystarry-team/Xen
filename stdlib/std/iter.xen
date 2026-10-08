@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.iter;
+
+// Iterator state and transitions live in Xen.  The compiler only needs to
+// recognize the structural next(&mut self) -> Option<T> protocol used by for.
+struct SliceIter<T> {
+    items: Slice<T>,
+    index: Int,
+}
+
+impl<T> SliceIter<T> {
+    fn next(&mut self) -> Option<T> {
+        if self.index < self.items.len() {
+            let value = self.items.get(self.index);
+            self.index = self.index + 1;
+            return Option<T>.Some(value);
+        }
+        return Option<T>.None;
+    }
+}
+
+struct PtrIter<T> {
+    pointer: Ptr<T>,
+    index: Int,
+    length: Int,
+}
+
+impl<T> PtrIter<T> {
+    #![bb]
+    fn next(&mut self) -> Option<T> {
+        if self.index < self.length {
+            let value = raw_load(self.pointer, self.index);
+            self.index = self.index + 1;
+            return Option<T>.Some(value);
+        }
+        return Option<T>.None;
+    }
+}
+
+struct Enumerate<I, T> {
+    iterator: I,
+    index: Int,
+}
+
+impl<I, T> Enumerate<I, T> {
+    fn next(&mut self) -> Option<(Int, T)> {
+        let index = self.index;
+        let item = self.iterator.next();
+        return match (item, index) {
+            (Option.Some(value), current) => {
+                self.index = self.index + 1;
+                Option<(Int, T)>.Some((current, value))
+            },
+            (Option.None, _) => Option<(Int, T)>.None,
+        };
+    }
+}

@@ -1,0 +1,9 @@
+(* SPDX-License-Identifier: Apache-2.0 *)
+let source =
+  "enum Option<T>{None,Some(T)} enum Result<T,E>{Ok(T),Err(E)} " ^
+  "struct Range{current:Int,finish:Int} " ^
+  "impl Range{fn next(&mut self)->Option<Int>{" ^
+  "if self.current<self.finish{let value=self.current;self.current=self.current+1;" ^
+  "return Option<Int>.Some(value);}return Option<Int>.None;}}"
+
+let program () = Parser.parse ~file:"<prelude>" source

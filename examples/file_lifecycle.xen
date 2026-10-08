@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+fn relay(file: File) -> File {
+    return file;
+}
+
+fn main() {
+    let path = arg(0);
+    {
+        let output = open_write(path);
+        let mut moved_output = relay(output);
+        moved_output.write("temporary Xen file\n");
+    }
+    {
+        let input = open_read(path);
+        let mut moved_input = relay(input);
+        print(moved_input.read());
+    }
+}

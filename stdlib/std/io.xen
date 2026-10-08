@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.io;
+use std.convert;
+
+enum IoError {
+    InvalidPath,
+    Open(Int),
+    Read(Int),
+    Write(Int),
+    WriteZero,
+    Close(Int),
+    Metadata(Int),
+    Directory(Int),
+    InvalidDirectoryEntry,
+    Cwd(Int),
+}
+
+fn errno(raw: Int) -> Int {
+    return -raw;
+}
+
+fn write_fd(fd: Int, text: String) -> Result<Int, IoError> {
+    let bytes = text.as_bytes();
+    let length = bytes.len();
+    #scope[bb] {
+        let buffer = raw_alloc<U8>(length);
+        for index in 0..length {
+            raw_store(buffer, index, bytes.get(index));
+        }
+
+        let mut offset = 0;
+        let mut failed = false;
+        let mut error = IoError.WriteZero;
+        while offset < length && !failed {
+            let written = syscall3(1, fd, ptr_addr(buffer) + offset, length - offset);
+            if written == -4 {
+                // EINTR: retry without advancing.
+            } else if written < 0 {
+                failed = true;
+                error = IoError.Write(errno(written));
+            } else if written == 0 {
+                failed = true;
+                error = IoError.WriteZero;
+            } else {
+                offset = offset + written;
+            }
+        }
+        raw_free(buffer);
+        if failed {
+            return Result<Int, IoError>.Err(error);
+        }
+        return Result<Int, IoError>.Ok(offset);
+    }
+}
+
+fn write_stdout(text: String) -> Result<Int, IoError> {
+    return write_fd(1, text);
+}
+
+fn write_stderr(text: String) -> Result<Int, IoError> {
+    return write_fd(2, text);
+}
+
+fn describe_error(error: IoError) -> String {
+    return match error {
+        IoError.InvalidPath => "invalid path: embedded NUL byte",
+        IoError.Open(code) => "open failed (errno " + std.convert.format_int(code) + ")",
+        IoError.Read(code) => "read failed (errno " + std.convert.format_int(code) + ")",
+        IoError.Write(code) => "write failed (errno " + std.convert.format_int(code) + ")",
+        IoError.WriteZero => "write made no progress",
+        IoError.Close(code) => "close failed (errno " + std.convert.format_int(code) + ")",
+        IoError.Metadata(code) => "metadata failed (errno " + std.convert.format_int(code) + ")",
+        IoError.Directory(code) => "directory read failed (errno " + std.convert.format_int(code) + ")",
+        IoError.InvalidDirectoryEntry => "invalid directory entry",
+        IoError.Cwd(code) => "current directory failed (errno " + std.convert.format_int(code) + ")",
+    };
+}
+fn read_fd(fd: Int) -> Result<String, IoError> {
+    #scope[bb] {
+        let buffer = raw_alloc<U8>(4096);
+        let mut contents: Vec<U8> = [];
+        let mut done = false;
+        let mut failed = false;
+        let mut error = IoError.Read(0);
+        while !done {
+            let count = syscall3(0, fd, ptr_addr(buffer), 4096);
+            if count == -4 {
+                // EINTR: retry.
+            } else if count < 0 {
+                error = IoError.Read(-count);
+                failed = true;
+                done = true;
+            } else if count == 0 {
+                done = true;
+            } else {
+                for index in 0..count {
+                    contents.push(raw_load(buffer, index));
+                }
+            }
+        }
+        raw_free(buffer);
+        if failed {
+            return Result<String, IoError>.Err(error);
+        }
+        return Result<String, IoError>.Ok(contents.into_string());
+    }
+}
+
+fn read_stdin() -> Result<String, IoError> {
+    return read_fd(0);
+}
+
+test fn invalid_descriptors() {
+    assert(match read_fd(-1) { Result.Err(IoError.Read(9)) => true, _ => false });
+    assert(match write_fd(-1, "x") { Result.Err(IoError.Write(9)) => true, _ => false });
+}

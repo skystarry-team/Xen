@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Expected diagnostic: operation requires a concrete type
+fn double<T>(value: T) -> T {
+    return value + value;
+}
+fn main() {
+    println(double(2));
+}

@@ -1,0 +1,16 @@
+Xen
+Copyright (c) 2026 vmintf(minsung)
+Project: https://github.com/skystarry-team/Xen
+
+The compiler and generative/metamorphic verification infrastructure are
+licensed under Apache-2.0. Other original code and documentation use
+MIT OR Apache-2.0, subject to the scope and generated-runtime exception
+in LICENSE.
+
+Branding images in assets/branding/ are AI-generated and use CC-BY-4.0.
+The licensor and attribution name is vmintf(minsung). See the asset README
+for the source and license links.
+
+The distributed compiler executable includes OCaml components.
+Their original license and linking exception are included in
+licenses/OCaml.txt; see THIRD_PARTY.md.

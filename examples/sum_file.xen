@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module sum_file;
+use std.convert;
+use std.env;
+use std.fs;
+use std.io;
+use std.iter;
+use std.string;
+
+fn parse_error_message(token: Int, error: std.convert.ParseIntError) -> String {
+    return match error {
+        std.convert.ParseIntError.Empty =>
+            "empty integer token at token " + std.convert.format_int(token),
+        std.convert.ParseIntError.InvalidDigit((index, byte)) =>
+            "invalid integer token " + std.convert.format_int(token) +
+            " at byte " + std.convert.format_int(index) +
+            " (value " + std.convert.format_int(i64(byte)) + ")",
+        std.convert.ParseIntError.Overflow =>
+            "integer overflow at token " + std.convert.format_int(token),
+    };
+}
+
+fn finish_output(result: Result<Int, std.io.IoError>) -> Int {
+    return match result {
+        Result.Ok(_) => 0,
+        Result.Err(error) => {
+            assert_msg(false, std.io.describe_error(error));
+            0
+        },
+    };
+}
+
+fn main() {
+    let arguments = std.env.args();
+    if arguments.len() != 1 {
+        panic("usage: sum_file <path>");
+    }
+
+    let loaded = std.fs.read(arguments.get(0));
+    let input = match loaded {
+        Result.Ok(contents) => contents,
+        Result.Err(error) => {
+            assert_msg(false, std.io.describe_error(error));
+            ""
+        },
+    };
+    let tokens = std.string.split_ascii_whitespace(input);
+    let mut total: Int = 0;
+    for (token_index, token) in tokens.iter().enumerate() {
+        let parsed = std.convert.parse_int(token);
+        let value = match parsed {
+            Result.Ok(value) => value,
+            Result.Err(error) => {
+                assert_msg(false, parse_error_message(token_index, error));
+                0
+            },
+        };
+        total = total + value;
+    }
+
+    finish_output(std.io.write_stdout(std.convert.format_int(total) + "\n"));
+}

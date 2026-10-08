@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+fn main() {
+    let name = "Xen";
+    println("hello, " + name);
+    println(len(name));
+
+    let mut integers: Vec<Int> = [];
+    integers.push(10);
+    integers.push(20);
+    integers.set(0, 11);
+    println(integers);
+    println(integers.pop());
+
+    let mut decimals: Vec<Float> = [1.5, 2.5];
+    decimals[1] = 3.5;
+    println(decimals);
+    println(decimals.get(1));
+
+    let view: Slice<Float> = decimals.slice(0, 1);
+    println(view.len());
+    println(view[0]);
+}

@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.string;
+
+enum BoundsError {
+    InvalidRange((Int, Int, Int)),
+}
+
+// Offsets and separators are bytes, including NUL and invalid UTF-8.
+// The result owns its bytes; no borrowed view escapes this function.
+fn slice_bytes(text: String, start: Int, end: Int) -> Result<String, BoundsError> {
+    let bytes = text.as_bytes();
+    let length = bytes.len();
+    if start < 0 || end < start || end > length {
+        return Result.Err(BoundsError.InvalidRange((start, end, length)));
+    }
+    let mut result: Vec<U8> = [];
+    for index in start..end { result.push(bytes.get(index)); }
+    return Result.Ok(result.into_string());
+}
+
+fn find(text: String, needle: String) -> Option<Int> {
+    let bytes = text.as_bytes();
+    let target = needle.as_bytes();
+    let length = bytes.len();
+    let target_length = target.len();
+    if target_length == 0 { return Option.Some(0); }
+    if target_length > length { return Option.None; }
+    let last = length - target_length;
+    let mut start = 0;
+    while start <= last {
+        let mut index = 0;
+        while index < target_length && bytes.get(start + index) == target.get(index) {
+            index = index + 1;
+        }
+        if index == target_length { return Option.Some(start); }
+        start = start + 1;
+    }
+    return Option.None;
+}
+
+fn contains(text: String, needle: String) -> Bool {
+    return match find(text, needle) {
+        Option.Some(_) => true,
+        Option.None => false,
+    };
+}
+
+fn split_byte(text: String, separator: U8) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let mut parts: Vec<String> = [];
+    let mut part: Vec<U8> = [];
+    for index in 0..bytes.len() {
+        let byte = bytes.get(index);
+        if byte == separator {
+            parts.push(part.into_string());
+            part = [];
+        } else {
+            part.push(byte);
+        }
+    }
+    parts.push(part.into_string());
+    return parts;
+}
+
+fn is_ascii_whitespace(byte: U8) -> Bool {
+    return (byte >= u8(9) && byte <= u8(13)) || byte == u8(32);
+}
+
+fn split_ascii_whitespace(text: String) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let length = bytes.len();
+    let mut tokens: Vec<String> = [];
+    let mut token: Vec<U8> = [];
+    for index in 0..length {
+        let byte = bytes.get(index);
+        if is_ascii_whitespace(byte) {
+            if token.len() > 0 {
+                tokens.push(token.into_string());
+                token = [];
+            }
+        } else {
+            token.push(byte);
+        }
+    }
+    if token.len() > 0 {
+        tokens.push(token.into_string());
+    }
+    return tokens;
+}
+
+test fn byte_ranges() {
+    assert(match slice_bytes("abc", 1, 3) { Result.Ok(value) => value == "bc", _ => false });
+    assert(match slice_bytes("abc", 3, 3) { Result.Ok(value) => value == "", _ => false });
+    assert(match slice_bytes("", 0, 0) { Result.Ok(value) => value == "", _ => false });
+    assert(match slice_bytes("abc", -1, 2) {
+        Result.Err(BoundsError.InvalidRange((start, end, length))) =>
+            start == -1 && end == 2 && length == 3,
+        _ => false,
+    });
+    assert(match slice_bytes("abc", 2, 1) { Result.Err(_) => true, _ => false });
+    assert(match slice_bytes("abc", 0, 4) { Result.Err(_) => true, _ => false });
+}
+
+test fn byte_search() {
+    assert(match find("ababa", "aba") { Option.Some(0) => true, _ => false });
+    assert(match find("ababa", "ba") { Option.Some(1) => true, _ => false });
+    assert(match find("abc", "c") { Option.Some(2) => true, _ => false });
+    assert(match find("abc", "abcd") { Option.None => true, _ => false });
+    assert(match find("abc", "d") { Option.None => true, _ => false });
+    assert(match find("", "") { Option.Some(0) => true, _ => false });
+    assert(contains("abc", ""));
+    assert(!contains("", "a"));
+}
+
+test fn empty_split_parts() {
+    let empty = split_byte("", u8(61));
+    assert(empty.len() == 1 && empty.get(0) == "");
+    let parts = split_byte("=a==", u8(61));
+    assert(parts.len() == 4);
+    assert(parts.get(0) == "" && parts.get(1) == "a");
+    assert(parts.get(2) == "" && parts.get(3) == "");
+}
+
+test fn binary_bytes() {
+    let bytes: Vec<U8> = [97, 0, 255, 195, 169];
+    let text = bytes.into_string();
+    let needle_bytes: Vec<U8> = [0, 255];
+    let needle = needle_bytes.into_string();
+    assert(match find(text, needle) { Option.Some(1) => true, _ => false });
+    assert(match slice_bytes(text, 2, 4) {
+        Result.Ok(value) => {
+            let view = value.as_bytes();
+            view.len() == 2 && view.get(0) == u8(255) && view.get(1) == u8(195)
+        },
+        _ => false,
+    });
+    let parts = split_byte(text, u8(0));
+    assert(parts.len() == 2 && parts.get(0) == "a");
+    let tail = parts.get(1);
+    let view = tail.as_bytes();
+    assert(view.len() == 3 && view.get(0) == u8(255));
+}

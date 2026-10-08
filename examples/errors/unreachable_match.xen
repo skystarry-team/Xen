@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Expected diagnostic: unreachable pattern
+fn main() {
+    println(match true { _ => 1, true => 2 });
+}

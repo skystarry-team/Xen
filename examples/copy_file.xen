@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module copy_file;
+use std.convert;
+use std.env;
+use std.fs;
+use std.io;
+
+fn finish_output(result: Result<Int, std.io.IoError>) -> Int {
+    return match result {
+        Result.Ok(_) => 0,
+        Result.Err(error) => {
+            assert_msg(false, std.io.describe_error(error));
+            0
+        },
+    };
+}
+
+fn main() {
+    let arguments = std.env.args();
+    if arguments.len() != 2 {
+        panic("usage: copy_file <source> <destination>");
+    }
+    let result: Result<Int, std.io.IoError> =
+        std.fs.copy(arguments.get(0), arguments.get(1));
+    let status = match result {
+        Result.Ok(count) => {
+            let output = "copied " + std.convert.format_int(count) + " bytes\n";
+            finish_output(std.io.write_stdout(output))
+        },
+        Result.Err(error) => {
+            assert_msg(false, std.io.describe_error(error));
+            0
+        },
+    };
+}

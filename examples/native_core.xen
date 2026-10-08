@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+fn add(left: Int, right: Int) -> Int {
+    return left + right;
+}
+
+fn main() {
+    let mut index = 0;
+    while index < 5 {
+        if index != 2 {
+            println(add(index, 10));
+        }
+        index = index + 1;
+    }
+    println(-7);
+}
+

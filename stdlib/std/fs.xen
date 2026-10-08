@@ -1,0 +1,245 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.fs;
+use std.io;
+
+struct Metadata {
+    size: Int,
+    modified_seconds: Int,
+    is_directory: Bool,
+    is_file: Bool,
+}
+
+fn encoded_path(path: String) -> Result<Vec<U8>, std.io.IoError> {
+    let bytes = path.as_bytes();
+    let mut encoded: Vec<U8> = [];
+    for index in 0..bytes.len() {
+        let byte = bytes.get(index);
+        if byte == u8(0) { return Result<Vec<U8>, std.io.IoError>.Err(std.io.IoError.InvalidPath); }
+        encoded.push(byte);
+    }
+    encoded.push(u8(0));
+    return Result<Vec<U8>, std.io.IoError>.Ok(encoded);
+}
+
+fn open_path(path: String, flags: Int, mode: Int) -> Result<Int, std.io.IoError> {
+    let bytes = encoded_path(path)?;
+    let length = bytes.len();
+
+    #scope[bb] {
+        let buffer = raw_alloc<U8>(length);
+        for index in 0..length {
+            raw_store(buffer, index, bytes.get(index));
+        }
+        let mut opened = syscall3(2, ptr_addr(buffer), flags, mode);
+        while opened == -4 {
+            opened = syscall3(2, ptr_addr(buffer), flags, mode);
+        }
+        raw_free(buffer);
+        if opened < 0 {
+            return Result<Int, std.io.IoError>.Err(std.io.IoError.Open(-opened));
+        }
+        return Result<Int, std.io.IoError>.Ok(opened);
+    }
+}
+
+fn close_fd(fd: Int) -> Result<Int, std.io.IoError> {
+    #scope[bb] {
+        let closed = syscall1(3, fd);
+        if closed < 0 {
+            return Result<Int, std.io.IoError>.Err(std.io.IoError.Close(-closed));
+        }
+        return Result<Int, std.io.IoError>.Ok(0);
+    }
+}
+
+fn read_open(fd: Int) -> Result<String, std.io.IoError> {
+    return std.io.read_fd(fd);
+}
+
+fn finish_read_close(
+    contents: String,
+    closed: Result<Int, std.io.IoError>
+) -> Result<String, std.io.IoError> {
+    return match closed {
+        Result.Err(error) => Result<String, std.io.IoError>.Err(error),
+        Result.Ok(_) => Result<String, std.io.IoError>.Ok(contents),
+    };
+}
+
+fn finish_read(
+    result: Result<String, std.io.IoError>,
+    closed: Result<Int, std.io.IoError>
+) -> Result<String, std.io.IoError> {
+    return match result {
+        Result.Err(error) => Result<String, std.io.IoError>.Err(error),
+        Result.Ok(contents) => finish_read_close(contents, closed),
+    };
+}
+
+fn finish_write_close(
+    count: Int,
+    closed: Result<Int, std.io.IoError>
+) -> Result<Int, std.io.IoError> {
+    return match closed {
+        Result.Err(error) => Result<Int, std.io.IoError>.Err(error),
+        Result.Ok(_) => Result<Int, std.io.IoError>.Ok(count),
+    };
+}
+
+fn finish_write(
+    result: Result<Int, std.io.IoError>,
+    closed: Result<Int, std.io.IoError>
+) -> Result<Int, std.io.IoError> {
+    return match result {
+        Result.Err(error) => Result<Int, std.io.IoError>.Err(error),
+        Result.Ok(count) => finish_write_close(count, closed),
+    };
+}
+
+fn read(path: String) -> Result<String, std.io.IoError> {
+    let fd = open_path(path, 0, 0)?;
+    let result = read_open(fd);
+    let closed = close_fd(fd);
+    return finish_read(result, closed);
+}
+
+fn write(path: String, contents: String) -> Result<Int, std.io.IoError> {
+    let fd = open_path(path, 577, 420)?;
+    let result = std.io.write_fd(fd, contents);
+    let closed = close_fd(fd);
+    return finish_write(result, closed);
+}
+
+fn copy(source: String, destination: String) -> Result<Int, std.io.IoError> {
+    let contents = read(source)?;
+    return write(destination, contents);
+}
+
+fn append(path: String, contents: String) -> Result<Int, std.io.IoError> {
+    // O_WRONLY | O_CREAT | O_APPEND, with the same mode/umask policy as write.
+    let fd = open_path(path, 1089, 420)?;
+    let result = std.io.write_fd(fd, contents);
+    let closed = close_fd(fd);
+    return finish_write(result, closed);
+}
+
+// Linux x86-64 struct stat: 144 bytes; size at word 6, mtime at word 11.
+// stat follows symlinks. No open permission or raw fd is required by callers.
+fn metadata(path: String) -> Result<Metadata, std.io.IoError> {
+    let bytes = encoded_path(path)?;
+    #scope[bb] {
+        let name = raw_alloc<U8>(bytes.len());
+        for index in 0..bytes.len() { raw_store(name, index, bytes.get(index)); }
+        let data = raw_alloc<Int>(18);
+        let mut result = syscall2(4, ptr_addr(name), ptr_addr(data));
+        while result == -4 { result = syscall2(4, ptr_addr(name), ptr_addr(data)); }
+        raw_free(name);
+        if result < 0 {
+            raw_free(data);
+            return Result<Metadata, std.io.IoError>.Err(std.io.IoError.Metadata(-result));
+        }
+        // The upper half of this word is uid; normalize the signed remainder.
+        let mode = (raw_load(data, 3) % 65536 + 65536) % 65536;
+        let kind = mode / 4096;
+        let value = Metadata {
+            size: raw_load(data, 6),
+            modified_seconds: raw_load(data, 11),
+            is_directory: kind == 4,
+            is_file: kind == 8,
+        };
+        raw_free(data);
+        return Result<Metadata, std.io.IoError>.Ok(value);
+    }
+}
+
+// Decoder is ordinary safe Xen, so malformed record boundaries are testable.
+fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, std.io.IoError> {
+    let mut names: Vec<String> = [];
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if bytes.len() - offset < 20 {
+            return Result<Vec<String>, std.io.IoError>.Err(std.io.IoError.InvalidDirectoryEntry);
+        }
+        let length = i64(bytes.get(offset + 16)) + 256 * i64(bytes.get(offset + 17));
+        if length < 20 || length > bytes.len() - offset {
+            return Result<Vec<String>, std.io.IoError>.Err(std.io.IoError.InvalidDirectoryEntry);
+        }
+        let mut name: Vec<U8> = [];
+        let mut index = offset + 19;
+        while index < offset + length && bytes.get(index) != u8(0) {
+            name.push(bytes.get(index));
+            index = index + 1;
+        }
+        if index == offset + length || index == offset + 19 {
+            return Result<Vec<String>, std.io.IoError>.Err(std.io.IoError.InvalidDirectoryEntry);
+        }
+        let text = name.into_string();
+        if text != "." && text != ".." { names.push(text); }
+        offset = offset + length;
+    }
+    return Result<Vec<String>, std.io.IoError>.Ok(names);
+}
+
+fn read_directory_fd(fd: Int) -> Result<Vec<String>, std.io.IoError> {
+    #scope[bb] {
+        let buffer = raw_alloc<U8>(4096);
+        let mut names: Vec<String> = [];
+        let mut done = false;
+        let mut failed = false;
+        let mut error = std.io.IoError.Directory(0);
+        while !done {
+            let count = syscall3(217, fd, ptr_addr(buffer), 4096);
+            if count == -4 {
+                // EINTR: retry.
+            } else if count < 0 {
+                failed = true;
+                done = true;
+                error = std.io.IoError.Directory(-count);
+            } else if count == 0 {
+                done = true;
+            } else {
+                let mut bytes: Vec<U8> = [];
+                for index in 0..count { bytes.push(raw_load(buffer, index)); }
+                match decode_directory(bytes.as_slice()) {
+                    Result.Err(problem) => {
+                        error = problem;
+                        failed = true;
+                        done = true;
+                    },
+                    Result.Ok(batch) => {
+                        for index in 0..batch.len() { names.push(batch.get(index)); }
+                    },
+                };
+            }
+        }
+        raw_free(buffer);
+        if failed { return Result<Vec<String>, std.io.IoError>.Err(error); }
+        return Result<Vec<String>, std.io.IoError>.Ok(names);
+    }
+}
+
+fn read_dir(path: String) -> Result<Vec<String>, std.io.IoError> {
+    let fd = open_path(path, 65536, 0)?; // O_RDONLY | O_DIRECTORY
+    let result = read_directory_fd(fd);
+    let closed = close_fd(fd);
+    return match result {
+        Result.Err(error) => Result<Vec<String>, std.io.IoError>.Err(error),
+        Result.Ok(names) => match closed {
+            Result.Err(error) => Result<Vec<String>, std.io.IoError>.Err(error),
+            Result.Ok(_) => Result<Vec<String>, std.io.IoError>.Ok(names),
+        },
+    };
+}
+
+test fn null_file() {
+    assert(match read("/dev/null") { Result.Ok(text) => len(text) == 0, _ => false });
+    assert(match metadata("/dev/null") { Result.Ok(info) => !info.is_file && !info.is_directory, _ => false });
+    assert(match read_dir("/dev/null") { Result.Err(_) => true, _ => false });
+}
+
+test fn invalid_paths_and_records() {
+    let nul: Vec<U8> = [0];
+    assert(match metadata(nul.into_string()) { Result.Err(std.io.IoError.InvalidPath) => true, _ => false });
+    let short: Vec<U8> = [0, 0];
+    assert(match decode_directory(short.as_slice()) { Result.Err(std.io.IoError.InvalidDirectoryEntry) => true, _ => false });
+}

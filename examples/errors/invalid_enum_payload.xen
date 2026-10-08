@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Expected diagnostic: enum variant payload expects one value
+enum Point { Coordinates((Int, Int)) }
+fn main() {
+    let point = Point.Coordinates(1, 2);
+}

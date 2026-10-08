@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.option;
+
+fn unwrap_or<T>(value: Option<T>, fallback: T) -> T {
+    return match value {
+        Option.Some(item) => item,
+        Option.None => fallback,
+    };
+}

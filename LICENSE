@@ -1,0 +1,37 @@
+Xen licensing
+==============
+
+Copyright (c) 2026 vmintf(minsung)
+
+Unless a file states otherwise, original code and documentation in this
+repository are available under your choice of MIT OR Apache-2.0. See
+LICENSE-MIT and LICENSE-APACHE for the full terms.
+
+The following exceptions take precedence over that default:
+
+* compiler/**: Apache-2.0 only, including the compiler executable.
+* tests/property/** and tests/semantic_ir_test.ml: Apache-2.0 only. These
+  contain the generative/metamorphic compiler verification infrastructure.
+* assets/branding/*.png: CC-BY-4.0 only, to the extent of the licensor's
+  applicable copyright and similar rights. See assets/branding/README.md
+  and licenses/CC-BY-4.0.txt. This artwork was generated using AI.
+* Third-party material retains its own terms. See THIRD_PARTY.md and
+  licenses/OCaml.txt for the OCaml components in the compiler executable.
+
+Generated runtime exception
+---------------------------
+
+The Xen-owned runtime machine code that this compiler emits or embeds in
+generated user executables, including code emitted by the experimental JIT,
+is additionally available under your choice of MIT OR Apache-2.0.
+This additional permission applies only to that runtime code as included in
+compiler output. It does not relicense the compiler's source, compiler
+executable, or verification infrastructure under MIT.
+
+Compiling your own source with Xen does not change the license of your
+source. For Xen-owned runtime code included in redistributed executables,
+retain the applicable MIT copyright and permission notice or comply with
+the Apache-2.0 terms, according to your choice. The standard library and
+examples use the repository's default dual license.
+
+Individual SPDX notices and third-party notices must be preserved.

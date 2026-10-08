@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+#![explc]
+fn append(values: &mut Vec<Int>, value: Int) {
+    values.push(value);
+}
+
+#![explc]
+fn consume(value: String) {
+    println(value);
+}
+
+#![explc]
+fn main() {
+    let mut values = [1];
+    {
+        let reference = &mut values;
+        append(reference, 2);
+    }
+    println(values);
+
+    let owned = "moved once";
+    consume(owned);
+    println(owned);
+
+    let number = 7;
+    {
+        let shared = &number;
+        println(*shared);
+    }
+    println(number);
+}

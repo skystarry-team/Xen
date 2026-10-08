@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+struct Address { city: String, zip: Int }
+struct User { name: String, address: Address }
+struct Pair<T, U> { first: T, second: U }
+
+fn identity<T>(value: T) -> T {
+    return value;
+}
+
+fn main() {
+    let user = User {
+        name: "Mina",
+        address: Address { city: "Seoul", zip: 12345 },
+    };
+    let pair = Pair<String, I32> { first: user.address.city, second: 7 };
+    println(user.name);
+    println(pair.first);
+    println(identity(pair.second));
+}

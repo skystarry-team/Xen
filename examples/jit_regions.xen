@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// One scalar region is compiled on its first execution and reused with each
+// current function frame. Calls, control flow and printing stay in the ELF.
+fn calculate(x: Int) -> Int {
+    #scope[jit] {
+        let square = x * x;
+        let repeated = x * x;
+        return square + repeated;
+    }
+}
+
+fn main() {
+    let mut index = arg_count();
+    while index < 5 {
+        println(calculate(index));
+        index = index + 1;
+    }
+}

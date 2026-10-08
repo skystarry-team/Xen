@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Expected diagnostic: use of moved File
+fn consume(file: File) {}
+fn main() {
+    let file = open_read("/dev/null");
+    consume(file);
+    println(file.is_open());
+}

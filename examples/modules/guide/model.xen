@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module guide.model;
+
+enum Role { Admin, Guest }
+struct User { name: String, role: Role }

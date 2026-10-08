@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+struct Label { id: U8, text: String }
+
+fn main() {
+    let labels: Vec<Label> = [
+        Label { id: u8(1), text: "first" },
+        Label { id: u8(2), text: "second" },
+    ];
+    let view: Slice<Label> = labels.as_slice();
+    let copied = view[1];
+    println(copied.text);
+
+    let mut nested: Vec<Vec<String>> = [["a"], ["b", "c"]];
+    nested.push(["d"]);
+    println(nested.pop()[0]);
+    println(nested == [["a"], ["b", "c"]]);
+}

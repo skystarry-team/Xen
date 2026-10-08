@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.path;
+use std.string;
+
+// Byte-based Linux path operations; no filesystem access or dot normalization.
+fn is_absolute(path: String) -> Bool {
+    let bytes = path.as_bytes();
+    return bytes.len() > 0 && bytes.get(0) == u8(47);
+}
+
+fn join(left: String, right: String) -> String {
+    if is_absolute(right) || len(left) == 0 { return right; }
+    if len(right) == 0 { return left; }
+    let bytes = left.as_bytes();
+    if bytes.get(bytes.len() - 1) == u8(47) { return left + right; }
+    return left + "/" + right;
+}
+
+fn trimmed_length(path: String) -> Int {
+    let bytes = path.as_bytes();
+    let mut end = bytes.len();
+    while end > 1 && bytes.get(end - 1) == u8(47) { end = end - 1; }
+    return end;
+}
+
+fn byte_part(path: String, start: Int, end: Int) -> String {
+    // Preserve the original range loop's empty/reversed-range behavior.
+    if start >= end { return ""; }
+    return match std.string.slice_bytes(path, start, end) {
+        Result.Ok(value) => value,
+        Result.Err(_) => { panic("path byte range is out of bounds"); },
+    };
+}
+
+fn basename(path: String) -> String {
+    let bytes = path.as_bytes();
+    let end = trimmed_length(path);
+    if end == 1 && bytes.get(0) == u8(47) { return "/"; }
+    let mut start = end;
+    while start > 0 && bytes.get(start - 1) != u8(47) { start = start - 1; }
+    return byte_part(path, start, end);
+}
+
+fn dirname(path: String) -> String {
+    let bytes = path.as_bytes();
+    let mut end = trimmed_length(path);
+    while end > 0 && bytes.get(end - 1) != u8(47) { end = end - 1; }
+    if end == 0 { return "."; }
+    while end > 1 && bytes.get(end - 1) == u8(47) { end = end - 1; }
+    return byte_part(path, 0, end);
+}
+
+test fn components() {
+    assert(basename("a/b///") == "b");
+    assert(dirname("a/b///") == "a");
+    assert(basename("") == "");
+    assert(dirname("") == ".");
+    assert(basename("///") == "/");
+}
+
+test fn joins() {
+    assert(join("a", "../b") == "a/../b");
+    assert(join("a", "/b") == "/b");
+    assert(join("a/", "b") == "a/b");
+    assert(is_absolute("/a"));
+    assert(!is_absolute(""));
+}

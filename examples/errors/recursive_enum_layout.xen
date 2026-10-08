@@ -1,0 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Expected diagnostic: recursive value layout involving
+enum Chain { End, Next(Chain) }
+fn main() {}

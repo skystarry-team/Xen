@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+fn classify(value: I32) -> String {
+    let label = if value < 0 {
+        "negative"
+    } else if value == 0 {
+        "zero"
+    } else {
+        "positive"
+    };
+    return label;
+}
+
+fn main() {
+    let wide: I64 = 120;
+    let narrow: I8 = i8(wide);
+    let ratio: F64 = float(5) / 2.0;
+    let mut total: I32 = 0;
+    let mut index: I32 = 1;
+    while index <= 4 {
+        if index != 3 {
+            total = total + index;
+        }
+        index = index + 1;
+    }
+    println(narrow);
+    println(ratio);
+    println(total);
+    println(classify(total));
+}
