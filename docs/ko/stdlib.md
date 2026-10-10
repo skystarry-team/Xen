@@ -123,6 +123,77 @@ fn read_config(path: String) -> Result<String, AppError> {
 [key-value CLI](../../examples/key_values.xen)는 두 helper를 사용해 I/O·byte 범위 오류를
 parse 오류와 하나의 `AppError`로 합친다.
 
+## Iterator 변환
+
+`use std.iter;` 뒤에 `Vec<T>.into_iter()`는 cloneable Vec도 소비하고 원래 순서로 owned
+element를 반환한다. Iterator 자체는 move-only이며 조기 종료 시 남은 element를 정리한다.
+`.map(fn(T)->U)`·`.filter(fn(&T)->Bool)`는 receiver를 소비하는 lazy adapter다.
+Concrete named function을 받으며 생성 시 callback을 실행하지 않는다. Map은 by-value,
+filter는 받은 item을 predicate 호출 동안만 공유 대여하고 탈락한 item을 drop한다.
+Filter는 Unit 등 대여 불가능한 타입을 받지 않는다. 두 adapter는 첫 None 이후 계속 None이다.
+Borrowed iter chain은 마지막 사용까지 원래 source의 loan을 유지한다.
+
+```xen
+use std.iter;
+fn twice(value: Int) -> Int { return value * 2; }
+#![explc]
+fn large(value: &Int) -> Bool { return *value > 2; }
+fn main() {
+    let values = [1, 2, 3];
+    for value in values.iter().map(twice).filter(large) { println(value); }
+}
+```
+
+결과는 `4`, `6`이다. 같은 이름의 inherent method가 있으면 그것을 우선하며 iterator import를
+요구하지 않는다. Predicate는 자신의 explc를 제공하고 adapter 생성은 caller의 explc를
+요구하지 않는다. Collection 자체를 for에 넘기는 자동 변환은 없다.
+
+`std.iter.fold<I,T,A>(iterator,initial,step:fn(A,T)->A)->A`는 순서대로 left fold하며 빈
+iterator는 initial을 반환한다. Iterator·accumulator·callback 인자에 일반 copy/clone/move
+규칙을 적용한다. `std.iter.collect<I,T>`는 순서를 보존하는 eager Vec을 만든다. T를 인자에서
+추론할 수 없으면 `std.iter.collect<std.iter.IntoIter<Int>,Int>(values.into_iter())`처럼 모든
+타입 인자를 명시한다. For는 move-only iterator를 loop owner로 이동시킨다. 바깥 iterator의
+next를 호출하는 수동 while loop는 break 후 그 iterator를 이어서 사용할 수 있다.
+
+## HashMap과 소유값 교체
+
+`use std.hashmap;`의 `std.hashmap.HashMap<V>`는 String byte key를 쓰는 move-only map이다.
+빈 key·NUL·invalid UTF-8을 허용하고 byte equality로 collision을 구분한다. 순회와 key snapshot
+순서는 보장하지 않는다. Hash table의 expected amortized probe 수는 상수지만 hash는 key byte
+길이에 비례하며 collision에서는 전체 table을 검사할 수 있다.
+
+| API | 동작 |
+| --- | --- |
+| `new<V>()`, `len()`, `is_empty()` | 생성·entry 수 조회 |
+| `insert(key:String,value:V)->Option<V>` | 중복 value 교체 후 이전 값 반환; 길이 유지 |
+| `remove(key:&String)->Option<V>` | 삭제한 값의 소유권 이전; 없으면 None |
+| `contains_key(key:&String)` | Key/value 복제 없이 존재 확인 |
+| `get_cloned(key:&String)->Option<V>` | Owned copy/clone; move-only 값은 거부 |
+| `with_value<V,R>(&HashMap<V>,&String,fn(&V)->R)->Option<R>` | 존재할 때 callback 동안만 대여; reference escape 금지 |
+| `keys()->Vec<String>`, `clear()` | Owned key snapshot·entry 정리 |
+| `into_iter()` | Map을 소비하고 owned `(String,V)` entry 반환 |
+
+명시적 reference 인자는 explc가 필요하다. File·Box의 삽입/교체/삭제/consuming 순회는 값을
+clone하지 않는다. 반환한 이전/삭제 값을 버리면 정상 cleanup이 정리한다. Unit은 저장과
+owned 조회를 지원하지만 reference callback과 `(String,Unit)` entry 순회는 기존
+referability/tuple 제한으로 지원하지 않는다. Reference 반환 get/get_mut는 없다.
+Struct field는 private이 아니므로 table invariant를 유지하려면 map API를 사용한다.
+
+```xen
+use std.hashmap;
+#![explc]
+fn main() {
+    let mut map = std.hashmap.new<Int>();
+    map.insert("answer", 42);
+    let key = "answer";
+    println(match map.get_cloned(&key) { Option.Some(value) => value, _ => 0 });
+}
+```
+
+`use std.mem;`의 `std.mem.replace<T>(&mut T,T)->T`는 준비한 새 값을 설치하고 이전 owned
+값을 반환한다. `Vec.replace(index,value)->T`도 같은 동작이며 길이를 유지한다.
+`Vec.swap(left,right)`는 element를 clone/drop 없이 교환한다. Invalid index는 runtime error다.
+
 ## 검사
 
 `python3 tests/integration/stdlib_test.py`는 API 계약, binary stdin/append, symlink metadata,

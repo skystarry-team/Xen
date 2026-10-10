@@ -8,7 +8,7 @@ type typ =
   | Named of string | Type_var of string | Apply of string * typ list | Tuple of typ list | Unit
   | Function of typ list * typ
 type mode = Explc | Jit | Bb
-type intrinsic = Size_of | Align_of
+type intrinsic = Size_of | Align_of | Exchange
 
 type expr = { node : expr_node; span : span }
 and expr_node =
@@ -38,7 +38,7 @@ and expr_node =
   | Match_control of string * typ * expr * (pattern * expr * stmt list * expr option) list
 and pattern = { pattern_node : pattern_node; pattern_span : span }
 and pattern_node =
-  | Wildcard_pattern | Binding_pattern of string
+  | Wildcard_pattern | Binding_pattern of string | Ref_binding_pattern of string
   | Literal_pattern of expr | Tuple_pattern of pattern list
   | Variant_pattern of string * string * pattern option
 and match_arm = { pattern : pattern; body : stmt list; tail : expr option; arm_span : span }
@@ -48,6 +48,7 @@ and stmt_node =
   | Let_pattern of bool * pattern * typ option * expr
   | Assign of string * expr
   | Field_assign of string * string * expr
+  | Place_assign of expr * expr
   | Index_assign of expr * expr * expr
   | Deref_assign of expr * expr
   | Expr of expr

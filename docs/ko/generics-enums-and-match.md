@@ -168,3 +168,25 @@ let value = match option {
     Option.None => 0,
 };
 ```
+
+## 공유 대여 match
+
+`match &value` 또는 기존 shared reference를 match하면 원본을 clone/소비하지 않는다.
+Shared mode의 named payload는 `ref name`으로 binding하며 타입은 `&Payload`다.
+Plain consuming binding은 거부한다. Borrow 생성에는 explc가 필요하고 mutable reference
+source에는 명시적 shared reborrow가 필요하다.
+
+```xen
+#![explc]
+fn main() {
+    let value: Option<Box<Int>> = Option.Some(box(8));
+    println(match &value { Option.Some(ref item) => **item, Option.None => 0 });
+    let owned = value;
+    println(match owned { Option.Some(item) => item.into_inner(), Option.None => 0 });
+}
+```
+
+두 줄 모두 8이다. Binding으로 borrowed payload를 이동하거나 reference/Slice match
+결과로 arm 밖에 내보낼 수 없다. Reference field/return·mutable pattern·temporary borrow는
+지원하지 않는다. Generic &T/&mut T parameter는 concrete referent가 유효하면 사용 가능하며
+reference-to-reference·Unit·function referent는 거부한다.

@@ -21,7 +21,7 @@ let rec subst bindings = function
   | t->Type_desc.canonical t
 
 module Names = Set.Make(String)
-let run (program:program) =
+let run ?(iterator_sources=[]) (program:program) =
  try
   (* Enum representation fields are compiler-private.  Reject source-level
      access before match/for lowering introduces its own internal field nodes. *)
@@ -43,7 +43,7 @@ let run (program:program) =
         fail s.span ("enum representation field '"^name^"' is private")
     | Let(_,_,_,x)|Let_pattern(_,_,_,x)|Assign(_,x)|Field_assign(_,_,x)|Expr x->reject_private_expr x
     | Index_assign(a,b,x)->List.iter reject_private_expr[a;b;x]
-    | Deref_assign(a,b)->List.iter reject_private_expr[a;b]
+    | Deref_assign(a,b)|Place_assign(a,b)->List.iter reject_private_expr[a;b]
     | Return x->Option.iter reject_private_expr x
     | If(c,a,b)->reject_private_expr c;List.iter reject_private_stmt(a@b)
     | While(c,b)->reject_private_expr c;List.iter reject_private_stmt b
@@ -151,7 +151,9 @@ let run (program:program) =
         Option.map(fun f->Function(List.map(fun(p:param)->p.typ)f.params,f.return_type))(find_function env n))
     |Int_lit _->Some(match expected with Some t when Type_desc.is_integer t->t|_->I64)
     |Float_lit _->Some(match expected with Some t when Type_desc.is_float t->t|_->F64)
-    |String_lit _->Some String|Bool_lit _->Some Bool|Intrinsic _->Some I64
+    |String_lit _->Some String|Bool_lit _->Some Bool
+    |Intrinsic(Exchange,ts,xs)->(match ts,xs with [t],_->Some t|_,a::_->(match ty a with Some(Ref(_,t))->Some t|_->None)|_->None)
+    |Intrinsic _->Some I64
     |Unary("*",r)->(match ty r with Some(Ref(_,t))->Some t|Some t->box_element t|_->None)
     |Unary("!",_)->Some Bool|Unary(_,x)->generic_type ?expected env x
     |Binary(("=="|"!="|"<"|"<="|">"|">="|"&&"|"||"),_,_)->Some Bool
@@ -254,20 +256,25 @@ let run (program:program) =
     |Some iterator,"enumerate"->(match method_type env r "next" []with
         |Some(Apply("Option",[item]))->Some(Apply("std.iter.Enumerate",[iterator;item]))|_->None)
     |Some(Vec _|Slice _|String),"len"->Some I64
-    |Some(Vec t|Slice t),("get"|"pop")->Some t
+    |Some(Vec t|Slice t),("get"|"pop"|"replace")->Some t
     |Some(Vec t),("as_slice"|"slice")->Some(Slice t)
     |Some String,"as_bytes"->Some(Slice U8)
     |Some(Vec U8),"into_string"|Some File,"read"->Some String
     |Some File,"is_open"->Some Bool
-    |Some(Vec _),("push"|"set")|Some File,("write"|"close")->Some Unit
+    |Some(Vec _),("push"|"set"|"swap")|Some File,("write"|"close")->Some Unit
     |Some t,("into_inner"|"as_ref"|"as_mut")->Option.map(fun t->if name="into_inner"then t else Ref(name="as_mut",t))(box_element t)
     |Some t,n->(match field_type t n with Some(Function(_,r))->Some r|_->None)|_->None
-  and bind_pattern env typ p = match p.pattern_node with
+  and bind_pattern env typ p =
+    let shared=match typ with Some(Ref _)->true|_->false in
+    let typ=Option.map referent typ in
+    let child t=if shared then Option.map(fun t->Ref(false,t))t else t in
+    match p.pattern_node with
     |Binding_pattern n->Option.iter(Hashtbl.replace env n)typ
+    |Ref_binding_pattern n->Option.iter(Hashtbl.replace env n)(Option.map(fun t->Ref(false,t))typ)
     |Literal_pattern _->(match typ with Some(Type_var _)->unconstrained p.pattern_span|_->())
-    |Tuple_pattern ps->(match Option.map symbolic typ with Some(Tuple ts)when List.length ps=List.length ts->List.iter2(fun p t->bind_pattern env (Some t)p)ps ts
+    |Tuple_pattern ps->(match Option.map symbolic typ with Some(Tuple ts)when List.length ps=List.length ts->List.iter2(fun p t->bind_pattern env (child(Some t))p)ps ts
         |Some(Type_var _)->unconstrained p.pattern_span|_->())
-    |Variant_pattern(_,v,Some p)->(match typ with Some(Type_var _)->unconstrained p.pattern_span|_->bind_pattern env (Option.bind typ(fun t->variant_type t v))p)
+    |Variant_pattern(_,v,Some p)->(match typ with Some(Type_var _)->unconstrained p.pattern_span|_->bind_pattern env (child(Option.bind typ(fun t->variant_type t v)))p)
     |Variant_pattern(_,_,None)->(match typ with Some(Type_var _)->unconstrained p.pattern_span|_->())
     |Wildcard_pattern->()
   and bind_let_pattern env typ p = match p.pattern_node with
@@ -316,8 +323,8 @@ let run (program:program) =
              |Some(Function(ps,_))when List.length ps=List.length xs->List.iter2(fun t x->check ~expected:t x)ps xs
              |_->let value_type=match Option.map referent(generic_type env r)with Some(Vec t)->Some t|_->None in
                List.iteri(fun i x->let expected=
-                 if (name="push"&&i=0)||(name="set"&&i=1)then value_type
-                 else if name="get"||name="slice"||(name="set"&&i=0)then Some I64
+                 if (name="push"&&i=0)||((name="set"||name="replace")&&i=1)then value_type
+                 else if name="get"||name="slice"||name="swap"||((name="set"||name="replace")&&i=0)then Some I64
                  else None in check ?expected x)xs))
     |Index(r,i)->reject_abstract r;check r;check ~expected:I64 i
     |Field(r,_)|Tuple_index(r,_)->reject_abstract r;check r
@@ -329,6 +336,9 @@ let run (program:program) =
            if not(compatible target error)then fail e.span "? requires the same Result error type"
          |Some(Apply("Result",_)),_->fail e.span "? requires a Result return type with the same error type"
          |_->())
+    |Intrinsic(Exchange,ts,xs)->(match ts,xs with
+        |[t],[a;b]->check ~expected:(Ref(true,t))a;check ~expected:t b
+        |_->List.iter check xs)
     |Intrinsic(_,_,xs)->List.iter check xs
     |Tuple_lit xs->let ts=match Option.map symbolic expected with Some(Tuple ts)when List.length ts=List.length xs->List.map Option.some ts|_->List.map(fun _->None)xs in
         List.iter2(fun t x->check ?expected:t x)ts xs
@@ -352,6 +362,7 @@ let run (program:program) =
     |Assign(n,x)->check ?expected:(Hashtbl.find_opt env n)x
     |Field_assign(n,f,x)->(match Option.map referent(Hashtbl.find_opt env n)with Some(Type_var _)->unconstrained s.span|_->());
         check ?expected:(Option.bind(Hashtbl.find_opt env n)(fun t->field_type t f))x
+    |Place_assign(a,b)->check a;check ?expected:(generic_type env a)b
     |Expr x->check x
     |Index_assign(a,b,x)->check a;check ~expected:I64 b;
         (match Option.map referent(generic_type env a)with Some(Type_var _)->unconstrained a.span|_->());
@@ -485,6 +496,7 @@ let run (program:program) =
     let expected=Option.map(subst bindings)expected in
     let infer expected x=infer_expr ~bindings env expected x in
     match e.node with
+    | Intrinsic(Exchange,ts,xs)->(match ts,xs with [t],_->Some(subst bindings t)|_,a::_->(match infer None a with Some(Ref(_,t))->Some t|_->expected)|_->expected)
     | Intrinsic _->Some I64
     | Int_lit _->(match expected with Some t when Type_desc.is_integer t->Some t|_->Some I64)
     | Float_lit _->(match expected with Some t when Type_desc.is_float t->Some t|_->Some F64)
@@ -609,12 +621,12 @@ let run (program:program) =
         let receiver=match infer None r with Some(Ref(_,t))->Some t|t->t in
         (match receiver,n with
          |Some(Vec _|Slice _|String),"len"|Some(Ptr _),"$bounds_len"->Some I64
-         |Some(Vec t), ("get"|"pop")|Some(Slice t),"get"->Some t
+         |Some(Vec t), ("get"|"pop"|"replace")|Some(Slice t),"get"->Some t
          |Some(Vec t), ("as_slice"|"slice")->Some(Slice t)
          |Some String,"as_bytes"->Some(Slice U8)
          |Some(Vec U8),"into_string"|Some File,"read"->Some String
          |Some File,"is_open"->Some Bool
-         |Some(Vec _),("set"|"push")|Some File,("write"|"close")->Some Unit
+         |Some(Vec _),("set"|"push"|"swap")|Some File,("write"|"close")->Some Unit
          |Some(Named owner),name->(match named_struct owner with
              |Some d->(match List.find_opt(fun f->f.field_name=name)d.fields with
                  |Some {field_type=Function(_,r);_}->Some r|_->expected)
@@ -639,6 +651,7 @@ let run (program:program) =
     | Box t->Generic_call("$inactive_box",[t],[])
     | Ptr t->Generic_call("$inactive_ptr",[t],[])
     | Slice t->Generic_call("$inactive_slice",[t],[])
+    | Function _->Generic_call("$inactive_function",[typ],[])
     | Tuple ts->Tuple_lit(List.map(default_expr span)ts)
     | Named n->let d=match named_struct n with Some d->d|None->fail span("cannot construct default for "^n) in
         Struct_lit(n,List.map(fun f->f.field_name,default_expr span f.field_type,f.field_span)d.fields)
@@ -646,9 +659,26 @@ let run (program:program) =
     | t->fail span("cannot construct inactive enum payload of type "^string_of_typ t) in
     {node;span}
   in
+  let require_iterator_module span =
+    if not(List.mem span.file iterator_sources) then
+      fail span "iterator factory requires explicit 'use std.iter;'" in
+  let has_inherent env bindings receiver name =
+    match infer_expr ~bindings env None receiver with
+    |Some(Named display)|Some(Ref(_,Named display))->
+        let base=match String.index_opt display '<' with Some i->String.sub display 0 i|None->display in
+        List.exists(fun(f:func)->f.name="__method$"^base^"$"^name)program.functions ||
+        (match named_struct display with Some d->List.exists(fun f->f.field_name=name &&
+          (match f.field_type with Function _->true|_->false))d.fields|None->false)
+    |_->false in
   let rec transform_expr env expected bindings (e:expr) =
     let tr ?expected x=transform_expr env expected bindings x in
     let node=match e.node with
+    | Intrinsic(Exchange,types,xs)->
+        let types=List.map(fun t->concrete_type e.span(subst bindings t))types in
+        (match xs with [target;value]->
+          let typ=match types with [t]->Some t|_->(match infer_expr ~bindings env None target with Some(Ref(true,t))->Some t|_->None)in
+          Intrinsic(Exchange,types,[transform_expr env (Option.map(fun t->Ref(true,t))typ)bindings target;transform_expr env typ bindings value])
+         |_->fail e.span "replace expects two value arguments")
     | Intrinsic(kind,types,xs)->Intrinsic(kind,List.map(fun t->concrete_type e.span(subst bindings t))types,List.map(fun x->tr x)xs)
     | Unary(op,x)->Unary(op,tr x)|Binary(op,a,b)->Binary(op,tr a,tr b)
     | Vec_lit xs->
@@ -670,11 +700,11 @@ let run (program:program) =
         let zero:expr={node=Int_lit "0";span=e.span} in
         (match infer_expr ~bindings env None r with
          |Some(Vec t)->if describe e.span t |> fun d->d.move_only then
-             fail e.span("cannot iterate move-only "^string_of_typ t^" by reference; consuming into_iter() is not supported yet");
+             fail e.span("cannot iterate move-only "^string_of_typ t^" by reference; use into_iter() to consume owned elements");
              require_std "std.iter.SliceIter";ignore(instantiate_struct e.span "std.iter.SliceIter" [t]);
              Struct_lit(key "std.iter.SliceIter" [t],["items",{node=Method(receiver,"as_slice",[]);span=e.span},e.span;"index",zero,e.span])
          |Some(Slice t)->if describe e.span t |> fun d->d.move_only then
-             fail e.span("cannot iterate move-only "^string_of_typ t^" by reference; consuming into_iter() is not supported yet");
+             fail e.span("cannot iterate move-only "^string_of_typ t^" by reference; use into_iter() to consume owned elements");
              require_std "std.iter.SliceIter";ignore(instantiate_struct e.span "std.iter.SliceIter" [t]);
              Struct_lit(key "std.iter.SliceIter" [t],["items",receiver,e.span;"index",zero,e.span])
          |Some String->require_std "std.iter.SliceIter";ignore(instantiate_struct e.span "std.iter.SliceIter" [U8]);
@@ -682,66 +712,43 @@ let run (program:program) =
          |Some(Ptr t)->require_std "std.iter.PtrIter";ignore(instantiate_struct e.span "std.iter.PtrIter" [t]);
              Struct_lit(key "std.iter.PtrIter" [t],["pointer",receiver,e.span;"index",zero,e.span;"length",{node=Method(receiver,"$bounds_len",[]);span=e.span},e.span])
          |Some t->fail e.span("iter() is not supported for "^string_of_typ t)|None->fail e.span "cannot infer iter() receiver type")
+    | Method(r,"into_iter",xs)->
+        let receiver=tr r in
+        (match infer_expr ~bindings env None receiver with
+         |Some(Vec element)->
+            require_iterator_module e.span;
+            if xs<>[] then fail e.span "into_iter expects no arguments";
+            ignore(instantiate_struct e.span "std.iter.IntoIter" [element]);
+            let consumed:expr={node=Call("$consume",[receiver]);span=e.span}in
+            let owned:expr={node=Generic_call("$box_new",[Vec element],[consumed]);span=e.span}in
+            Struct_lit(key "std.iter.IntoIter" [element],["values",owned,e.span;"prepared",{node=Bool_lit false;span=e.span},e.span])
+         |_->transform_method env bindings e receiver "into_iter" xs)
+    | Method(r,("map"|"filter" as name),xs)->
+        let receiver=tr r in
+        if has_inherent env bindings receiver name then transform_method env bindings e receiver name xs else begin
+          require_iterator_module e.span;
+          let callback=match xs with [x]->tr x|_->fail e.span (name^" expects one callback")in
+          let iterator=match infer_expr ~bindings env None receiver with Some t->concrete_type e.span t|_->fail e.span "cannot infer adapter receiver"in
+          let item=iterator_item e.span iterator in
+          let cb=match infer_expr ~bindings env None callback with Some(Function(ps,u))->ps,u|_->fail callback.span "iterator adapter requires a concrete function value"in
+          let args,field=match name,cb with
+            |"map",([t],u) when t=item->[iterator;item;u],"transform"
+            |"filter",([Ref(false,t)],Bool) when t=item->[iterator;item],"predicate"
+            |_->fail callback.span "iterator adapter callback does not match the concrete item type"in
+          let owner=if name="map"then "std.iter.Map"else "std.iter.Filter"in
+          ignore(instantiate_struct e.span owner args);
+          Struct_lit(key owner args,["iterator",{node=Call("$consume",[receiver]);span=e.span},e.span;field,callback,e.span;"finished",{node=Bool_lit false;span=e.span},e.span])
+        end
     | Method(r,"enumerate",[]) ->
         let receiver=tr r in
-        let iterator=match infer_expr ~bindings env None r with Some t->concrete_type e.span t|None->fail e.span "cannot infer enumerate() receiver type" in
-        let display=match iterator with Named n->n|_->fail e.span "enumerate() receiver must satisfy next(&mut self) -> Option<T>" in
-        let base=match String.index_opt display '<' with Some i->String.sub display 0 i|None->display in
-        let method_name="__method$"^base^"$next" in
-        let result=match Hashtbl.find_opt fn_templates method_name with
-          |Some _->let args=Option.value ~default:[] (Hashtbl.find_opt concrete_struct_args display) in
-            let target=instantiate_fn e.span method_name args in
-            let f=Hashtbl.find generated_fns target in
-            if List.map(fun(p:param)->p.typ)f.params<>[Ref(true,iterator)] then
-              fail e.span("iterator next must have signature next(&mut self) -> Option<T>; found "^string_of_typ(Function(List.map(fun(p:param)->p.typ)f.params,f.return_type)));
-            f.return_type
-          |None->(match List.find_opt(fun(f:func)->f.name=method_name)program.functions with Some f->
-              let params=List.map(fun(p:param)->concrete_type p.span p.typ)f.params in
-              if params<>[Ref(true,iterator)] then fail e.span("iterator next must have signature next(&mut self) -> Option<T>; found "^string_of_typ(Function(params,f.return_type)));
-              concrete_type e.span f.return_type
-            |None->fail e.span("type "^display^" has no next(&mut self) -> Option<T> method")) in
-        let item=match result with Named option when Hashtbl.mem concrete_enum_args option &&
-          (match String.index_opt option '<' with Some i->String.sub option 0 i="Option"|None->false)->List.hd(Hashtbl.find concrete_enum_args option)
-          |_->fail e.span("iterator next must have signature next(&mut self) -> Option<T>") in
+        let iterator=match infer_expr ~bindings env None receiver with Some t->concrete_type e.span t|None->fail e.span "cannot infer enumerate() receiver type" in
+        let item=iterator_item e.span iterator in
         if not(Hashtbl.mem struct_templates "std.iter.Enumerate") then fail e.span "iterator factory requires explicit 'use std.iter;'";
         ignore(instantiate_struct e.span "std.iter.Enumerate" [iterator;item]);
         let zero:expr={node=Int_lit "0";span=e.span} in
         let consumed:expr={node=Call("$consume",[receiver]);span=e.span} in
         Struct_lit(key "std.iter.Enumerate" [iterator;item],["iterator",consumed,e.span;"index",zero,e.span])
-    | Method(r,n,xs)->
-        let receiver=tr r in
-        let owner=match infer_expr ~bindings env None r with Some(Named q)->Some q|Some(Ref(_,Named q))->Some q|_->None in
-        if Hashtbl.mem structural_next e.span then begin
-          let bad ()=fail e.span "structural iterator requires next(&mut self) -> Option<T>" in
-          match owner with None->bad ()|Some display->
-            let base=match String.index_opt display '<'with Some i->String.sub display 0 i|None->display in
-            let method_name="__method$"^base^"$next" in
-            let f=match List.find_opt(fun(f:func)->f.name=method_name)program.functions with Some f->f|_->bad () in
-            let args=Option.value ~default:[](Hashtbl.find_opt concrete_struct_args display)in
-            if List.length f.type_params<>List.length args then bad ();
-            let types=List.combine f.type_params args in
-            (match f.params with
-             |[{typ=Ref(true,t);_}] when concrete_type e.span(subst types t)=Named display->()
-             |_->bad ());
-            (match concrete_type e.span(subst types f.return_type)with
-             |Named option when Hashtbl.mem concrete_enums option &&
-               (match String.index_opt option '<'with Some i->String.sub option 0 i|None->option)="Option"->()
-             |_->bad ())
-        end;
-        (match owner with
-         | Some display->
-             let base=match String.index_opt display '<' with Some i->String.sub display 0 i|None->display in
-             let method_name="__method$"^base^"$"^n in
-             if Hashtbl.mem fn_templates method_name then
-               let args=match Hashtbl.find_opt concrete_struct_args display with Some xs->xs|None->[] in
-               let target=instantiate_fn e.span method_name args in
-               let signature=Hashtbl.find generated_fns target in
-               let values=receiver::List.map tr xs in
-               Call(target,List.map2(fun (p:param) x->transform_expr env (Some p.typ) bindings x)signature.params values)
-             else if List.exists(fun (f:func)->f.name=method_name)program.functions then
-               Call(method_name,receiver::List.map tr xs)
-             else Method(receiver,n,List.map tr xs)
-         | None->Method(receiver,n,List.map tr xs))
+    | Method(r,n,xs)->transform_method env bindings e (tr r) n xs
     | Borrow(m,x)->Borrow(m,tr x)
     | Field(r,n)->Field(tr r,n)
     | Tuple_index(r,digits)->
@@ -793,7 +800,7 @@ let run (program:program) =
     | Generic_call(n,args,xs) when box_constructor env n->
         if List.length args<>1 then fail e.span "box expects 1 type argument";
         Generic_call("$box_new",List.map(fun t->concrete_type e.span(subst bindings t))args,List.map tr xs)
-    | Generic_call(("$inactive_box"|"raw_alloc"|"raw_load"|"raw_store"|"raw_free"|"ptr_addr" as n),args,xs)->
+    | Generic_call(("$inactive_box"|"$inactive_function"|"raw_alloc"|"raw_load"|"raw_store"|"raw_free"|"ptr_addr" as n),args,xs)->
         Generic_call(n,List.map(fun t->concrete_type e.span(subst bindings t))args,List.map tr xs)
     | Generic_call(n,args,xs)->
         let args=List.map(fun t->concrete_type e.span(subst bindings t))args in
@@ -846,7 +853,10 @@ let run (program:program) =
     | Match(x,arms)->
         if arms=[] then fail e.span "match must contain at least one arm";
         let scrutinee=tr x in
-        let scrutinee_type=match infer_expr ~bindings env None scrutinee with Some t->concrete_type e.span t|None->fail e.span "cannot infer match scrutinee type" in
+        let actual_type=match infer_expr ~bindings env None scrutinee with Some t->concrete_type e.span t|None->fail e.span "cannot infer match scrutinee type" in
+        let shared,scrutinee_type=match actual_type with
+          |Ref(false,t)->true,t|Ref(true,_)->fail e.span "match requires an explicit shared reborrow"
+          |t->false,t in
         let tuple_fields typ=match typ with Named n when String.starts_with ~prefix:"$Tuple<" n->
           (Hashtbl.find generated_structs n).fields|_->fail e.span("tuple pattern cannot match "^string_of_typ typ) in
         let enum_of typ span=match typ with Named n->(match Hashtbl.find_opt concrete_enums n with Some d->d|None->fail span("variant pattern cannot match "^string_of_typ typ))
@@ -854,7 +864,10 @@ let run (program:program) =
         let owner_name n=match String.index_opt n '<' with Some i->String.sub n 0 i|None->n in
         let rec validate names typ p = match p.pattern_node with
         | Wildcard_pattern->()
-        | Binding_pattern n->if Hashtbl.mem names n then fail p.pattern_span("duplicate pattern binding '"^n^"'")else Hashtbl.add names n typ
+        | Binding_pattern n->if shared then fail p.pattern_span "shared match requires ref bindings";
+            if Hashtbl.mem names n then fail p.pattern_span("duplicate pattern binding '"^n^"'")else Hashtbl.add names n typ
+        | Ref_binding_pattern n->if not shared then fail p.pattern_span "ref bindings require shared match";
+            if Hashtbl.mem names n then fail p.pattern_span("duplicate pattern binding '"^n^"'")else Hashtbl.add names n(Ref(false,typ))
         | Literal_pattern lit->(match lit.node with
             |Int_lit _ when Type_desc.is_integer typ->()|Float_lit _ when Type_desc.is_float typ->()
             |String_lit _ when typ=String->()|Bool_lit _ when typ=Bool->()
@@ -886,7 +899,7 @@ let run (program:program) =
         | _->let literals=List.fold_left(fun out p->match p.pattern_node with Literal_pattern l when not(List.exists(literal_equal l.node)out)->l.node::out|_->out)[]ps in
             List.map(fun n->W_literal n)literals @ [W_other] in
         let rec matches p w=match p.pattern_node,w with
-        |(Wildcard_pattern|Binding_pattern _),_->true
+        |(Wildcard_pattern|Binding_pattern _|Ref_binding_pattern _),_->true
         |Literal_pattern l,W_literal n->literal_equal l.node n
         |Tuple_pattern ps,W_tuple ws->List.for_all2 matches ps ws
         |Variant_pattern(_,v,None),W_variant(q,None)->v=q
@@ -919,7 +932,7 @@ let run (program:program) =
         let scr=expr(Var scrutinee_name) in
         let path_expr path=List.fold_left(fun x f->expr(Field(x,f)))scr path in
         let rec condition typ path p=match p.pattern_node with
-        |Wildcard_pattern|Binding_pattern _->expr(Bool_lit true)
+        |Wildcard_pattern|Binding_pattern _|Ref_binding_pattern _->expr(Bool_lit true)
         |Literal_pattern l->expr(Binary("==",path_expr path,transform_expr env(Some typ)bindings l))
         |Tuple_pattern ps->let fs=tuple_fields typ in combine(List.map2(fun q f->condition f.field_type(path@[f.field_name])q)ps fs)
         |Variant_pattern(_,v,payload)->let d=enum_of typ p.pattern_span in
@@ -930,6 +943,8 @@ let run (program:program) =
         and combine=function []->expr(Bool_lit true)|[x]->x|x::xs->expr(Binary("&&",x,combine xs)) in
         let rec binding_stmts typ path p=match p.pattern_node with
         |Binding_pattern n->[stmt(Let(false,n,Some typ,path_expr path))]
+        |Ref_binding_pattern n->let target=if path=[] then expr(Unary("*",scr))else path_expr path in
+            [stmt(Let(false,n,Some(Ref(false,typ)),expr(Borrow(false,target))))]
         |Tuple_pattern ps->let fs=tuple_fields typ in List.concat(List.map2(fun q f->binding_stmts f.field_type(path@[f.field_name])q)ps fs)
         |Variant_pattern(_,v,Some q)->let d=enum_of typ p.pattern_span in let t=Option.get(List.find(fun x->x.variant_name=v)d.variants).payload in binding_stmts t(path@["__payload_"^v])q
         |_->[] in
@@ -961,6 +976,7 @@ let run (program:program) =
         record_concrete_pattern env typ p;
         Let_pattern(m,p,t,x)
     | Assign(n,x)->Assign(n,ex ?expected:(Hashtbl.find_opt env n)x)|Field_assign(n,f,x)->Field_assign(n,f,ex x)
+    | Place_assign(a,b)->let target=ex a in Place_assign(target,ex ?expected:(infer_expr ~bindings env None target)b)
     | Index_assign(a,b,x)->Index_assign(ex a,ex b,ex x)
     | Deref_assign(a,b)->
         let target=match infer_expr ~bindings env None a with Some(Ref(_,t))->Some t|_->None in
@@ -1008,6 +1024,65 @@ let run (program:program) =
         Scope(m,body)
     |(Break|Continue)as n->n in {s with node}
   and transform_stmts env bindings xs=List.map(transform_stmt env bindings)xs
+  and transform_method env bindings e receiver n xs =
+    let tr x=transform_expr env None bindings x in
+        let owner=match infer_expr ~bindings env None receiver with Some(Named q)->Some q|Some(Ref(_,Named q))->Some q|_->None in
+        if Hashtbl.mem structural_next e.span then begin
+          let bad ()=fail e.span "structural iterator requires next(&mut self) -> Option<T>" in
+          match owner with None->bad ()|Some display->
+            let base=match String.index_opt display '<'with Some i->String.sub display 0 i|None->display in
+            let method_name="__method$"^base^"$next" in
+            let f=match List.find_opt(fun(f:func)->f.name=method_name)program.functions with Some f->f|_->bad () in
+            let args=Option.value ~default:[](Hashtbl.find_opt concrete_struct_args display)in
+            if List.length f.type_params<>List.length args then bad ();
+            let types=List.combine f.type_params args in
+            (match f.params with
+             |[{typ=Ref(true,t);_}] when concrete_type e.span(subst types t)=Named display->()
+             |_->bad ());
+            (match concrete_type e.span(subst types f.return_type)with
+             |Named option when Hashtbl.mem concrete_enums option &&
+               (match String.index_opt option '<'with Some i->String.sub option 0 i|None->option)="Option"->()
+             |_->bad ())
+        end;
+        (match owner with
+         | Some display->
+             let base=match String.index_opt display '<' with Some i->String.sub display 0 i|None->display in
+             let method_name="__method$"^base^"$"^n in
+             if Hashtbl.mem fn_templates method_name then
+               let args=match Hashtbl.find_opt concrete_struct_args display with Some xs->xs|None->[] in
+               let target=instantiate_fn e.span method_name args in
+               let signature=Hashtbl.find generated_fns target in
+               if List.length signature.params<>List.length xs+1 then fail e.span
+                 (Printf.sprintf "method '%s' expects %d argument%s" n (List.length signature.params-1) (if List.length signature.params=2 then ""else "s"));
+               Call(target,receiver::List.map2(fun (p:param) x->transform_expr env (Some p.typ) bindings x)(List.tl signature.params)xs)
+             else if List.exists(fun (f:func)->f.name=method_name)program.functions then
+               let signature=List.find(fun(f:func)->f.name=method_name)program.functions in
+               if List.length signature.params<>List.length xs+1 then fail e.span
+                 (Printf.sprintf "method '%s' expects %d argument%s" n (List.length signature.params-1) (if List.length signature.params=2 then ""else "s"));
+               Call(method_name,receiver::List.map2(fun(p:param)x->transform_expr env (Some(concrete_type e.span p.typ))bindings x)(List.tl signature.params)xs)
+             else Method(receiver,n,List.map tr xs)
+         | None->Method(receiver,n,List.map tr xs))
+
+  and iterator_item span iterator =
+        let display=match iterator with Named n->n|_->fail span "iterator receiver must satisfy next(&mut self) -> Option<T>" in
+        let base=match String.index_opt display '<' with Some i->String.sub display 0 i|None->display in
+        let method_name="__method$"^base^"$next" in
+        let result=match Hashtbl.find_opt fn_templates method_name with
+          |Some _->let args=Option.value ~default:[] (Hashtbl.find_opt concrete_struct_args display) in
+            let target=instantiate_fn span method_name args in
+            let f=Hashtbl.find generated_fns target in
+            if List.map(fun(p:param)->p.typ)f.params<>[Ref(true,iterator)] then
+              fail span("iterator next must have signature next(&mut self) -> Option<T>; found "^string_of_typ(Function(List.map(fun(p:param)->p.typ)f.params,f.return_type)));
+            f.return_type
+          |None->(match List.find_opt(fun(f:func)->f.name=method_name)program.functions with Some f->
+              let params=List.map(fun(p:param)->concrete_type p.span p.typ)f.params in
+              if params<>[Ref(true,iterator)] then fail span("iterator next must have signature next(&mut self) -> Option<T>; found "^string_of_typ(Function(params,f.return_type)));
+              concrete_type span f.return_type
+            |None->fail span("type "^display^" has no next(&mut self) -> Option<T> method")) in
+        let item=match result with Named option when Hashtbl.mem concrete_enum_args option &&
+          (match String.index_opt option '<' with Some i->String.sub option 0 i="Option"|None->false)->List.hd(Hashtbl.find concrete_enum_args option)
+          |_->fail span("iterator next must have signature next(&mut self) -> Option<T>") in
+        item
   and instantiate_fn span name args =
     let display=key name args in if Hashtbl.mem generated_fns display then display else
     if !instantiation_depth>=64 then fail span "generic recursion keeps expanding its type arguments" else

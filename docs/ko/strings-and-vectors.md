@@ -70,3 +70,14 @@ Slice 및 이를 포함한 aggregate의 반환·owner 밖 escape와 Vec 저장�
 Vec equality는 숫자, Bool, String과 그 중첩 Vec에 재귀적으로 제공된다. File 및
 struct/enum element는 compile-time error다. Vec 출력은 기존 `Vec<Int>`와
 `Vec<Float>` 범위를 유지한다.
+
+## 공유 element 접근과 consuming iteration
+
+Explc에서 `let item = &values[index];`는 File·Box를 포함한 Vec element를 clone 없이
+대여한다. Bounds를 검사하며 마지막 사용까지 다른 index의 변경도 포함한 Vec mutation과
+move를 금지한다. Mutable element reference는 지원하지 않는다. String.as_bytes는
+stable String field·검사된 &String에서도 view를 만들며 원본 loan을 유지한다.
+
+`use std.iter;` 뒤에 values.into_iter는 Vec을 소비하고 원래 순서로 owned element를
+반환한다. Vec.swap(left,right)는 clone/drop 없이 교환한다. Vec.replace(index,value)는
+길이를 유지하고 이전 owned element를 반환하며, 반환값을 버리면 정상 cleanup이 정리한다.

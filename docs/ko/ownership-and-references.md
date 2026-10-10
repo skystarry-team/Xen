@@ -98,8 +98,8 @@ whole-value 취득은 허용하지 않으며, `&mut`를 통한 기존 field 이�
 아니다.
 
 Aggregate 전체를 빌리는 reference는 해당 값 전체의 borrow다. 서로 다른 field에
-대한 명시적 borrow, reference 필드 저장, reference 반환, reference-to-reference와
-temporary borrow는 이번 지원 범위에 포함되지 않는다. 기존 Slice field의 원본 수명과
+대한 명시적 shared/mutable borrow와 Vec element의 shared borrow를 사용할 수 있다.
+Reference 필드 저장·반환, reference-to-reference와 temporary borrow는 지원하지 않는다. 기존 Slice field의 원본 수명과
 Ptr field의 `bb` 경계도 유지한다.
 
 Struct field 초기화·대입에는 기존 enum 기대 타입 추론 제한이 남아 있다. 예를 들어

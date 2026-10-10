@@ -56,8 +56,9 @@ chained range는 지원하지 않는다. `Range`와 그 구조적 `next` 구현�
 `use std.iter;` 뒤에는 clone 가능한 element의 `Vec<T>.iter()`와
 `Slice<T>.iter()`, byte 단위 `String.iter()`, bounds descriptor를 따르는
 `Ptr<T>.iter()`를 사용할 수 있다. 모든 구조적 iterator의 `.enumerate()`는 iterator를
-소비하고 `(Int, T)`를 0부터 산출한다. collection 자체를 `for`에 바로 넘기거나
-move-only element를 consuming iteration하는 `into_iter()`는 아직 지원하지 않는다.
+소비하고 `(Int, T)`를 0부터 산출한다. Vec의 `into_iter()`는 원본을 소비하고 move-only
+element도 순서대로 이전한다. Map/filter/fold는 [표준 라이브러리](stdlib.md)를 참고한다.
+Collection 자체를 for에 바로 넘기는 자동 변환은 없다.
 
 `String.as_bytes()`는 local-only `Slice<U8>` view를 만들고
 `Vec<U8>.into_string()`은 vector를 소비해 byte-preserving String으로 옮긴다.

@@ -206,6 +206,16 @@ let emit_value env (v:value) =
   else if T.is_integer v.typ||v.typ=Bool then load_scalar env v.typ name v.span
   else load_int env name v.span
 
+let emit_exchange_at_address env (result:value) (value:value) =
+  let output=env.output in
+  push_rax env;
+      M.bytes output[0x48;0x89;0xc6;0x48;0x8d;0xbd];M.u32 output(Int64.of_int(-(env.scratch+aggregate_bias(slot_size result.typ))));
+      M.bytes output[0xb9];M.u32 output(Int64.of_int(slot_size result.typ));M.bytes output[0xf3;0xa4];
+      M.bytes output[0x48;0x8b;0x3c;0x24;0x48;0x8d;0xb5];
+      M.u32 output(Int64.of_int(-(Hashtbl.find env.slots value.id+aggregate_bias(slot_size value.typ))));
+      M.bytes output[0xb9];M.u32 output(Int64.of_int(slot_size value.typ));M.bytes output[0xf3;0xa4;0x48;0x83;0xc4;8];env.stack_depth<-env.stack_depth-8;
+      emit_value env result
+
 let rec emit_rvalue env (expression:value) node =
   let output = env.output in
   match node with
@@ -249,7 +259,8 @@ let rec emit_rvalue env (expression:value) node =
       let stride=element_stride (match values with x::_->x.typ|[]->(match expression.typ with Vec t->t|_->assert false)) in
       List.iter (fun (value:value) ->
         emit_value env value;M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int stride);env.stack_depth<-env.stack_depth+stride;
-        if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
+        if value.typ=Unit then ()
+        else if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
         else if (match value.typ with Named _->true|_->false) then begin
           M.bytes output[0x48;0x89;0xc6;0x48;0x89;0xe7;0x48;0xc7;0xc1];M.u32 output(Int64.of_int(slot_size value.typ));M.bytes output[0xf3;0xa4]
         end else if is_managed value.typ then M.bytes output[0x48;0x89;0x04;0x24;0x48;0x89;0x54;0x24;8;0x48;0x89;0x4c;0x24;16]
@@ -347,7 +358,8 @@ let rec emit_rvalue env (expression:value) node =
   | Vec_set (target,index,value) ->
       let stride=element_stride value.typ in emit_value env target;push_rax env;emit_value env index;push_rax env;emit_value env value;
       M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int stride);env.stack_depth<-env.stack_depth+stride;
-      if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
+      if value.typ=Unit then ()
+      else if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
       else if (match value.typ with Named _->true|_->false) then begin M.bytes output[0x48;0x89;0xc6;0x48;0x89;0xe7;0x48;0xc7;0xc1];M.u32 output(Int64.of_int(slot_size value.typ));M.bytes output[0xf3;0xa4]end
       else if is_managed value.typ then M.bytes output[0x48;0x89;0x04;0x24;0x48;0x89;0x54;0x24;8;0x48;0x89;0x4c;0x24;16]
       else (match (descriptor value.typ).size with 1->M.bytes output[0x88;0x04;0x24]|2->M.bytes output[0x66;0x89;0x04;0x24]|4->M.bytes output[0x89;0x04;0x24]|_->M.bytes output[0x48;0x89;0x04;0x24]);
@@ -368,7 +380,8 @@ let rec emit_rvalue env (expression:value) node =
   | Vec_push (target,value) ->
       let stride=element_stride value.typ in emit_value env target;push_rax env;emit_value env value;
       M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int stride);env.stack_depth<-env.stack_depth+stride;
-      if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
+      if value.typ=Unit then ()
+      else if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
       else if (match value.typ with Named _->true|_->false) then begin M.bytes output[0x48;0x89;0xc6;0x48;0x89;0xe7;0x48;0xc7;0xc1];M.u32 output(Int64.of_int(slot_size value.typ));M.bytes output[0xf3;0xa4]end
       else if is_managed value.typ then M.bytes output[0x48;0x89;0x04;0x24;0x48;0x89;0x54;0x24;8;0x48;0x89;0x4c;0x24;16]
       else (match (descriptor value.typ).size with 1->M.bytes output[0x88;0x04;0x24]|2->M.bytes output[0x66;0x89;0x04;0x24]|4->M.bytes output[0x89;0x04;0x24]|_->M.bytes output[0x48;0x89;0x04;0x24]);
@@ -378,7 +391,8 @@ let rec emit_rvalue env (expression:value) node =
       emit_value env target;M.bytes output [0x48;0x89;0xc7];
       let error=emit_error_stub output expression.span "cannot pop from an empty vector" in
       M.bytes output [0x48;0x83;0x7f;0x08;0x00];M.branch output [0x0f;0x84] error;
-      if (match expression.typ with Named _->true|_->false) then begin M.bytes output[0x48;0xff;0x4f;8;0x48;0x8b;0x47;8;0x48;0x69;0xc0];M.u32 output(Int64.of_int(element_stride expression.typ));M.bytes output[0x48;0x03;0x07]end
+      if expression.typ=Unit then begin M.bytes output[0x48;0xff;0x4f;8];mov_rax_imm output 0L end
+      else if (match expression.typ with Named _->true|_->false) then begin M.bytes output[0x48;0xff;0x4f;8;0x48;0x8b;0x47;8;0x48;0x69;0xc0];M.u32 output(Int64.of_int(element_stride expression.typ));M.bytes output[0x48;0x03;0x07]end
       else if is_managed expression.typ then begin M.bytes output[0x48;0xc7;0xc6];M.u32 output(Int64.of_int(element_stride expression.typ));aligned_call env "__xen_vec_pop" end
       else begin
         M.bytes output[0x48;0xff;0x4f;8;0x48;0x8b;0x47;8;0x48;0x69;0xc0];M.u32 output(Int64.of_int(element_stride expression.typ));
@@ -386,6 +400,30 @@ let rec emit_rvalue env (expression:value) node =
       end;
       if expression.typ=F64 then M.bytes output [0x66;0x48;0x0f;0x6e;0xc0] else if expression.typ=F32 then M.bytes output[0x66;0x0f;0x6e;0xc0]
       else normalize_rax output expression.typ
+  | Exchange(target,value) ->
+      emit_value env target;emit_exchange_at_address env expression value
+  | Vec_replace(target,index,value) ->
+      emit_value env target;push_rax env;emit_value env index;
+      let error=emit_error_stub output expression.span "vector index out of bounds"in
+      M.bytes output[0x48;0x8b;0x14;0x24;0x48;0x85;0xc0];M.branch output[0x0f;0x88]error;
+      M.bytes output[0x48;0x3b;0x42;8];M.branch output[0x0f;0x83]error;
+      M.bytes output[0x48;0x69;0xc0];M.u32 output(Int64.of_int(element_stride expression.typ));
+      M.bytes output[0x48;0x03;0x02;0x48;0x83;0xc4;8];env.stack_depth<-env.stack_depth-8;
+      emit_exchange_at_address env expression value
+  | Vec_swap(target,left,right) ->
+      let element=match target.typ with Ref(true,Vec t)->t|_->assert false in
+      let error=emit_error_stub output expression.span "vector index out of bounds" in
+      emit_value env target;push_rax env;
+      let address index displacement =
+        emit_value env index;M.bytes output[0x48;0x8b;0x54;0x24;displacement;0x48;0x85;0xc0];M.branch output[0x0f;0x88]error;
+        M.bytes output[0x48;0x3b;0x42;8];M.branch output[0x0f;0x83]error;
+        M.bytes output[0x48;0x69;0xc0];M.u32 output(Int64.of_int(element_stride element));M.bytes output[0x48;0x03;0x02]in
+      address left 0;push_rax env;address right 8;
+      M.bytes output[0x48;0x89;0xc6;0x48;0x8b;0x3c;0x24;0xb9];M.u32 output(Int64.of_int(slot_size element));
+      let loop=fresh "vec_swap_bytes" and done_=fresh "vec_swap_done" in
+      M.label output loop;M.bytes output[0x48;0x85;0xc9];M.branch output[0x0f;0x84]done_;
+      M.bytes output[0x8a;0x17;0x44;0x8a;0x06;0x44;0x88;0x07;0x88;0x16;0x48;0xff;0xc7;0x48;0xff;0xc6;0x48;0xff;0xc9];M.branch output[0xe9]loop;
+      M.label output done_;M.bytes output[0x48;0x83;0xc4;16];env.stack_depth<-env.stack_depth-16;mov_rax_imm output 0L
   | Unary ("-", value) when expression.typ = F32 ->
       emit_value env value;M.bytes output[0x66;0x0f;0x7e;0xc0;0x35;0;0;0;0x80;0x66;0x0f;0x6e;0xc0]
   | Unary ("-", value) when expression.typ = F64 ->
@@ -774,15 +812,17 @@ let rec owned_leaves_at offset = function
 let base_offset env id = let l=env.locals.(id)in Hashtbl.find env.slots id+aggregate_bias(slot_size l.typ)
 let emit_place_address env p =
   let output=env.output in
+  let current_type=ref env.locals.(p.root).typ in
   M.bytes output[0x48;0x8d;0x85];M.frame32 output p.root(Int64.of_int(-base_offset env p.root));
   List.iter(function
-    |Field f->if f.offset<>0 then(M.bytes output[0x48;0x05];M.u32 output(Int64.of_int f.offset))
-    |Deref->M.bytes output[0x48;0x8b;0x00]
+    |Field f->current_type:=f.typ;if f.offset<>0 then(M.bytes output[0x48;0x05];M.u32 output(Int64.of_int f.offset))
+    |Deref->current_type:=(match !current_type with Ref(_,t)|Box t->t|_->assert false);M.bytes output[0x48;0x8b;0x00]
     |Element v->push_rax env;emit_value env v;
+        let element=match !current_type with Vec t|Slice t->t|_->assert false in current_type:=element;
         let error=emit_error_stub output p.span "index out of bounds"in
         M.bytes output[0x48;0x8b;0x14;0x24;0x48;0x85;0xc0];M.branch output[0x0f;0x88]error;
         M.bytes output[0x48;0x3b;0x42;8];M.branch output[0x0f;0x83]error;
-        M.bytes output[0x48;0x69;0xc0];M.u32 output(Int64.of_int(element_stride p.typ));M.bytes output[0x48;0x03;0x02;0x48;0x83;0xc4;8];env.stack_depth<-env.stack_depth-8)p.projections
+        M.bytes output[0x48;0x69;0xc0];M.u32 output(Int64.of_int(element_stride element));M.bytes output[0x48;0x03;0x02;0x48;0x83;0xc4;8];env.stack_depth<-env.stack_depth-8)p.projections
 let static_offset p =
   List.fold_left(fun acc->function Field f->Option.map(fun n->n+f.offset)acc|_->None)(Some 0)p.projections
 let flag_offset env p leaf = Option.bind(static_offset p)(fun offset->Hashtbl.find_opt env.flags(p.root,offset+leaf))

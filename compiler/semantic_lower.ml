@@ -48,6 +48,7 @@ let lower (program:A.program) =
       |A.Var n->local_place n e.span
       |A.Field(r,f)->field(place r)f
       |A.Deref r->let p=place_or_value r in {p with projections=p.projections@[Deref];typ=e.typ;span=e.span}
+      |A.Index(r,i)->let p=place r in let i=expression i in {p with projections=p.projections@[Element i];typ=e.typ;span=e.span}
       |_->place_of_value(expression e)
     and place_or_value e=match e.A.node with A.Var _|A.Field _|A.Deref _->place e|_->place_of_value(expression e)
     and borrow reserved mut span (p:place) = let v=temp ~own:false (Ref(mut,p.typ))span in emit span(Borrow(v,mut,reserved && mut,p));v
@@ -58,6 +59,7 @@ let lower (program:A.program) =
           let p=place_or_value r in
           let typ=match p.typ with Ref(_,t)->t|_->assert false in
           borrow false false e.span {p with projections=p.projections@[Deref];typ;span=e.span}
+      |A.Place_borrow(mut,r)->borrow reserved mut e.span(place r)
       |A.Box_borrow(mut,r)->
           let p=place_or_value r in
           let p=match p.typ with Ref(_,t)->{p with projections=p.projections@[Deref];typ=t}|_->p in
@@ -70,7 +72,7 @@ let lower (program:A.program) =
       match e.node with
       |A.Int_lit x->ev(Int_lit x)|A.Float_lit x->ev(Float_lit x)|A.String_lit x->ev(String_lit x)|A.Bool_lit x->ev(Bool_lit x)
       |A.Var _|A.Field _|A.Deref _->acquire e.span(kind e)(place e)
-      |A.Address _|A.Field_address _|A.Shared_reborrow _|A.Box_borrow _->operand e
+      |A.Address _|A.Field_address _|A.Shared_reborrow _|A.Box_borrow _|A.Place_borrow _->operand e
       |A.Unary(op,x)->unary(fun x->Unary(op,x))x
       |A.Binary(("&&"|"||"as op),a,b)->
           let c=ex a in let result=temp ~own:false Bool e.span in
@@ -144,6 +146,9 @@ let lower (program:A.program) =
       |A.File_close x->let x=operand ~reserved:true x in ev(File_close x)
       |A.File_write(a,b)->let a=operand ~reserved:true a in let b=ex b in ev(File_write(a,b))
       |A.Vec_pop a->let a=operand ~reserved:true a in ev(Vec_pop a)
+      |A.Exchange(a,b)->let a=operand ~reserved:true a in let b=ex b in let v=ev(Exchange(a,b))in consume b;v
+      |A.Vec_swap(a,b,c)->let a=operand ~reserved:true a in let b=ex b in let c=ex c in ev(Vec_swap(a,b,c))
+      |A.Vec_replace(a,b,c)->let a=operand ~reserved:true a in let b=ex b in let c=ex c in let v=ev(Vec_replace(a,b,c))in consume c;v
       |A.Vec_push(a,b)->let a=operand ~reserved:true a in let b=ex b in let v=ev(Vec_push(a,b))in consume b;v
       |A.Vec_set(a,b,c)->let a=operand ~reserved:true a in let b=ex b in let c=ex c in let v=ev(Vec_set(a,b,c))in consume c;v
     and default typ span = match typ with
@@ -170,6 +175,7 @@ let lower (program:A.program) =
           List.iter(fun(n,target)->Hashtbl.add names n target)bindings
        |A.Assign(n,x)->let v=expression x in store false(local_place n s.span)v
        |A.Field_assign(n,f,x)->let v=expression x in store false(field(local_place n s.span)f)v
+       |A.Place_assign(target,x)->let p=place target in let v=expression x in store false p v
        |A.Ref_field_assign(r,f,x)->let p=place_or_value r in let typ=match p.typ with Ref(_,t)->t|_->assert false in let p={p with projections=p.projections@[Deref];typ}in
           let v=expression x in store false(field p f)v
        |A.Ref_set(r,x)->let p=place_or_value r in let typ=match p.typ with Ref(_,t)->t|_->assert false in let v=expression x in store false{p with projections=p.projections@[Deref];typ}v

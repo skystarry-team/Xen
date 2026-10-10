@@ -19,7 +19,10 @@ and expr_node =
   | Slice_make of expr * expr * expr | Slice_len of expr | Slice_get of expr * expr
   | Address of string | Field_address of expr * struct_field | Deref of expr
   | Shared_reborrow of expr
+  | Place_borrow of bool * expr
   | Vec_set of expr * expr * expr | Vec_push of expr * expr | Vec_pop of expr
+  | Exchange of expr * expr | Vec_swap of expr * expr * expr
+  | Vec_replace of expr * expr * expr
   | File_read of expr | File_write of expr * expr | File_close of expr | File_is_open of expr
   | Struct_lit of struct_layout * (struct_field * expr) list
   | Field of expr * struct_field
@@ -33,6 +36,7 @@ and stmt_node =
   | Let_pattern of expr * (string * struct_field list * span) list
   | Let of string * expr | Assign of string * expr | Field_assign of string * struct_field * expr
   | Ref_field_assign of expr * struct_field * expr | Expr of expr
+  | Place_assign of expr * expr
   | Vec_set_stmt of expr * expr * expr | Ref_set of expr * expr
   | Return of expr option | If of expr * block * block
   | While of expr * block | Block of block | Scope of block | Break | Continue

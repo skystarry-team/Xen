@@ -195,7 +195,9 @@ let check_internal ~entry (program : Ast.program) =
     | Vec t->validate_type span t;if contains_slice t then invalid span("unsupported Vec element type "^string_of_typ t);(match t with Ref _|Ptr _|Type_var _->invalid span("unsupported Vec element type "^string_of_typ t)|_->())
     | Slice t->validate_type span t;(match t with Ref _|Slice _|Ptr _|Type_var _->invalid span("unsupported Slice element type "^string_of_typ t)|_->())
     | Ptr t->validate_type span t;if not(raw_safe(canonical t))then invalid span("Ptr element type "^string_of_typ t^" is not raw-safe POD")
-    | Ref(_,t)->validate_type span t
+    | Ref(_,t)->validate_type span t;
+        if not(referable t) || (match t with Function _->true|_->false)then
+          invalid span ("unsupported reference target "^string_of_typ t)
     | Function(xs,r)->List.iter(validate_type span)xs;validate_type span r
     | _->() in
   List.iter(fun(d:struct_decl)->List.iter(fun field->validate_type field.field_span
@@ -282,7 +284,16 @@ let check_internal ~entry (program : Ast.program) =
         let x=expression ~explc ~bb ~expected:t env(List.hd args)in require x.span t x.typ;
         make(Box t)(Ir.Box_new x)
     | Generic_call("$inactive_box",[t],[])->make(Box(canonical t))(Ir.Int_lit 0L)
+    | Generic_call("$inactive_function",[(Function _ as t)],[])->make(canonical t)(Ir.Int_lit 0L)
     | Call("$unit",[])->make Unit(Ir.Int_lit 0L)
+    | Intrinsic(Exchange,types,args)->
+        if not explc then capability_error v.span Explc "replacement requires #![explc]";
+        args_exact "replace" 2 args;
+        let target=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in
+        let t=match target.typ with Ref(true,t)->t|_->invalid v.span "replace requires &mut T"in
+        (match types with []->()|[typ]->require v.span(canonical typ)t|_->invalid v.span "replace expects at most one type argument");
+        let value=expression ~explc ~bb ~expected:t ~transfer:Ir.Move env(List.nth args 1)in
+        require value.span t value.typ;make t(Ir.Exchange(target,value))
     | Intrinsic(kind,types,args)->
         if args<>[] || List.length types<>1 then
           invalid v.span (Core_modules.name kind^" expects one type argument and no value arguments");
@@ -290,7 +301,7 @@ let check_internal ~entry (program : Ast.program) =
         let named n=let l=Hashtbl.find layout_table n in
           {(T.describe Unit) with size=l.size;alignment=l.alignment} in
         let descriptor=T.describe ~named typ in
-        make I64(Ir.Int_lit(Int64.of_int(match kind with Size_of->descriptor.size|Align_of->descriptor.alignment)))
+        make I64(Ir.Int_lit(Int64.of_int(match kind with Size_of->descriptor.size|Align_of->descriptor.alignment|Exchange->assert false)))
     | Var name when not(Hashtbl.mem env name) ->
         let wanted=if String.contains name '.' then name else match !current_module with Some m->m^"."^name|None->name in
         let candidates=Hashtbl.fold(fun n s xs->if n=wanted then(n,s)::xs else xs)signatures[] in
@@ -362,6 +373,28 @@ let check_internal ~entry (program : Ast.program) =
               |Ref(_,t)->if mutable_ then invalid target.span "mutable reborrow is not supported";
                   make(Ref(false,t))(Ir.Shared_reborrow reference)
               |_->invalid target.span "reborrow expects a reference")
+         | Field _ | Tuple_index _ | Index _ ->
+             let rec root (e:Ast.expr)=match e.node with
+               |Var n->n|Field(r,_)|Tuple_index(r,_)|Index(r,_)->root r
+               |_->invalid e.span "borrow target must be a stable local Place" in
+             let n=root target in
+             (match Hashtbl.find_opt env n with
+              |Some {typ=Ref(false,_);_} when mutable_->invalid target.span "mutable borrow requires a mutable owner"
+              |Some {typ=Ref(true,_);_}->()
+              |Some {mutable_=true;_}->()
+              |Some _ when not mutable_->()
+              |_->invalid target.span "mutable borrow requires a mutable local");
+             let value=match target.node with
+               |Index(r,i)->
+                   if mutable_ then invalid target.span "mutable element borrowing is not supported";
+                   let r=expression ~explc ~bb ~transfer:Ir.Direct env r in
+                   let r=match r.typ with Ref(_,Vec t)->make(Vec t)(Ir.Deref r)|_->r in
+                   let t=match r.typ with Vec t->t|_->invalid target.span "element borrow requires Vec" in
+                   let i=expression ~explc ~bb ~expected:I64 env i in require i.span I64 i.typ;
+                   make t(Ir.Index(r,i))
+               |_->expression ~explc ~bb ~transfer:Ir.Direct env target in
+             if not(referable value.typ)then invalid target.span("cannot reference "^string_of_typ value.typ);
+             make(Ref(mutable_,value.typ))(Ir.Place_borrow(mutable_,value))
          | _->invalid target.span "borrow target must be a local variable")
     | Unary ("*",r) ->
         let r=expression ~explc ~bb ~transfer:Ir.Direct env r in
@@ -423,10 +456,13 @@ let check_internal ~entry (program : Ast.program) =
            | "into_inner"->(match raw.typ with Ref _->invalid receiver.span "into_inner requires an owned Box"|_->());
                let x=expression ~explc ~bb ~transfer:Ir.Move env receiver in make t(Ir.Box_take x)
            |_->invalid v.span("unknown Box method '"^name^"'"))
-        | String ->
+        | String | Ref(_,String) ->
+          let raw=match raw.typ with Ref(_,String)->make String(Ir.Deref raw)|_->raw in
           (match name with
            | "len"->args_exact name 0 args;make I64(Ir.Call("len",[raw]))
-           | "as_bytes"->args_exact name 0 args;(match receiver.node with Var _->()|_->invalid receiver.span "String byte view source must be a local");
+           | "as_bytes"->args_exact name 0 args;
+               let rec stable (e:Ast.expr)=match e.node with Var _->true|Field(r,_)|Tuple_index(r,_)|Unary("*",r)->stable r|_->false in
+               if not(stable receiver)then invalid receiver.span "String byte view source must be a stable Place";
                let zero=make I64(Ir.Int_lit 0L)in make(Slice U8)(Ir.Slice_make(raw,zero,make I64(Ir.Call("len",[raw]))))
            | _->invalid v.span("unknown String method '"^name^"'"))
         | File | Ref(_,File) ->
@@ -485,6 +521,14 @@ let check_internal ~entry (program : Ast.program) =
               let x=expression ~explc ~bb ~expected:element ~transfer:(if move_only element then Ir.Move else Ir.Clone)env(List.hd args)in
               require x.span element x.typ;make Unit(Ir.Vec_push(target,x))
         | "pop"->args_exact name 0 args;make element(Ir.Vec_pop(mutable_target()))
+        | "swap"->args_exact name 2 args;let target=mutable_target()in
+            let index x=let i=expression ~explc ~bb ~expected:I64 env x in require i.span I64 i.typ;i in
+            make Unit(Ir.Vec_swap(target,index(List.nth args 0),index(List.nth args 1)))
+        | "replace"->args_exact name 2 args;let target=mutable_target()in
+            let i=expression ~explc ~bb ~expected:I64 env(List.hd args)in require i.span I64 i.typ;
+            let value=expression ~explc ~bb ~expected:element ~transfer:(if move_only element then Ir.Move else Ir.Clone)env(List.nth args 1)in
+            require value.span element value.typ;
+            make element(Ir.Vec_replace(target,i,value))
         | "into_string"->args_exact name 0 args;if element<>U8 then invalid v.span "into_string requires Vec<U8>";
             let moved=expression ~explc ~bb ~expected:(Vec U8) ~transfer:Ir.Move env receiver in make String(Ir.Call("$vec_into_string",[moved]))
         | "as_slice"->args_exact name 0 args;(match receiver.node with Var _->()|_->invalid receiver.span "Slice source must be a local Vec");let zero=make I64(Ir.Int_lit 0L)in make(Slice element)(Ir.Slice_make(r,zero,make I64(Ir.Vec_len r)))
@@ -591,6 +635,8 @@ let check_internal ~entry (program : Ast.program) =
     | Match_control(scr_name,result_type,scrutinee,arms)->
         let enclosing_loop= !current_loop in
         let scrutinee=expression ~explc ~bb ~mode_set env scrutinee in
+        (match scrutinee.typ with Ref _ when (match result_type with Ref _->true|t->contains_slice t)->
+          invalid v.span "borrowed match bindings cannot escape their arm"|_->());
         let scr_name_ir=fresh_binding scr_name in
         let match_env=copy_env env in
         Hashtbl.add match_env scr_name {typ=scrutinee.typ;mutable_=false;ir_name=scr_name_ir};
@@ -670,6 +716,19 @@ let check_internal ~entry (program : Ast.program) =
           |Ref(false,Named _)->invalid s.span "cannot assign a field through a shared reference"
           |_->invalid s.span "field assignment expects a struct local")
         | Deref_assign(r,x)->let r=expression ~explc ~bb ~transfer:Ir.Direct env r in(match r.typ with Ref(true,t)->let x=expression ~explc ~bb ~expected:t ~transfer:(if move_only t then Ir.Move else Ir.Clone)env x in require x.span t x.typ;make(Ir.Ref_set(r,x)),false|Ref(false,_)->invalid r.span "cannot assign through a shared reference"|_->invalid r.span "dereference assignment expects &mut T")
+        | Place_assign(target,x)->
+            let rec root (e:Ast.expr)=match e.node with
+              |Var n->n|Field(r,_)|Tuple_index(r,_)->root r
+              |_->invalid e.span "nested assignment requires a local-rooted field path" in
+            let n=root target in
+            (match Hashtbl.find_opt env n with
+             |Some {typ=Ref(true,Named _);_}->()
+             |Some {typ=Ref(false,_);_}->invalid target.span "cannot assign through a shared reference"
+             |Some {mutable_=true;_}->()
+             |_->invalid target.span "nested assignment requires a mutable root");
+            let target=expression ~explc ~bb ~transfer:Ir.Direct env target in
+            let x=expression ~explc ~bb ~expected:target.typ ~transfer:(if move_only target.typ then Ir.Move else Ir.Clone)env x in
+            require x.span target.typ x.typ;make(Ir.Place_assign(target,x)),false
         | Index_assign(r,i,x)->let raw=expression ~explc ~bb ~transfer:Ir.Direct env r in let target,element=match r.node,raw.typ with
             | Var n,Vec t->(match Hashtbl.find env n with b when b.mutable_->{Ir.node=Ir.Address b.ir_name;typ=Ref(true,b.typ);span=r.span;transfer=Ir.Direct;mode_set},t|_->invalid r.span "index assignment requires a mutable vector local")
             | Var _,Ref(true,Vec t)->raw,t|_,Ref(false,Vec _)->invalid r.span "index assignment requires &mut Vec"|_->invalid r.span "index assignment expects Vec" in
@@ -723,7 +782,7 @@ let rec uses_range_expr (e:expr) = match e.node with
 and uses_range_stmt (s:stmt) = match s.node with
   | Let(_,_,_,x)|Let_pattern(_,_,_,x)|Assign(_,x)|Field_assign(_,_,x)|Expr x->uses_range_expr x
   | Index_assign(a,b,x)->List.exists uses_range_expr[a;b;x]
-  | Deref_assign(a,b)->uses_range_expr a||uses_range_expr b
+  | Deref_assign(a,b)|Place_assign(a,b)->uses_range_expr a||uses_range_expr b
   | Return x->Option.fold ~none:false ~some:uses_range_expr x
   | If(c,a,b)->uses_range_expr c||uses_range_stmts a||uses_range_stmts b
   | While(c,b)->uses_range_expr c||uses_range_stmts b
@@ -825,7 +884,7 @@ let check_project ?(entry_function="main") ~(entry_module:string) (programs : As
           | Variant_pattern(owner,v,payload)->Variant_pattern(qualify module_ imports p.pattern_span owner,v,Option.map pattern payload)
           | Tuple_pattern ps->Tuple_pattern(List.map pattern ps)
           | Literal_pattern x->Literal_pattern(m x)
-          | (Wildcard_pattern|Binding_pattern _)as n->n in {p with pattern_node} in
+          | (Wildcard_pattern|Binding_pattern _|Ref_binding_pattern _)as n->n in {p with pattern_node} in
         Match(m x,List.map(fun a->{a with pattern=pattern a.pattern;
           body=List.map(map_stmt module_ imports)a.body;tail=Option.map m a.tail})arms)
     | If_expr(c,a,b)->If_expr(m c,m a,m b)
@@ -848,6 +907,7 @@ let check_project ?(entry_function="main") ~(entry_module:string) (programs : As
     | Let_pattern(m,p,t,x)->Let_pattern(m,p,Option.map(map_type module_ imports s.span)t,e x)
     | Assign(n,x)->Assign(n,e x)|Field_assign(n,f,x)->Field_assign(n,f,e x)
     | Index_assign(a,b,x)->Index_assign(e a,e b,e x)|Deref_assign(a,b)->Deref_assign(e a,e b)
+    | Place_assign(a,b)->Place_assign(e a,e b)
     | Expr x->Expr(e x)|Return x->Return(Option.map e x)
     | If(c,a,b)->If(e c,ss a,ss b)|While(c,b)->While(e c,ss b)|For(p,x,b)->For(p,e x,ss b)|Block b->Block(ss b)|Scope(m,b)->Scope(m,ss b)
     | (Break|Continue) as n->n in {s with node} in
@@ -872,6 +932,9 @@ let check_project ?(entry_function="main") ~(entry_module:string) (programs : As
       List.map(fun(d:enum_decl)->{d with enum_name=m^"."^d.enum_name;
         variants=List.map(fun v->{v with payload=Option.map(map_type m imports v.variant_span)v.payload})d.variants})p.enums)programs in
     let merged={module_decl=None;imports=[];global_mode_set=[];structs;enums;functions} in
-    (match Monomorph.run merged with Error d->Error{span=d.span;message=d.message;notes=[];help=d.help}
+    let iterator_sources=List.concat_map(fun p->
+      if module_name p="std.iter" || List.exists(fun i->i.import_name="std.iter")p.imports
+      then List.map(fun(f:func)->f.span.file)p.functions else [])programs in
+    (match Monomorph.run ~iterator_sources merged with Error d->Error{span=d.span;message=d.message;notes=[];help=d.help}
      |Ok merged->finish(check_internal ~entry:(entry_module^"."^entry_function) merged))
   with Invalid d->Error d

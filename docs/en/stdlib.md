@@ -85,8 +85,83 @@ With `use std.iter;`, cloneable elements support `.iter()` on `Vec<T>` and `Slic
 `String.iter()` yields bytes; `Ptr<T>.iter()` follows the pointer's bounds descriptor.
 Using a `Ptr<T>` still requires the caller's lexical `bb` capability. `.enumerate()`
 consumes an iterator and yields `(Int, T)` pairs starting at zero.
-Collections are not automatically converted for `for`, and consuming `into_iter()` for
-move-only values is not available.
+Collections are not automatically converted for `for`. `Vec<T>.into_iter()` consumes
+the vector, including a cloneable vector, and yields owned items in original order.
+The iterator is move-only; early loop exit drops its remaining items.
+
+## Iterator transformations
+
+With `use std.iter;`, `.map(fn(T) -> U)` and `.filter(fn(&T) -> Bool)` construct lazy
+adapters and consume their receiver. Concrete named functions are accepted; closures
+are not. Creation executes no callback. Map passes each item by value; filter borrows
+each yielded item during the predicate call and drops rejected items. Filter requires
+a referable item type, so `Unit` is not supported. Both stop permanently at the first
+`None`. A borrowed `.iter()` chain retains the source loan until its last use.
+
+```xen
+use std.iter;
+fn twice(value: Int) -> Int { return value * 2; }
+#![explc]
+fn large(value: &Int) -> Bool { return *value > 2; }
+fn main() {
+    let values = [1, 2, 3];
+    for value in values.iter().map(twice).filter(large) { println(value); }
+}
+```
+
+This prints `4` and `6`. An existing inherent `map`/`filter` method takes precedence
+and does not require the iterator import. Predicate bodies provide their own `explc`;
+adapter construction does not require that capability from the caller.
+
+`std.iter.fold<I,T,A>(iterator, initial, step: fn(A,T) -> A) -> A` performs an ordered
+left fold and returns initial for an empty iterator. Ordinary by-value clone/move
+rules apply to the iterator, accumulator and callback arguments. `std.iter.collect<I,T>`
+eagerly creates a `Vec<T>` in source order; specify all type arguments when T cannot
+be inferred, for example `std.iter.collect<std.iter.IntoIter<Int>,Int>(values.into_iter())`.
+In `for value in iterator`, a move-only iterator moves into loop ownership. A manual
+while loop calling an outer iterator's `next()` can break and later resume that owner.
+
+## HashMap and owned replacement
+
+`use std.hashmap;` provides a move-only `std.hashmap.HashMap<V>` with String byte keys.
+Empty keys, NUL and invalid UTF-8 bytes are valid; equality compares bytes. Hash
+collisions are resolved by key equality. Iteration and key snapshots have unspecified
+order. Hash-table operations have expected amortized constant probe counts; key hashing
+also takes time proportional to byte length, and collisions can require a full scan.
+
+| API | Behavior |
+| --- | --- |
+| `new<V>()`, `len()`, `is_empty()` | Create a map and inspect its entry count |
+| `insert(key: String, value: V) -> Option<V>` | Replace a duplicate value and return the previous value; length stays unchanged |
+| `remove(key: &String) -> Option<V>` | Transfer the removed value; absent key returns None |
+| `contains_key(key: &String)` | Test presence without copying key/value |
+| `get_cloned(key: &String) -> Option<V>` | Return an owned copy/clone; move-only values are rejected |
+| `with_value<V,R>(&HashMap<V>, &String, fn(&V)->R) -> Option<R>` | Borrow a present value only during the callback; no reference can escape |
+| `keys() -> Vec<String>`, `clear()` | Owned key snapshot; drop entries and empty the map |
+| `into_iter()` | Consume the map and yield owned `(String,V)` entries |
+
+Explicit reference arguments require `explc`. File and Box values support insertion,
+replacement, removal and consuming iteration without cloning them. Discarding a
+returned previous/removed value drops it normally. `Unit` supports storage and owned
+lookup; reference callbacks and `(String,Unit)` entry iteration are unavailable under
+the existing referability/tuple rules. There is no reference-returning get/get_mut.
+Public struct fields are not private; use the map APIs to maintain table invariants.
+
+```xen
+use std.hashmap;
+#![explc]
+fn main() {
+    let mut map = std.hashmap.new<Int>();
+    map.insert("answer", 42);
+    let key = "answer";
+    println(match map.get_cloned(&key) { Option.Some(value) => value, _ => 0 });
+}
+```
+
+`use std.mem;` provides `std.mem.replace<T>(&mut T, T) -> T`: install a prepared
+replacement and return the previous owned value. `Vec.replace(index, value) -> T`
+does the same for an element without changing length; `Vec.swap(left, right)` exchanges
+elements without cloning or dropping them. Invalid indices terminate with a runtime error.
 
 ## `std.option` and `std.result`
 
