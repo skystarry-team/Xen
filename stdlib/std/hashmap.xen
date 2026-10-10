@@ -1,0 +1,240 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.hashmap;
+use std.mem;
+
+struct Entry<V> { key: String, value: Option<V> }
+enum Slot<V> { Empty, Tombstone, Occupied(Box<Entry<V>>) }
+struct State<V> { slots: Vec<Slot<V>>, length: Int, used: Int }
+struct HashMap<V> { state: Box<State<V>> }
+struct Entries<V> { slots: Vec<Slot<V>> }
+
+fn empty_slots<V>(capacity: Int) -> Vec<Slot<V>> {
+    let mut slots: Vec<Slot<V>> = [];
+    let mut index = 0;
+    while index < capacity {
+        slots.push(Slot<V>.Empty);
+        index = index + 1;
+    }
+    return slots;
+}
+
+fn new<V>() -> HashMap<V> {
+    return HashMap<V> { state: box(State<V> { slots: empty_slots<V>(8), length: 0, used: 0 }) };
+}
+
+#![explc]
+fn bucket(key: &String, capacity: Int) -> Int {
+    let bytes = key.as_bytes();
+    let mut hash = 17;
+    for index in 0..bytes.len() { hash = hash * 131 + i64(bytes.get(index)); }
+    let index = hash % capacity;
+    if index < 0 { return index + capacity; }
+    return index;
+}
+
+#![explc]
+fn validate<V>(state: &State<V>) {
+    let capacity = state.slots.len();
+    assert(capacity >= 8 && state.length >= 0 && state.length <= state.used && state.used <= capacity);
+}
+
+#![explc]
+fn locate<V>(slots: &Vec<Slot<V>>, key: &String) -> Option<Int> {
+    let capacity = slots.len();
+    let mut index = bucket(key, capacity);
+    let mut probes = 0;
+    while probes < capacity {
+        let slot = &slots[index];
+        match slot {
+            Slot.Empty => { return Option<Int>.None; },
+            Slot.Tombstone => {},
+            Slot.Occupied(ref owned) => {
+                let entry = owned.as_ref();
+                if entry.key == *key { return Option<Int>.Some(index); }
+            },
+        };
+        index = (index + 1) % capacity;
+        probes = probes + 1;
+    }
+    return Option<Int>.None;
+}
+
+#![explc]
+fn vacancy<V>(slots: &Vec<Slot<V>>, key: &String) -> Int {
+    let capacity = slots.len();
+    let mut index = bucket(key, capacity);
+    let mut probes = 0;
+    while probes < capacity {
+        let free = match &slots[index] {
+            Slot.Occupied(_) => false,
+            _ => true,
+        };
+        if free { return index; }
+        index = (index + 1) % capacity;
+        probes = probes + 1;
+    }
+    panic("HashMap has no vacant slot");
+}
+
+#![explc]
+fn grow<V>(state: &mut State<V>) {
+    let capacity = state.slots.len();
+    let target = if state.length < capacity / 2 { capacity } else { capacity * 2 };
+    assert(target >= capacity);
+    let mut previous = std.mem.replace(&mut state.slots, empty_slots<V>(target));
+    state.used = state.length;
+    while previous.len() > 0 {
+        match previous.pop() {
+            Slot.Occupied(owned) => {
+                let entry = owned.as_ref();
+                let index = vacancy(&state.slots, &entry.key);
+                state.slots.set(index, Slot<V>.Occupied(owned));
+            },
+            _ => {},
+        };
+    }
+}
+
+impl<V> HashMap<V> {
+    #![explc]
+    fn len(&self) -> Int {
+        let state = self.state.as_ref();
+        validate(state);
+        return state.length;
+    }
+
+    fn is_empty(&self) -> Bool { return self.len() == 0; }
+
+    #![explc]
+    fn contains_key(&self, key: &String) -> Bool {
+        let state = self.state.as_ref();
+        validate(state);
+        return match locate(&state.slots, key) { Option.Some(_) => true, Option.None => false };
+    }
+
+    #![explc]
+    fn insert(&mut self, key: String, value: V) -> Option<V> {
+        let state = self.state.as_mut();
+        validate(state);
+        match locate(&state.slots, &key) {
+            Option.Some(index) => {
+                let mut slot = state.slots.replace(index, Slot<V>.Tombstone);
+                return match slot {
+                    Slot.Occupied(owned) => {
+                        let mut current = owned;
+                        let entry = current.as_mut();
+                        let previous = std.mem.replace(&mut entry.value, Option<V>.Some(value));
+                        state.slots.set(index, Slot<V>.Occupied(current));
+                        previous
+                    },
+                    _ => { panic("HashMap occupied slot missing"); },
+                };
+            },
+            Option.None => {},
+        };
+        if state.used >= state.slots.len() - state.slots.len() / 4 { grow(state); }
+        let index = vacancy(&state.slots, &key);
+        let was_empty = match &state.slots[index] { Slot.Empty => true, _ => false };
+        state.slots.set(index, Slot<V>.Occupied(box(Entry<V> { key: key, value: Option<V>.Some(value) })));
+        state.length = state.length + 1;
+        if was_empty { state.used = state.used + 1; }
+        return Option<V>.None;
+    }
+
+    #![explc]
+    fn remove(&mut self, key: &String) -> Option<V> {
+        let state = self.state.as_mut();
+        validate(state);
+        return match locate(&state.slots, key) {
+            Option.Some(index) => {
+                let previous = state.slots.replace(index, Slot<V>.Tombstone);
+                state.length = state.length - 1;
+                match previous {
+                    Slot.Occupied(owned) => { let entry = owned.into_inner(); entry.value },
+                    _ => { panic("HashMap occupied slot missing"); },
+                }
+            },
+            Option.None => Option<V>.None,
+        };
+    }
+
+    #![explc]
+    fn get_cloned(&self, key: &String) -> Option<V> {
+        let state = self.state.as_ref();
+        validate(state);
+        return match locate(&state.slots, key) {
+            Option.Some(index) => match &state.slots[index] {
+                Slot.Occupied(ref owned) => {
+                    let entry = owned.as_ref();
+                    entry.value
+                },
+                _ => { panic("HashMap occupied slot missing"); },
+            },
+            Option.None => Option<V>.None,
+        };
+    }
+
+    #![explc]
+    fn keys(&self) -> Vec<String> {
+        let state = self.state.as_ref();
+        validate(state);
+        let mut keys: Vec<String> = [];
+        for index in 0..state.slots.len() {
+            match &state.slots[index] {
+                Slot.Occupied(ref owned) => { let entry = owned.as_ref(); keys.push(entry.key); },
+                _ => {},
+            };
+        }
+        return keys;
+    }
+
+    #![explc]
+    fn clear(&mut self) {
+        let state = self.state.as_mut();
+        validate(state);
+        state.slots = empty_slots<V>(8);
+        state.length = 0;
+        state.used = 0;
+    }
+
+    fn into_iter(self) -> Entries<V> {
+        let state = self.state.into_inner();
+        return Entries<V> { slots: state.slots };
+    }
+}
+
+#![explc]
+fn with_value<V, R>(map: &HashMap<V>, key: &String, inspect: fn(&V) -> R) -> Option<R> {
+    let state = map.state.as_ref();
+    validate(state);
+    return match locate(&state.slots, key) {
+        Option.Some(index) => match &state.slots[index] {
+            Slot.Occupied(ref owned) => {
+                let entry = owned.as_ref();
+                match &entry.value { Option.Some(ref value) => Option<R>.Some(inspect(value)), Option.None => Option<R>.None }
+            },
+            _ => { panic("HashMap occupied slot missing"); },
+        },
+        Option.None => Option<R>.None,
+    };
+}
+
+impl<V> Entries<V> {
+    fn next(&mut self) -> Option<(String, V)> {
+        let mut result: Option<(String, V)> = Option<(String, V)>.None;
+        let mut found = false;
+        while self.slots.len() > 0 && !found {
+            match self.slots.pop() {
+                Slot.Occupied(owned) => {
+                    let entry = owned.into_inner();
+                    match entry.value {
+                        Option.Some(value) => { result = Option<(String, V)>.Some((entry.key, value)); found = true; },
+                        Option.None => { panic("HashMap entry has no value"); },
+                    };
+                },
+                _ => {},
+            };
+        }
+        return result;
+    }
+}

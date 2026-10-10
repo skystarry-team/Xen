@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.mem;
+use core.intrinsics;
+
+#![explc]
+fn replace<T>(target: &mut T, value: T) -> T {
+    return core.intrinsics.replace<T>(target, value);
+}
