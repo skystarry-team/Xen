@@ -64,8 +64,8 @@ reference 규칙으로 처리한다.
 첫 Box는 reference·Slice·Ptr을 내부에 저장하지 않는다. 빌린 Box 내부의 소유 field를
 부분 이동하는 연산도 거부한다. 먼저 `into_inner()`로 소유값을 꺼내 local로 만든 뒤
 필드를 이동한다. `*owned`의 값 취득은 clone 가능한 내부 값만 복제하며 move-only
-내부 값에는 `into_inner()`를 사용한다. Reference 반환과 borrowed pattern matching의
-기존 제한은 유지한다. 따라서 재귀 enum의 `match` 순회는 현재 tree를 소비한다.
+내부 값에는 `into_inner()`를 사용한다. Enum을 소비 없이 관찰하려면
+`match owned.as_ref()`와 ref payload binding을 사용한다. Reference 반환은 지원하지 않는다.
 
 ## 이름과 호환성
 

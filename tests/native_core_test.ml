@@ -1926,6 +1926,117 @@ let test_std_iterator_factories () =
     "module consumed_iterator; use std.iter; struct R{n:Int} impl R{fn next(&mut self)->Option<Int>{return Option<Int>.None;}} fn main(){let r=R{n:0};let e=r.enumerate();println(r.n);}" in
   expect(contains consumed.message "moved") "enumerate source consumption diagnostic differs"
 
+let test_std_iter_fold () =
+  let prefix = "use std.iter; struct Counter{n:Int,end:Int} impl Counter{fn next(&mut self)->Option<Int>{if self.n==self.end{return Option<Int>.None;}let n=self.n;self.n=self.n+1;return Option<Int>.Some(n);}} " in
+  let status,out,err=execute(prefix ^
+    "fn step(a:Int,b:Int)->Int{return a*10+b;} fn main(){println(std.iter.fold(Counter{n:1,end:4},0,step));println(std.iter.fold(Counter{n:0,end:0},7,step));}")in
+  expect(status=0&&out="123\n7\n"&&err="") "fold order or empty accumulator differs";
+  let status,out,err=execute(prefix ^
+    "fn step(a:Box<Int>,b:Int)->Box<Int>{return box(a.into_inner()+b);}fn main(){let total=std.iter.fold(Counter{n:1,end:4},box(0),step);println(total.into_inner());}")in
+  expect(status=0&&out="6\n"&&err="") "fold move-only accumulator differs";
+  let bad=check_error(prefix ^
+    "fn step(a:Int,b:Int)->Bool{return true;}fn main(){std.iter.fold<Counter,Int,Int>(Counter{n:0,end:1},0,step);}")in
+  expect(contains bad.message "expected") "fold callback mismatch was not rejected";
+  let bad=check_error "use std.iter;struct R{n:Int}impl R{fn next(&self)->Option<Int>{return Option.None;}}fn step(a:Int,b:Int)->Int{return a+b;}fn main(){std.iter.fold(R{n:0},0,step);}"in
+  expect(contains bad.message "next(&mut self)") "fold shared next receiver was accepted";
+  let bad=check_error "use std.iter;struct R{n:Int}impl R{fn next(&mut self)->Option<Bool>{return Option.None;}}fn step(a:Int,b:Int)->Int{return a+b;}fn main(){std.iter.fold(R{n:0},0,step);}"in
+  expect(contains bad.message "expected") "fold concrete item mismatch was accepted"
+
+let test_semantic_expansion_places () =
+  let status,out,err=execute
+    "use std.mem;struct Inner{pair:(String,Box<Int>)}struct Outer{inner:Inner}#![explc]\nfn edit(x:&mut Outer){x.inner.pair.0=\"changed\";}#![explc]\nfn main(){let mut x=Outer{inner:Inner{pair:(\"old\",box(1))}};x.inner.pair.0=\"nested\";println(x.inner.pair.0);let first=x.inner.pair.1;x.inner.pair.1=box(2);println(first.into_inner());edit(&mut x);println(x.inner.pair.0);let mut xs:Vec<Box<Int>>=[box(3),box(4)];xs.swap(0,1);xs.swap(1,1);let old=xs.replace(0,box(5));println(old.into_inner());println(xs.pop().into_inner());let mut b=box(6);let previous=std.mem.replace(&mut b,box(7));println(previous.into_inner());println(b.into_inner());}"in
+  expect(status=0&&out="nested\n1\nchanged\n4\n3\n6\n7\n"&&err="") "nested Place or owned exchange differs";
+  let borrowed=check_error
+    "struct Inner{n:Int}struct Outer{inner:Inner}#![explc]\nfn main(){let mut x=Outer{inner:Inner{n:1}};let r=&x;x.inner.n=2;println(r.inner.n);}"in
+  expect(contains borrowed.message "borrowed") "nested parent loan conflict was accepted";
+  let borrowed=check_error
+    "#![explc]\nfn main(){let mut xs:Vec<Box<Int>>=[box(1)];let r=&xs[0];xs.replace(0,box(2));println(**r);}"in
+  expect(contains borrowed.message "borrow") "Vec element loan did not block replacement";
+  let status,out,err=execute
+    "struct Inner{file:File}struct Outer{inner:Inner}fn fail()->Result<File,Int>{return Result.Err(1);}#![explc]\nfn edit(x:&mut Outer)->Result<Unit,Int>{x.inner.file=fail()?;return Result.Ok(());}#![explc]\nfn main(){let mut x=Outer{inner:Inner{file:open_read(\"/dev/null\")}};println(match edit(&mut x){Result.Err(_)=>true,_=>false});let mut file=x.inner.file;println(file.read());}"in
+  expect(status=0&&out="true\n\n"&&err="") "nested RHS ? dropped the original File";
+  let status,_,err=execute "fn main(){let mut xs=[1,2];xs.swap(0,2);}"in
+  expect(status<>0&&contains err "index out of bounds") "Vec.swap bounds failure was not checked";
+  let status,out,err=execute "struct Big{padding:(Int,Int,Int),key:String}#![explc]\nfn main(){let xs:Vec<Big>=[Big{padding:(1,2,3),key:\"first\"},Big{padding:(4,5,6),key:\"second\"}];let key=&xs[1].key;println(*key);}"in
+  expect(status=0&&out="second\n"&&err="") "element followed by field used the field stride";
+  let bad=check_error "#![explc]\nfn observe<T>(x:&T){}fn main(){observe<Unit>(0);}"in
+  expect(contains bad.message "reference target") "generic Unit reference substitution was accepted";
+  let bad=check_error "#![explc]\nfn observe<T>(x:&T){}fn main(){observe<&Int>(0);}"in
+  expect(contains bad.message "reference target") "generic nested reference substitution was accepted"
+
+let test_storage_review_regressions () =
+  let status,out,err=execute
+    "use core.intrinsics;struct R{n:Int}impl R{fn map(self,n:Int)->Int{return self.n+n;}}struct S{n:Int}impl S{fn make(self)->R{println(1);return R{n:self.n};}}#![explc]\nfn main(){let s=S{n:1};println(s.make().map(2));let mut x:Option<I32>=Option.Some(1);let old=core.intrinsics.replace<Option<I32>>(&mut x,Option.Some(2));println(match old{Option.Some(n)=>n,_=>0});let mut units:Vec<Unit>=[(),()];units.replace(1,());units.push(());units.set(0,());units.pop();println(units.len());}"in
+  expect(status=0&&out="1\n3\n1\n2\n"&&err="") "receiver evaluation, Exchange context or zero-size replacement differs";
+  let bad=check_error "struct R<T>{n:T}impl<T> R<T>{fn map(self,n:Int)->Int{return n;}}fn main(){let r=R<Int>{n:0};r.map(1,2);}"in
+  expect(contains bad.message "expects 1") "generic method arity did not produce a diagnostic";
+  let status,_,err=execute "fn main(){let mut units:Vec<Unit>=[()];units.replace(1,());}"in
+  expect(status<>0&&contains err "index out of bounds") "zero-size replacement skipped bounds checking"
+
+let test_function_value_storage () =
+  let status,out,err=execute
+    "use std.iter;use std.hashmap;fn first(n:Int)->Int{return n+1;}fn second(n:Int)->Int{return n+2;}fn select(n:Int)->fn(Int)->Int{return second;}#![explc]\nfn main(){let mut functions:Vec<fn(Int)->Int>=[first];let previous=functions.replace(0,second);println(previous(3));let current=functions.pop();println(current(3));println(functions.len());for callback in [1].into_iter().map(select){println(callback(3));}let mut map=std.hashmap.new<fn(Int)->Int>();map.insert(\"callback\",first);let key=\"callback\";let callback=match map.get_cloned(&key){Option.Some(callback)=>callback,Option.None=>second};println(callback(3));}"in
+  expect(status=0&&out="4\n5\n0\n5\n4\n"&&err="") "function element replacement, adapter or HashMap storage differs";
+  let status,_,err=execute "fn first(n:Int)->Int{return n+1;}fn main(){let mut functions:Vec<fn(Int)->Int>=[first];functions.replace(1,first);}"in
+  expect(status<>0&&contains err "index out of bounds") "function element replacement skipped bounds checking"
+
+let test_semantic_expansion_matching () =
+  let status,out,err=execute
+    "#![explc]\nfn observe<T>(value:&T)->Bool{return true;}#![explc]\nfn main(){let value:Option<(Box<Int>,Bool)>=Option.Some((box(8),true));println(match &value{Option.Some((ref item,true))=>**item,Option.Some((_,false))=>0,Option.None=>0});let owned=value;println(match owned{Option.Some((item,_))=>item.into_inner(),Option.None=>0});let items:Vec<Box<Int>>=[box(9)];let ref=&items[0];println(observe(ref));println(**ref);let text=\"abc\";let shared=&text;let bytes=shared.as_bytes();println(bytes.get(1));}"in
+  expect(status=0&&out="8\n8\ntrue\n9\n98\n"&&err="") "shared matching or generic borrowing differs";
+  let bad=check_error
+    "#![explc]\nfn main(){let value:Option<Box<Int>>=Option.Some(box(1));match &value{Option.Some(item)=>{},Option.None=>{}};}"in
+  expect(contains bad.message "ref bindings") "shared match accepted a consuming binding";
+  let bad=check_error
+    "#![explc]\nfn main(){let value:Option<Box<Int>>=Option.Some(box(1));let r=match &value{Option.Some(ref item)=>item,Option.None=>{panic(\"missing\");}};println(**r);}"in
+  expect(contains bad.message "escape") "borrowed arm reference escaped through match result";
+  let bad=check_error
+    "#![explc]\nfn main(){let mut text=\"abc\";let shared=&text;let bytes=shared.as_bytes();text=\"changed\";println(bytes.get(0));}"in
+  expect(contains bad.message "borrow") "shared String byte view lost its source loan"
+
+let test_semantic_expansion_adapters () =
+  let source=
+    "use std.iter;fn twice(value:Int)->Int{return value*2;}#![explc]\nfn positive(value:&Int)->Bool{return *value>2;}fn sum(total:Int,value:Int)->Int{return total+value;}fn unbox(value:Box<Int>)->Int{return value.into_inner();}#![explc]\nfn keep(value:&Box<Int>)->Bool{return **value>1;}fn main(){let numbers=[1,2,3];for n in numbers.iter().map(twice).filter(positive){println(n);}let boxes:Vec<Box<Int>>=[box(1),box(2),box(3)];println(std.iter.fold(boxes.into_iter().filter(keep).map(unbox),0,sum));println(std.iter.collect<std.iter.IntoIter<Int>,Int>([4,5,6].into_iter()));}"in
+  let status,out,err=execute source in
+  expect(status=0&&out="4\n6\n5\n[4, 5, 6]\n"&&err="") "lazy adapter chain or consuming order differs";
+  let bad=check_error "use std.iter;fn main(){let xs=[1];let it=xs.into_iter();println(xs);}"in
+  expect(contains bad.message "moved") "cloneable Vec into_iter did not consume its source";
+  let bad=check_error "use std.iter;fn id(x:Int)->Int{return x;}fn main(){let mut xs=[1];let it=xs.iter().map(id);xs.push(2);for n in it{println(n);}}"in
+  expect(contains bad.message "borrow") "map chain lost its Slice loan";
+  let status,out,err=execute "struct R{n:Int}impl R{fn map(&self,n:Int)->Int{return n+1;}}fn main(){let r=R{n:0};println(r.map(2));}"in
+  expect(status=0&&out="3\n"&&err="") "inherent map method required iterator factory import";
+  let status,out,err=execute "struct R{map:fn(Int)->Int}fn increment(n:Int)->Int{return n+1;}fn main(){let r=R{map:increment};println(r.map(2));}"in
+  expect(status=0&&out="3\n"&&err="") "function-valued map field was intercepted by the factory";
+  let status,out,err=execute
+    "use std.iter;struct Source{n:Int}impl Source{fn next(&mut self)->Option<Int>{self.n=self.n+1;if self.n==2{return Option.None;}return Option.Some(self.n);}}fn noisy(n:Int)->Int{println(n);return n;}fn main(){let mut it=Source{n:0}.map(noisy);it.next();it.next();it.next();}"in
+  expect(status=0&&out="1\n"&&err="") "lazy adapter did not latch first None";
+  let status,out,err=execute_with_fd_limit 16
+    "use std.iter;#![explc]\nfn reject(file:&File)->Bool{return false;}fn main(){let mut n=0;while n<100{let files:Vec<File>=[open_read(\"/dev/null\"),open_read(\"/dev/null\")];for file in files.into_iter().filter(reject){panic(\"unexpected\");}let remaining:Vec<File>=[open_read(\"/dev/null\"),open_read(\"/dev/null\")];for file in remaining.into_iter(){break;}n=n+1;}println(n);}"in
+  expect(status=0&&out="100\n"&&err="") "filtered or unyielded File cleanup leaked"
+
+let test_iterator_exit_cleanup () =
+  let status,out,err=execute_with_fd_limit 16
+    "use std.iter;fn fail()->Result<Int,Int>{return Result.Err(1);}fn identity(file:File)->File{return file;}fn early(){let files:Vec<File>=[open_read(\"/dev/null\"),open_read(\"/dev/null\")];for file in files.into_iter(){return;}}fn error()->Result<Unit,Int>{let files:Vec<File>=[open_read(\"/dev/null\"),open_read(\"/dev/null\")];for file in files.into_iter(){fail()?;}return Result.Ok(());}fn construct()->Result<Unit,Int>{let files:Vec<File>=[open_read(\"/dev/null\"),open_read(\"/dev/null\")];let adapter=files.into_iter().map(if fail()?==0{identity}else{identity});return Result.Ok(());}fn main(){let mut n=0;while n<100{early();assert(match error(){Result.Err(_)=>true,_=>false});assert(match construct(){Result.Err(_)=>true,_=>false});let files:Vec<File>=[open_read(\"/dev/null\"),open_read(\"/dev/null\")];for file in files.into_iter(){continue;}n=n+1;}let mut iterator=[3,4].into_iter();while true{println(match iterator.next(){Option.Some(v)=>v,_=>0});break;}println(match iterator.next(){Option.Some(v)=>v,_=>0});println(n);}"in
+  expect(status=0&&out="3\n4\n100\n"&&err="") "iterator return/?/continue or staged adapter cleanup leaked"
+
+let test_std_hashmap () =
+  let status,out,err=execute
+    "use std.hashmap;#![explc]\nfn size(value:&Box<Int>)->Int{return **value;}#![explc]\nfn main(){let mut map=std.hashmap.new<Int>();for n in 0..30{map.insert(int_to_str(n),n);}println(map.len());let key=\"5\";println(match map.get_cloned(&key){Option.Some(n)=>n,_=>-1});println(match map.insert(key,55){Option.Some(n)=>n,_=>-1});println(match map.remove(&key){Option.Some(n)=>n,_=>-1});println(map.contains_key(&key));println(map.keys().len());let mut boxes=std.hashmap.new<Box<Int>>();boxes.insert(\"a\",box(3));let a=\"a\";println(match std.hashmap.with_value(&boxes,&a,size){Option.Some(n)=>n,_=>-1});println(match boxes.insert(\"a\",box(4)){Option.Some(b)=>b.into_inner(),_=>-1});for (k,b) in boxes.into_iter(){println(k);println(b.into_inner());}map.clear();println(map.len());}"in
+  expect(status=0&&out="30\n5\n5\n55\nfalse\n29\n3\n3\na\n4\n0\n"&&err="") "HashMap growth, replacement, removal or consuming entries differs";
+  let status,out,err=execute
+    "use std.hashmap;#![explc]\nfn main(){let mut map=std.hashmap.new<Int>();map.insert(\"a\",1);map.insert(\"i\",2);let a=\"a\";let i=\"i\";map.remove(&a);map.insert(\"q\",3);assert(map.contains_key(&i));let bytes:Vec<U8>=[0,255];let key=bytes.into_string();map.insert(key,4);assert(map.contains_key(&key));map.insert(\"\",5);let empty=\"\";assert(map.contains_key(&empty));println(map.len());let mut unit=std.hashmap.new<Unit>();unit.insert(\"present\",());let p=\"present\";assert(unit.contains_key(&p));unit.remove(&p);println(unit.len());}"in
+  expect(status=0&&out="4\n0\n"&&err="") "HashMap collision, binary key or Unit value differs";
+  let bad=check_error "use std.hashmap;#![explc]\nfn main(){let map=std.hashmap.new<Box<Int>>();let key=\"a\";map.get_cloned(&key);}"in
+  expect(contains bad.message "cannot move") "HashMap get_cloned accepted a move-only value";
+  let status,out,err=execute_with_fd_limit 16
+    "use std.hashmap;#![explc]\nfn main(){let mut n=0;while n<100{let mut map=std.hashmap.new<File>();map.insert(\"a\",open_read(\"/dev/null\"));map.insert(\"a\",open_read(\"/dev/null\"));map.insert(\"b\",open_read(\"/dev/null\"));for i in 0..6{map.insert(int_to_str(i),open_read(\"/dev/null\"));}let a=\"a\";match map.remove(&a){Option.Some(file)=>{let mut f=file;f.read();},_=>{panic(\"missing\");}}for (key,file) in map.into_iter(){break;}n=n+1;}println(n);}"in
+  expect(status=0&&out="100\n"&&err="") "HashMap File replacement/removal/early exit leaked or closed a returned value"
+
+let test_hashmap_box_cleanup () =
+  let status,out,err=execute_with_fd_limit ~memory_limit_kib:32768 16
+    "use std.hashmap;#![explc]\nfn peek(value:&Box<Int>)->Int{return **value;}#![explc]\nfn main(){let mut iteration=0;while iteration<200{let mut map=std.hashmap.new<Box<Int>>();for n in 0..48{map.insert(int_to_str(n),box(n));}for n in 0..48{let key=int_to_str(n);assert(match std.hashmap.with_value(&map,&key,peek){Option.Some(value)=>value==n,_=>false});}for n in 0..24{let key=int_to_str(n);map.remove(&key);}for (key,value) in map.into_iter(){break;}iteration=iteration+1;}println(iteration);}"in
+  expect(status=0&&out="200\n"&&err="") "HashMap rehash lost Box values or leaked allocations"
+
 let test_named_function_values () =
   let source =
     "fn double(value:Int)->Int{return value*2;}" ^
@@ -2336,6 +2447,15 @@ let () =
   test_std_fs_io_and_copy_file ();
   test_word_count ();
   test_std_iterator_factories ();
+  test_std_iter_fold ();
+  test_semantic_expansion_places ();
+  test_storage_review_regressions ();
+  test_function_value_storage ();
+  test_semantic_expansion_matching ();
+  test_semantic_expansion_adapters ();
+  test_iterator_exit_cleanup ();
+  test_std_hashmap ();
+  test_hashmap_box_cleanup ();
   test_named_function_values ();
   test_review_regressions ();
   test_result_try ();

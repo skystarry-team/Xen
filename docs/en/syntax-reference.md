@@ -160,13 +160,16 @@ name is its owner; generic arguments follow the owner, as in `Option<Int>.Some(v
 ## Patterns
 
 ```text
-pattern         = "_" | binding | literal | tuple-pattern | variant-pattern ;
+pattern         = "_" | binding | reference-binding | literal | tuple-pattern | variant-pattern ;
 tuple-pattern   = "(" pattern "," pattern { "," pattern } ")" ;
 variant-pattern = qualified-name ["(" pattern ")"] ;
 binding         = identifier ;
+reference-binding = "ref" identifier ;
 literal         = integer | float | string | "true" | "false" ;
 ```
 
 Patterns are used by `match` and `for`. `match` must be exhaustive. Guards, struct
 patterns, and destructuring assignment are not supported. `for` accepts bindings,
 `_`, and nested tuple patterns.
+`ref name` is accepted only in shared `match`; it binds a borrowed payload. See
+[shared matching](generics-enums-and-match.md#shared-matching).

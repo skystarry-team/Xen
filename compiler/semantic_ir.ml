@@ -29,6 +29,8 @@ type rvalue =
   | Vec_lit of value list | Index of value * value | Vec_get of value * value | Vec_len of value
   | Slice_make of value * value * value | Slice_len of value | Slice_get of value * value
   | Vec_set of value * value * value | Vec_push of value * value | Vec_pop of value
+  | Exchange of value * value | Vec_swap of value * value * value
+  | Vec_replace of value * value * value
   | File_read of value | File_write of value * value | File_close of value | File_is_open of value
   | Struct_lit of struct_layout * (struct_field * value) list
 
@@ -67,8 +69,8 @@ let rvalue_uses = function
   | Int_lit _|Float_lit _|String_lit _|Bool_lit _|Function_address _ -> []
   | Box_new x|Box_take x|Unary(_,x)|Raw_alloc(_,x)|Raw_free(_,x)|Ptr_addr(_,x)|Ptr_len x|Vec_len x|Slice_len x
   | Vec_pop x|File_read x|File_close x|File_is_open x -> [x]
-  | Binary(_,a,b)|Raw_load(_,a,b)|Index(a,b)|Vec_get(a,b)|Slice_get(a,b)|Vec_push(a,b)|File_write(a,b) -> [a;b]
-  | Raw_store(_,a,b,c)|Slice_make(a,b,c)|Vec_set(a,b,c) -> [a;b;c]
+  | Binary(_,a,b)|Raw_load(_,a,b)|Index(a,b)|Vec_get(a,b)|Slice_get(a,b)|Vec_push(a,b)|File_write(a,b)|Exchange(a,b) -> [a;b]
+  | Raw_store(_,a,b,c)|Slice_make(a,b,c)|Vec_set(a,b,c)|Vec_swap(a,b,c)|Vec_replace(a,b,c) -> [a;b;c]
   | Call(_,xs)|Syscall xs|Vec_lit xs -> xs
   | Indirect_call(c,xs) -> c::xs
   | Struct_lit(_,fs) -> List.map snd fs
@@ -166,7 +168,7 @@ let verify program =
                if List.length args<>List.length params then bad op.span "call arity mismatch";
                List.iter2(fun(v:value)t->require t v.typ)args params;require result v.typ in
              (match r with
-              |Int_lit n->if not(Type_desc.is_integer v.typ||v.typ=Unit||v.typ=File||(match v.typ with Box _->n=0L|_->false))then bad op.span "integer constant type"
+              |Int_lit n->if not(Type_desc.is_integer v.typ||v.typ=Unit||v.typ=File||(match v.typ with Box _|Function _->n=0L|_->false))then bad op.span "integer constant type"
               |Float_lit _->if not(Type_desc.is_float v.typ)then bad op.span "float constant type"
               |String_lit _->require String v.typ|Bool_lit _->require Bool v.typ
               |Unary("!",x)->require Bool x.typ;require Bool v.typ
@@ -229,6 +231,13 @@ let verify program =
               |Vec_push(a,x)|Vec_set(a,_,x)->require(Ref(true,Vec x.typ))a.typ;require Unit v.typ;
                   (match r with Vec_set(_,i,_)->index i|_->())
               |Vec_pop a->require(Ref(true,Vec v.typ))a.typ
+              |Exchange(a,x)->require(Ref(true,x.typ))a.typ;require x.typ v.typ;
+                  if (owns x.typ||linear [] x.typ)&&not(local x.span x.id).owned then
+                    bad op.span "replacement consumes an owned operand"
+              |Vec_swap(a,i,j)->index i;index j;require Unit v.typ;(match a.typ with Ref(true,Vec _)->()|_->bad op.span "swap receiver")
+              |Vec_replace(a,i,x)->index i;require(Ref(true,Vec x.typ))a.typ;require x.typ v.typ;
+                  if (owns x.typ||linear [] x.typ)&&not(local x.span x.id).owned then
+                    bad op.span "replacement consumes an owned operand"
               |File_read a->require(Ref(true,File))a.typ;require String v.typ
               |File_write(a,b)->require(Ref(true,File))a.typ;require String b.typ;require Unit v.typ
               |File_close a->require(Ref(true,File))a.typ;require Unit v.typ

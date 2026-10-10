@@ -28,6 +28,8 @@ Linux x86-64 static non-PIE ELF.
 - `std.option.unwrap_or` and `std.result.map_err` for eager fallback and explicit error conversion with a concrete named callback.
 - Recursive clone, move, and drop for managed values; move-only `File` and owning
   `Box<T>`; shared/mutable references and non-lexical borrow end points.
+- Nested struct/tuple field assignment, shared `match` with `ref` bindings, and generic reference parameters.
+- Lazy iterator map/filter, ordered fold/collect and consuming Vec iteration; standard-library String-key HashMap.
 - Irrefutable `let` bindings with `_` and nested tuples, whole-pattern annotations and `mut`.
 - Project `module`/`import`, file-local module aliases, toolchain `use std.*` and `use core.*`, bundled Xen-source
   standard library, and concrete named function values.
@@ -50,7 +52,7 @@ Linux x86-64 static non-PIE ELF.
   dereferencing.
 - String indexing/slicing syntax and mutation; mutable slices; returning or escaping slices,
   or storing slices in vectors (local struct fields preserve the owner's borrow);
-  automatic collection iteration, consuming `into_iter`, or `map`/`filter`/`fold`.
+  automatic collection iteration.
 - Package manifests, re-exports, visibility controls, and separate
   project module search paths.
 - Match guards, struct patterns, or destructuring assignment.
@@ -59,7 +61,7 @@ Linux x86-64 static non-PIE ELF.
 - Reference fields, reference returns, temporary borrows, reference-to-reference, or
   mutable reborrow syntax.
 - `Box` containing reference, slice, or pointer values; moving a field through a
-  borrowed box; or borrowed pattern matching.
+  borrowed box.
 - `Option` propagation with `?` or implicit conversion between `Result` error types; use `std.result.map_err` for explicit conversion.
 - Legacy `File` seek and append, environment-variable lookup, process spawn/wait/pipe,
   stdin/stdout File wrapping, and lazy directory iteration.

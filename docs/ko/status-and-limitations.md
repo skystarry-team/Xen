@@ -19,6 +19,8 @@
 - tuple 값, 공개 `.N` 원소 접근·mutable local 대입과 `Option<T>`/`Result<T,E>` prelude
 - 동일 오류 타입의 `Result<T,E>` 전용 postfix `?`, generic·조건식·match arm 조기 반환
 - eager fallback용 `std.option.unwrap_or`와 concrete named callback을 받는 명시적 오류 변환 `std.result.map_err`
+- 중첩 struct/tuple field 대입, ref binding의 shared match와 generic reference parameter
+- Lazy map/filter, fold/collect, Vec consuming iteration과 std.hashmap의 String key map
 - enum·tuple·Bool의 구조적 exhaustive `match`, scalar literal/catch-all, nested binding과 unreachable arm 진단
 - generic body의 알려진 enum·tuple 구조 분해와 typed callback; local·pattern·projection·호출을 거친 symbolic 타입 제한 유지
 - compiler-private enum representation과 `__tag`·`__payload_*` source 접근·대입 차단
@@ -90,9 +92,9 @@
 - package manifest, re-export/visibility와 별도 module search path
 - match guard, struct pattern과 destructuring assignment
 - Slice 반환·장기 escape·mutable Slice
-- Box 내부의 reference·Slice·Ptr 저장, borrowed Box 내부 field의 부분 이동과 borrowed pattern matching
+- Box 내부의 reference·Slice·Ptr 저장과 borrowed Box 내부 field의 부분 이동
 - String indexing·slicing 문법과 mutation (stdlib의 소유 byte 추출은 지원)
-- collection 자동 `for`, consuming `into_iter()`와 `map/filter/fold`
+- collection 자동 `for`
 - exception, `Option`의 `?` 전파와 `Result` 오류 타입의 암묵 변환 (`std.result.map_err`를 통한 명시 변환은 지원)
 - legacy File seek, permission 선택과 lazy directory iterator
 - process spawn/wait/pipe와 환경변수 조회 (envp entry 지원 미구현)

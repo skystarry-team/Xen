@@ -35,7 +35,7 @@ let blank_summary={effects=[];reads=[];moves=[];result=[]}
 let rec get state ((root,path) as key)=match P.find_opt key state.cells with
   |Some cell->cell
   |None->let rec owner before=function
-      |"$box"::_->let cell=get state(root,List.rev before)in {cell with loans=L.empty}
+      |("$box"|"[]")::_->let cell=get state(root,List.rev before)in {cell with loans=L.empty}
       |x::xs->owner(x::before)xs|[]->absent in owner [] path
 let prefix a b = let rec loop a b=match a,b with [],_->true|x::xs,y::ys when x=y||x="[]"||y="[]"->loop xs ys|_->false in loop a b
 let overlaps (a,xs)(b,ys)=a=b&&(prefix xs ys||prefix ys xs)
@@ -270,7 +270,7 @@ let analyze_program ~elaborate (program:program) =
        concerns the owning cell. Recursive traversal cannot grow path strings. *)
     let summary_target (root,path) typ =
       let rec before acc=function
-        |"$box"::_->let path=List.rev acc in (root,path),typ_at root path
+        |("$box"|"[]")::_->let path=List.rev acc in (root,path),typ_at root path
         |x::xs->before(x::acc)xs|[]->(root,path),typ in before [] path in
     let record ?(definite=true) state key typ =
       let key,typ=summary_target key typ in if fst key<0 then
@@ -422,7 +422,7 @@ let analyze_program ~elaborate (program:program) =
           ensure_storage span state v.id;
           check_values(rvalue_uses r);
           let state,values=apply_call v.id span state live r in
-          let state=match r with Vec_push(t,_)|Vec_set(t,_,_)|Vec_pop t|File_read t|File_write(t,_)|File_close t->
+          let state=match r with Vec_push(t,_)|Vec_set(t,_,_)|Vec_replace(t,_,_)|Vec_pop t|Vec_swap(t,_,_)|File_read t|File_write(t,_)|File_close t->
             L.fold(fun loan state->match loan.origin with Owner key->
               ensure_initialized span state key(typ_at(fst key)(snd key));
               access span state live key(authority (get state(t.id,[])).loans loan)`Write;
@@ -430,6 +430,20 @@ let analyze_program ~elaborate (program:program) =
               record state key(typ_at(fst key)(snd key))
               |_->state)(get state(t.id,[])).loans state
             |_->state in
+          let state,values=match r with
+            |Exchange(t,x)->
+                let typ=x.typ and alternatives=(get state(t.id,[])).loans in
+                let values=read state(x.id,[])x.typ in
+                let destinations=L.elements alternatives|>List.filter_map(fun loan->match loan.origin with Owner key->Some(key,authority alternatives loan)|_->None)in
+                let old=List.fold_left(fun out(key,_)->
+                  List.fold_left(fun out(path,loans)->(path,L.union loans(Option.value ~default:L.empty(List.assoc_opt path out)))::List.remove_assoc path out)out(read state key typ))[]destinations in
+                let state=List.fold_left(fun state(key,auth)->
+                  ensure_initialized span state key typ;access span state live key auth `Write;
+                  if fst key<0 then check_escape span values;
+                  let state=record_read state key typ in
+                  record state key typ |> fun state->write state key typ values ~definite:(List.length destinations=1) ~moved_at:None)state destinations in
+                state,old
+            |_->state,values in
           let values=match r with
             |Struct_lit(_,fields)->List.concat_map(fun((field:struct_field),(v:value))->List.map(fun(path,loans)->field.name::path,loans)(read state(v.id,[])v.typ))fields
             |Slice_make(receiver,_,_)->let loans=L.union(get state(receiver.id,["$view"])).loans(all_loans state receiver.id)in

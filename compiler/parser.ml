@@ -77,7 +77,7 @@ and parse_type state = match bump state with
        | Bool | String | File | Box _ | Vec _ | Slice _ | Ptr _
        | Named _ | Apply _ | Tuple _ -> Ref (mutable_, target)
        | Function _ -> fail state "function references are not supported"
-       | Type_var _ -> fail state "type variable references are not supported"
+       | Type_var _ -> Ref (mutable_, target)
        | Ref _ -> fail state "reference-to-reference types are not supported"
        | Unit -> fail state "Unit cannot be referenced")
   | { kind = Ident "Int"; _ } -> Int
@@ -127,6 +127,8 @@ and parse_type state = match bump state with
 let rec parse_pattern state =
   let token=bump state in
   let pattern_node = match token.kind with
+  | Ident "ref" when (match (peek state).kind with Ident _|Mut->true|_->false) ->
+      let name,_=identifier state in Ref_binding_pattern name
   | Ident "_" -> Wildcard_pattern
   | Int_lit s -> Literal_pattern(expression token.span(Int_lit s))
   | Float_lit s -> Literal_pattern(expression token.span(Float_lit(float_of_string s)))
@@ -280,6 +282,7 @@ and primary state =
                   let assigned=match e.node with
                     |Var n->Assign(n,value)|Field({node=Var n;_},f)->Field_assign(n,f,value)
                     |Tuple_index({node=Var n;_},i)->Field_assign(n,"__item_"^i,value)
+                    |Field _|Tuple_index _->Place_assign(e,value)
                     |Index(a,b)->Index_assign(a,b,value)|Unary("*",r)->Deref_assign(r,value)
                     |_->raise(Error(e.span,"assignment target must be a local variable, dereference, or vector element")) in
                   block(statement e.span assigned::statements)
@@ -409,6 +412,7 @@ let rec parse_statement state =
         | Var name -> let value = parse_expr state in optional_semi state; statement start (Assign (name, value))
         | Field ({node=Var name;_}, field) -> let value=parse_expr state in optional_semi state; statement start (Field_assign(name,field,value))
         | Tuple_index ({node=Var name;_}, index) -> let value=parse_expr state in optional_semi state; statement start (Field_assign(name,"__item_"^index,value))
+        | Field _ | Tuple_index _ -> let value=parse_expr state in optional_semi state; statement start (Place_assign(left,value))
         | Index (receiver, index) -> let value = parse_expr state in optional_semi state;
             statement start (Index_assign (receiver, index, value))
         | Unary ("*", reference) -> let value = parse_expr state in optional_semi state;
@@ -614,7 +618,7 @@ let parse ~file source =
   let binding name span=if Hashtbl.mem seen name then
     raise(Error(span,"binding '"^name^"' conflicts with module alias")) in
   let rec pattern p=match p.pattern_node with
-    |Binding_pattern n->binding n p.pattern_span
+    |Binding_pattern n|Ref_binding_pattern n->binding n p.pattern_span
     |Tuple_pattern ps->List.iter pattern ps
     |Variant_pattern(_,_,p)->Option.iter pattern p
     |Wildcard_pattern|Literal_pattern _->() in
@@ -633,7 +637,7 @@ let parse ~file source =
     |Let(_,n,_,x)->binding n s.span;expr x
     |Let_pattern(_,p,_,x)->pattern p;expr x
     |Assign(_,x)|Field_assign(_,_,x)|Expr x->expr x
-    |Index_assign(a,b,c)->List.iter expr[a;b;c]|Deref_assign(a,b)->expr a;expr b
+    |Index_assign(a,b,c)->List.iter expr[a;b;c]|Deref_assign(a,b)|Place_assign(a,b)->expr a;expr b
     |Return x->Option.iter expr x
     |If(c,a,b)->expr c;List.iter stmt(a@b)|While(c,b)->expr c;List.iter stmt b
     |For(p,x,b)->pattern p;expr x;List.iter stmt b

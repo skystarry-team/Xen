@@ -71,6 +71,8 @@ type rvalue =
   | Vec_set of value * value * value
   | Vec_push of value * value
   | Vec_pop of value
+  | Exchange of value * value | Vec_swap of value * value * value
+  | Vec_replace of value * value * value
   | File_read of value
   | File_write of value * value
   | File_close of value
