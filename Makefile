@@ -17,7 +17,7 @@ PACKAGE := $(DIST_DIR)/$(PACKAGE_NAME).tar.gz
 SOURCE_NAME := $(PROJECT)-$(VERSION)-source
 SOURCE_PACKAGE := $(DIST_DIR)/$(SOURCE_NAME).tar.gz
 
-.PHONY: all build test quickcheck semantic-test package source-package clean help
+.PHONY: all build test test-arm64 quickcheck semantic-test package source-package clean help
 
 all: build
 
@@ -30,9 +30,14 @@ test: build
 	python3 tests/integration/optimization_test.py
 	python3 tests/integration/jit_test.py
 	python3 tests/integration/toolchain_test.py
+	python3 tests/integration/arm64_test.py
 	python3 tests/integration/stdlib_test.py
 	python3 tests/integration/test_workflow_test.py
 	$(MAKE) quickcheck
+
+test-arm64: build
+	dune exec tests/arm64_machine_test.exe
+	XEN_REQUIRE_ARM64=1 python3 tests/integration/arm64_test.py
 
 quickcheck: build
 	XEN_BIN="$(CURDIR)/$(XEN)" XEN_STDLIB_ROOT="$(CURDIR)/stdlib" python3 tests/property/runner.py --mode "$(QUICKCHECK_MODE)" --depth "$(QUICKCHECK_DEPTH)" $(if $(QUICKCHECK_SEED),--seed "$(QUICKCHECK_SEED)")

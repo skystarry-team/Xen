@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = ("README.md", "CONTRIBUTING.md", "LICENSE", "LICENSE-MIT",
          "LICENSE-APACHE", "NOTICE", "THIRD_PARTY.md", "VERSION")
 DIRECTORIES = ("docs", "examples", "stdlib", "assets", "licenses")
+COMPILER_DOCS = ("compiler/README.md", "compiler/cpu/arm64/README.md", "compiler/platform/README.md")
 SOURCE_FILES = ("Makefile", "dune-project", ".gitignore")
 SOURCE_DIRECTORIES = ("compiler", "tests", "benchmarks", "scripts")
 EXCLUDED = {"__pycache__", "found_bugs", "dist"}
@@ -35,6 +36,8 @@ def package(name: str, output: Path, *, source: bool = False, version: str | Non
     entries += [(ROOT / file, file) for file in FILES]
     if source:
         entries += [(ROOT / file, file) for file in SOURCE_FILES]
+    else:
+        entries += [(ROOT / file, file) for file in COMPILER_DOCS]
     directories = DIRECTORIES + (SOURCE_DIRECTORIES if source else ())
     for directory in directories:
         entries += [(path, path.relative_to(ROOT).as_posix())

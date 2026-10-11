@@ -6,9 +6,9 @@ The Xen command-line interface has five subcommands:
 xen version
 xen --version
 xen check <file.xen>
-xen build <file.xen> [-o output] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]
-xen run <file.xen> [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]
-xen test [file.xen | directory | std.module] [--filter substring] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]
+xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]
+xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]
+xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]
 ```
 
 ## `version`
@@ -62,6 +62,24 @@ one
 directory, or standard-library module as the target. `--filter substring` selects test
 display names containing a substring. See the [testing guide](testing.md) for output
 and discovery rules.
+
+## Target selection
+
+`build`, `run`, and `test` accept `--target=x86_64-linux` or
+`--target x86_64-linux`, before or after the source/test path. The default remains
+`x86_64-linux`, with the same existing static ELF support.
+`aarch64-linux` (alias `arm64-linux`) supports the initial core language subset
+with `--jit=off`; JIT, floating point, heap collections, files and raw syscalls
+are explicitly rejected. `x86_64-windows` remains unimplemented.
+Invalid or unavailable targets fail before source loading or output creation.
+`check` remains independent of backend selection.
+
+`run`/`test` execute through the host kernel and require a compatible CPU/OS or
+a configured binary handler; selecting a target does not provide emulation.
+For cross execution: `xen build app.xen --target=aarch64-linux --jit=off -o app`,
+then `qemu-aarch64 ./app`. Tokens after `run --` remain literal program arguments,
+including `--target=...`. See the [compiler architecture](../../compiler/README.md)
+for the ARM64 support matrix and the current 64-bit layout/stdlib constraints.
 
 ## Optimization
 

@@ -41,65 +41,96 @@ let optimize opt report checked =
   | Semantic_analysis.Diagnostic(span,message,notes)->
       print_diagnostic {span;message="optimization error: "^message;notes;help=None};exit 1
 
-let build opt report jit jit_report source output =
-  match Native_backend.generate ~jit ~jit_report (optimize opt report (compile source)) with
+let build (module B : Backend_intf.S) opt report jit jit_report source output =
+  match B.generate ~jit ~jit_report (optimize opt report (compile source)) with
   | Error error ->
       let prefix = match error.span with None -> "" | Some span -> location span ^ ": " in
       fail (prefix ^ "native backend error: " ^ error.message)
-  | Ok executable -> parent_directory output; Native_backend.write output executable
+  | Ok executable -> parent_directory output; B.write output executable
 
-let run opt report jit jit_report source arguments =
-  let temporary = Filename.temp_file "xen-run-" ".elf" in
+let run backend opt report jit jit_report source arguments =
+  let temporary = Filename.temp_file "xen-run-" ".exe" in
   Fun.protect ~finally:(fun () -> try Sys.remove temporary with Sys_error _ -> ()) (fun () ->
-    build opt report jit jit_report source temporary;
+    build backend opt report jit jit_report source temporary;
     let argv = Array.of_list (temporary :: arguments) in
-    let pid = Unix.create_process temporary argv Unix.stdin Unix.stdout Unix.stderr in
+    let pid = try Unix.create_process temporary argv Unix.stdin Unix.stdout Unix.stderr with
+      | Unix.Unix_error (error, _, _) ->
+          let module B = (val backend : Backend_intf.S) in
+          fail ("cannot execute target '" ^ Target.to_string B.description.target ^
+            "' on this host: " ^ Unix.error_message error) in
     match snd (Unix.waitpid [] pid) with
     | Unix.WEXITED status -> exit status
     | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
         Printf.eprintf "program terminated by signal %d\n" signal; exit (128 + signal))
 
 let usage () =
-  prerr_endline "Usage:\n  xen version | --version\n  xen check <file.xen>\n  xen build <file.xen> [-o output] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]\n  xen run <file.xen> [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]\n  xen test [file.xen | directory | std.module] [--filter substring] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]";
+  prerr_endline "Usage:\n  xen version | --version\n  xen check <file.xen>\n  xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]\n  xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]\n  xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]";
   exit 2
 
 (* Compiler options may occur before or after the source/target. The run
    delimiter preserves all following tokens as literal program arguments. *)
-let parse_options command options =
-  let rec loop opt report jit jit_report target output filter args = function
-    |[]->opt,report,jit,jit_report,target,output,filter,args
-    |"--opt=off"::rest->loop Semantic_opt.Off report jit jit_report target output filter args rest
-    |"--opt=basic"::rest->loop Semantic_opt.Basic report jit jit_report target output filter args rest
-    |"--opt-report"::rest->loop opt true jit jit_report target output filter args rest
-    |"--jit=on"::rest->loop opt report true jit_report target output filter args rest
-    |"--jit=off"::rest->loop opt report false jit_report target output filter args rest
-    |"--jit-report"::rest->loop opt report jit true target output filter args rest
-    |"-o"::path::rest when command="build"->loop opt report jit jit_report target path filter args rest
-    |"--filter"::value::rest when command="test"->loop opt report jit jit_report target output value args rest
-    |"--"::arguments when command="run"->opt,report,jit,jit_report,target,output,filter,arguments
-    |value::rest when not(String.starts_with ~prefix:"-" value) && target=None->
-        loop opt report jit jit_report (Some value) output filter args rest
-    |_->usage() in
-  let opt,report,jit,jit_report,target,output,filter,args=loop Semantic_opt.Off false true false None "a.out" "" [] options in
-  if (report && opt<>Semantic_opt.Basic) || (jit_report && not jit) then usage();
-  opt,report,jit,jit_report,target,output,filter,args
+type options = {
+  opt : Semantic_opt.level;
+  report : bool;
+  jit : bool;
+  jit_report : bool;
+  source : string option;
+  output : string;
+  filter : string;
+  args : string list;
+  target : string;
+}
+
+let parse_options command arguments =
+  let rec loop options = function
+    | [] -> options
+    | "--opt=off" :: rest -> loop {options with opt=Semantic_opt.Off} rest
+    | "--opt=basic" :: rest -> loop {options with opt=Semantic_opt.Basic} rest
+    | "--opt-report" :: rest -> loop {options with report=true} rest
+    | "--jit=on" :: rest -> loop {options with jit=true} rest
+    | "--jit=off" :: rest -> loop {options with jit=false} rest
+    | "--jit-report" :: rest -> loop {options with jit_report=true} rest
+    | "--target" :: value :: rest when value<>"" && not(String.starts_with ~prefix:"-" value) ->
+        loop {options with target=value} rest
+    | value :: rest when String.starts_with ~prefix:"--target=" value ->
+        let target=String.sub value 9 (String.length value-9) in
+        if target="" then usage();
+        loop {options with target} rest
+    | "-o" :: path :: rest when command="build" -> loop {options with output=path} rest
+    | "--filter" :: value :: rest when command="test" -> loop {options with filter=value} rest
+    | "--" :: args when command="run" -> {options with args}
+    | value :: rest when not(String.starts_with ~prefix:"-" value) && options.source=None ->
+        loop {options with source=Some value} rest
+    | _ -> usage() in
+  let options=loop {opt=Semantic_opt.Off;report=false;jit=true;jit_report=false;
+    source=None;output="a.out";filter="";args=[];target=Target.to_string Target.default} arguments in
+  if (options.report && options.opt<>Semantic_opt.Basic) ||
+     (options.jit_report && not options.jit) then usage();
+  options
+
+let select_backend target = match Backend.of_string target with
+  | Ok backend -> backend
+  | Error message -> fail ("target error: " ^ message)
 
 let () =
   match Array.to_list Sys.argv with
   | [_; ("version" | "--version")] -> Printf.printf "xen %s\n" Build_version.current
   | [_; "check"; source] -> ignore (compile source)
   | _ :: ("build"|"run" as command) :: options ->
-      let opt,report,jit,jit_report,target,output,_,args=parse_options command options in
-      let source=match target with Some source->source|None->usage() in
-      if command="build"then build opt report jit jit_report source output else run opt report jit jit_report source args
+      let o=parse_options command options in
+      let source=match o.source with Some source->source|None->usage() in
+      let backend=select_backend o.target in
+      if command="build" then build backend o.opt o.report o.jit o.jit_report source o.output
+      else run backend o.opt o.report o.jit o.jit_report source o.args
   | _ :: "test" :: options ->
-      let opt,report,jit,jit_report,target,_,filter,_=parse_options "test" options in
-      let target=Option.value ~default:"." target in
-      let cases,errors=Test_runner.discover ~target ~filter in
+      let o=parse_options "test" options in
+      let backend=select_backend o.target in
+      let target=Option.value ~default:"." o.source in
+      let cases,errors=Test_runner.discover ~target ~filter:o.filter in
       List.iter print_diagnostic errors;
       let failed=ref(List.length errors)and passed=ref 0 in
       List.iter(fun(case:Test_runner.case)->
-        match Test_runner.run ~opt ~opt_report:report ~jit ~jit_report case with
+        match Test_runner.run ~backend ~opt:o.opt ~opt_report:o.report ~jit:o.jit ~jit_report:o.jit_report case with
         |Test_runner.Passed->incr passed;Printf.printf "PASS %s\n%!" case.name
         |Test_runner.Compilation_error d->incr failed;Printf.printf "FAIL %s (compilation)\n%!" case.name;
             print_diagnostic d

@@ -44,3 +44,9 @@ Timing/size observations live in [benchmarks/](../benchmarks/README.md).
 The generator's structural shrinker remains part of `property/semantic.py`;
 the unused statement-deletion shrinker was removed because it did not
 preserve the expected-output oracle.
+
+`make test-arm64` requires Linux ARM64 or `qemu-aarch64` (Ubuntu package
+`qemu-user`). It runs instruction encoding/relocation checks and both-optimizer
+execution tests for the initial ARM64 subset, including x86 differential checks
+on x86 hosts. `make test` includes these tests but skips ARM64 execution when no
+runner is installed; ELF and unsupported-feature checks still run.

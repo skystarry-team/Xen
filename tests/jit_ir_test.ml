@@ -1,4 +1,5 @@
 (* SPDX-License-Identifier: MIT OR Apache-2.0 *)
+open Xen_x86_64
 open Semantic_ir
 let expect b message = if not b then failwith message
 let () =

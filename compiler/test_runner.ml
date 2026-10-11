@@ -59,22 +59,28 @@ let discover ~target ~filter =
        else load target(fun()->Project_loader.load target));
   List.sort(fun a b->String.compare a.name b.name)!cases,List.rev !errors
 
-let execute executable =
-  let binary=Filename.temp_file "xen-test-" ".elf"
+let execute ?target ~write executable =
+  let binary=Filename.temp_file "xen-test-" ".exe"
   and stdout_path=Filename.temp_file "xen-test-" ".stdout"
   and stderr_path=Filename.temp_file "xen-test-" ".stderr"in
   Fun.protect ~finally:(fun()->List.iter(fun path->try Sys.remove path with Sys_error _->())
       [binary;stdout_path;stderr_path])(fun()->
-    Native_backend.write binary executable;
+    write binary executable;
     let output=Unix.openfile stdout_path[Unix.O_WRONLY;Unix.O_TRUNC]0o600
     and errors=Unix.openfile stderr_path[Unix.O_WRONLY;Unix.O_TRUNC]0o600
     and input=Unix.openfile "/dev/null"[Unix.O_RDONLY]0 in
     let pid=Fun.protect ~finally:(fun()->List.iter Unix.close[input;output;errors])(fun()->
-      Unix.create_process binary[|binary|]input output errors)in
+      try Unix.create_process binary[|binary|]input output errors with
+      |Unix.Unix_error(error,operation,path)->
+          match target with
+          |None->raise(Unix.Unix_error(error,operation,path))
+          |Some target->raise(Sys_error("cannot execute target '"^Target.to_string target^
+              "' on this host: "^Unix.error_message error)))in
     let status=snd(Unix.waitpid[]pid)in
     status,Project_loader.read_file stdout_path,Project_loader.read_file stderr_path)
 
-let run ?(opt=Semantic_opt.Off) ?(opt_report=false) ?(jit=true) ?(jit_report=false) case =
+let run ?(backend=Backend.default) ?(opt=Semantic_opt.Off) ?(opt_report=false) ?(jit=true) ?(jit_report=false) case =
+  let module B = (val backend : Backend_intf.S) in
   let checked=if case.single then Checker.check ~entry:case.function_name(List.hd case.programs)
     else Checker.check_project ~entry_module:case.owner ~entry_function:case.function_name case.programs in
   match checked with
@@ -84,10 +90,10 @@ let run ?(opt=Semantic_opt.Off) ?(opt_report=false) ?(jit=true) ?(jit_report=fal
       |Semantic_ir.Invalid(span,message)->Error(diagnostic span ("optimization error: "^message))
       |Semantic_analysis.Diagnostic(span,message,notes)->Error({span;message="optimization error: "^message;notes;help=None}:Checker.diagnostic)in
     match optimized with Error d->Compilation_error d|Ok checked->
-    match Native_backend.generate ~jit ~jit_report checked with
+    match B.generate ~jit ~jit_report checked with
     |Error error->Compilation_error(diagnostic(Option.value ~default:case.span error.span)
         ("native backend error: "^error.message))
-    |Ok executable->match protect case.span.file(fun()->execute executable)with
+    |Ok executable->match protect case.span.file(fun()->execute ~target:B.description.target ~write:B.write executable)with
       |Error d->Compilation_error d
       |Ok(Unix.WEXITED 0,_,stderr)->if jit_report then prerr_string stderr;Passed
       |Ok(status,stdout,stderr)->Failed(status,stdout,stderr)

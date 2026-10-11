@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Build with --target=aarch64-linux --jit=off, then run on Linux ARM64 or QEMU.
+struct Pair { left: I64, right: I64 }
+
+fn fibonacci(n: I64) -> I64 {
+    if n < 2 { return n; }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+fn total(pair: Pair) -> I64 {
+    return pair.left + pair.right;
+}
+
+fn main() {
+    println("Hello from Xen ARM64");
+    println(total(Pair { left: 12, right: 30 }));
+    println(fibonacci(10));
+    let mut index = 0;
+    while index < arg_count() {
+        println(arg(index));
+        index = index + 1;
+    }
+}

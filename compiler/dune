@@ -2,8 +2,8 @@
 (library
  (name xen_compiler)
  (wrapped false)
- (modules ast core_modules type_desc lexer parser prelude semantic_ir typed_ast semantic_lower semantic_analysis semantic_opt monomorph checker project_loader machine_ir jit_runtime elf_writer native_backend test_runner)
- (libraries unix))
+ (modules backend test_runner)
+ (libraries unix xen_common xen_x86_64 xen_arm64))
 
 (executable
  (name main)

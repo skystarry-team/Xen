@@ -398,7 +398,7 @@ let run ?(iterator_sources=[]) (program:program) =
            trivial_copy=List.for_all(fun x->x.Type_desc.trivial_copy)fields;
            move_only=List.exists(fun x->x.Type_desc.move_only)fields;
            drop=(if List.exists(fun x->x.Type_desc.drop<>Type_desc.No_drop)fields then Type_desc.Drop_struct else Type_desc.No_drop);
-           equality=false;abi=Type_desc.Indirect}
+           equality=false}
       |None->fail span("cannot resolve type descriptor for "^n))typ
     with Invalid_argument _->fail span("cannot resolve type descriptor for "^string_of_typ typ) in
   let rec concrete_type ?(vec_boundary=false) span = function

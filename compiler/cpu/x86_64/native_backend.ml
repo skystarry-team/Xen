@@ -33,7 +33,7 @@ let rec descriptor typ = T.describe ~named:(fun n->let l=Hashtbl.find layouts n 
     move_only=List.exists(fun d->d.T.move_only)fields ||
       List.exists(fun (f:struct_field)->match f.typ with Ptr _->true|_->false)l.fields;
     drop=(if List.exists(fun d->d.T.drop<>T.No_drop)fields then T.Drop_struct else T.No_drop);
-    equality=List.for_all(fun d->d.T.equality)fields;abi=T.Indirect }) typ
+    equality=List.for_all(fun d->d.T.equality)fields }) typ
 let is_owned typ = match typ with
   | String | Vec _ | File | Box _ -> true
   | Named _ -> let d=descriptor typ in d.T.move_only || d.T.drop<>T.No_drop

@@ -2,4 +2,4 @@
 (executable
  (name semantic_opt_benchmark)
  (modules semantic_opt_benchmark)
- (libraries unix xen_compiler))
+ (libraries unix xen_common))

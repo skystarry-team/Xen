@@ -25,7 +25,8 @@ let dependency_root dependency =
    | _->()); root
 
 let executable_directory () =
-  (* Linux is Xen's sole host/target. This also handles PATH and symlink launches. *)
+  (* Host-side executable discovery; independent of the generated code target.
+     /proc handles PATH and symlink launches on Linux, with a portable fallback. *)
   let executable=try Unix.readlink "/proc/self/exe" with Unix.Unix_error _->Sys.executable_name in
   Filename.dirname executable
 

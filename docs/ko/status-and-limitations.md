@@ -112,3 +112,25 @@ instruction encoding과 ELF layout을 직접 만든다. 출력 ELF는 RX text, r
 RW data segment를 분리한다.
 
 이 문서는 데모의 현재 구현을 설명한다. 문법과 API는 바뀔 수 있다.
+
+## 멀티 타깃 컴파일러 구조
+
+공통 프런트엔드는 `compiler/common/`, CPU별 백엔드는 `compiler/cpu/x86_64/`와
+`compiler/cpu/arm64/`의 별도 Dune 라이브러리로 분리되어 있습니다.
+향후 OS별 서비스와 실행 파일 형식 경계는 `compiler/platform/`에서 관리합니다.
+
+기본 타깃은 기존 `x86_64-linux`입니다. `build`, `run`, `test`에
+`--target=aarch64-linux --jit=off`를 지정하면 초기 ARM64 백엔드를 사용합니다.
+`arm64-linux` 별칭도 허용합니다. 외부 assembler/linker 없이 정적 Linux AArch64
+ELF를 생성하며, 정수·Bool·제어 흐름·함수·참조·지원 타입의 구조체와 enum·
+문자열 리터럴/프로그램 인자와 기본 출력을 지원합니다.
+
+현재 ARM64에서는 JIT, 부동소수점, 힙 문자열 생성, Vec/Slice/Box/Ptr, 파일,
+raw syscall과 이를 사용하는 플랫폼 의존 표준 라이브러리를 명시적 오류로 거부합니다.
+기본 JIT 설정은 기존 호환성을 위해 on이므로 ARM64에서는 반드시 `--jit=off`를 지정합니다.
+`x86_64-windows`와 `aarch64-windows`는 아직 미구현입니다.
+
+`run`과 `test`는 호스트 커널을 통해 실행하며 에뮬레이터를 자동 실행하지 않습니다.
+x86-64에서 만든 ARM64 실행 파일은 `qemu-aarch64 ./app`으로 검증할 수 있습니다.
+공통 계층은 Xen의 고정 64비트 값 배치와 기존 여섯 인자 제한을 유지합니다.
+[컴파일러 구조](../../compiler/README.md)와 [ARM64 지원 범위](../../compiler/cpu/arm64/README.md)를 참고하세요.

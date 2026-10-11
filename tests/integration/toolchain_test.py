@@ -57,6 +57,54 @@ class ToolchainTests(unittest.TestCase):
         original.rename(moved)
         return moved / "bin/xen"
 
+    def test_explicit_target_preserves_output_and_run_arguments(self):
+        source = self.source('fn main(){println(arg_count());println(arg(0));}')
+        for opt in ("off", "basic"):
+            for jit in ("off", "on"):
+                with self.subTest(opt=opt, jit=jit):
+                    default = self.cwd / "default"
+                    explicit = self.cwd / "explicit"
+                    flags = [f"--opt={opt}", f"--jit={jit}"]
+                    self.success(self.invoke("build", source, *flags, "-o", default))
+                    self.success(self.invoke("build", "--target=x86_64-linux", source,
+                                             *flags, "-o", explicit))
+                    self.assertEqual(default.read_bytes(), explicit.read_bytes())
+        self.success(self.invoke("run", source, "--target", "x86_64-linux",
+                                 "--", "--target=aarch64-linux"),
+                     "1\n--target=aarch64-linux\n")
+        self.success(self.invoke("test", "--target=x86_64-linux", "std.fs",
+                                 "--filter", "null"),
+                     "PASS std.fs.null_file\n1 passed; 0 failed\n")
+        source = self.source('test fn selected(){assert(true);}fn main(){}')
+        self.success(self.invoke("test", source, "--target", "x86_64-linux"),
+                     "PASS app.selected\n1 passed; 0 failed\n")
+
+    def test_unavailable_target_fails_before_loading_or_writing(self):
+        output = self.cwd / "preserved"
+        output.write_bytes(b"preserve existing output")
+        for command in ("build", "run", "test"):
+            for target in ("aarch64-windows", "x86_64-windows"):
+                with self.subTest(command=command, target=target):
+                    args = [command, self.cwd / "missing.xen", f"--target={target}"]
+                    if command == "build":
+                        args += ["-o", output]
+                    result = self.invoke(*args)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("is not implemented", result.stderr)
+                    self.assertIn("supported targets: x86_64-linux", result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    self.assertEqual(output.read_bytes(), b"preserve existing output")
+        for target, message in (("mystery-linux", "unknown target architecture"),
+                                ("x86_64-mystery", "unknown target operating system"),
+                                ("x86_64", "invalid target")):
+            result = self.invoke("build", "missing.xen", f"--target={target}")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(message, result.stderr)
+        for flags in (("--target",), ("--target=",), ("--target", "--jit=off")):
+            result = self.invoke("build", "missing.xen", *flags)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Usage:", result.stderr)
+
     def test_module_aliases(self):
         self.source('module guide.model;struct Pair<T>{value:T}'
                     'enum Role{Admin,Guest}enum Maybe<T>{Some(T),None}fn identity<T>(x:T)->T{return x;}'
@@ -237,8 +285,10 @@ class ToolchainTests(unittest.TestCase):
                              "THIRD_PARTY.md", "licenses/OCaml.txt", "licenses/CC-BY-4.0.txt",
                              "assets/branding/README.md", "assets/branding/full_logo.png",
                              "assets/branding/full_logo.png.license", "docs/en/jit.md",
-                             "docs/ko/jit.md", "examples/demo.xen"):
+                             "docs/ko/jit.md", "examples/demo.xen", "compiler/README.md",
+                             "compiler/cpu/arm64/README.md", "compiler/platform/README.md"):
                 self.assertIn(f"{prefix}/{relative}", names)
+            self.assertFalse(any(Path(name).suffix in (".ml", ".mli") for name in names))
             for image in set(re.findall(r'assets/branding/[^"\s]+\.png', (REPO / "README.md").read_text())):
                 self.assertIn(f"{prefix}/{image}", names)
                 self.assertIn(f"{prefix}/{image}.license", names)
@@ -270,14 +320,19 @@ class ToolchainTests(unittest.TestCase):
         with tarfile.open(source_archive) as archive:
             names = archive.getnames()
             prefix = "xen-loader-test-source"
-            for relative in ("Makefile", "dune-project", ".gitignore", "compiler/checker.ml",
+            for relative in ("Makefile", "dune-project", ".gitignore", "compiler/common/checker.ml",
+                             "compiler/common/dune", "compiler/common/backend_intf.ml",
+                             "compiler/cpu/x86_64/dune", "compiler/cpu/x86_64/native_backend.ml",
+                             "compiler/cpu/arm64/README.md", "compiler/cpu/arm64/dune",
+                             "compiler/cpu/arm64/native_backend.ml", "compiler/platform/README.md",
+                             "compiler/backend.ml",
                              "tests/property/runner.py", "scripts/package.py", "LICENSE"):
                 self.assertIn(f"{prefix}/{relative}", names)
             banned = {".git", ".idea", "reference", "test", "__pycache__", "found_bugs", "dist"}
             self.assertFalse(any(banned.intersection(Path(name).parts) or
                                  Path(name).name in ("AGENTS.md", "CLAUDE.md") for name in names))
-            self.assertEqual(archive.extractfile(f"{prefix}/compiler/checker.ml").read(),
-                             (REPO / "compiler/checker.ml").read_bytes())
+            self.assertEqual(archive.extractfile(f"{prefix}/compiler/common/checker.ml").read(),
+                             (REPO / "compiler/common/checker.ml").read_bytes())
             self.assertEqual(archive.extractfile(f"{prefix}/VERSION").read(), b"loader-test\n")
 
     def test_cli_version(self):

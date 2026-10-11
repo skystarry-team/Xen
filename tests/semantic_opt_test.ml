@@ -1,4 +1,5 @@
 (* SPDX-License-Identifier: MIT OR Apache-2.0 *)
+open Xen_x86_64
 open Ast
 open Semantic_ir
 let fail s = failwith s
@@ -8,7 +9,7 @@ let compile source = match Checker.check(Parser.parse ~file:"opt.xen" source)wit
 let executable p = match Native_backend.generate p with Ok x->x|Error e->fail e.message
 let differential source =
   let off=compile source in let basic,_=Semantic_opt.optimize off in
-  let a=Test_runner.execute(executable off)and b=Test_runner.execute(executable basic)in
+  let a=Test_runner.execute ~write:Native_backend.write (executable off)and b=Test_runner.execute ~write:Native_backend.write (executable basic)in
   expect(a=b)("off/basic mismatch: "^source);a
 let operations p name = let f=List.find(fun(f:func)->f.name=name)(program p).functions in
   Array.to_list f.blocks |> List.concat_map(fun(b:block)->b.operations)
@@ -87,7 +88,7 @@ let test_operation_budget () =
   let p=Semantic_analysis.revalidate{p with functions=List.map(fun(f:func)->if f.name="leaf"then leaf else f)p.functions}in
   let q,r=Semantic_opt.optimize p in
   expect(r.fusion.fused=6 && count q "main"(direct "leaf")=4)"additional IR operation budget ignored";
-  let a=Test_runner.execute(executable p)and b=Test_runner.execute(executable q)in expect(a=b)"budget fixture behavior changed"
+  let a=Test_runner.execute ~write:Native_backend.write (executable p)and b=Test_runner.execute ~write:Native_backend.write (executable q)in expect(a=b)"budget fixture behavior changed"
 let test_stack_padding () =
   let source="struct Nine{a:U8,b:U8,c:U8,d:U8,e:U8,f:U8,g:U8,h:U8,i:U8} fn leaf(x:Int)->Int{return x+1;}fn main(){"^
     String.concat ""(List.init 8(fun _->"leaf(1);"))^"}"in
@@ -99,7 +100,7 @@ let test_stack_padding () =
   let f={f with locals=Array.append f.locals [|local|];scopes}in
   let p=Semantic_analysis.revalidate{p with functions=List.map(fun old->if old.name="main"then f else old)p.functions}in
   let q,r=Semantic_opt.optimize p in expect(r.fusion.fused=7 && count q "main"(direct "leaf")=1)"slot padding exceeds budget";
-  expect(Test_runner.execute(executable p)=Test_runner.execute(executable q))"padding fixture changed result"
+  expect(Test_runner.execute ~write:Native_backend.write (executable p)=Test_runner.execute ~write:Native_backend.write (executable q))"padding fixture changed result"
 let test_storage_versions () =
   let p=compile "fn work(x:Int)->Int{return x*x;}fn main(){println(work(3));}" |> program in
   let f=List.find(fun(f:func)->f.name="work")p.functions in
@@ -112,7 +113,7 @@ let test_storage_versions () =
     blocks=[|{id=0;scope=0;operations=List.map op nodes;terminator=Return(Some(v 4))}|]}in
   let p=Semantic_analysis.revalidate{p with functions=List.map(fun old->if old.name="work"then f else old)p.functions}in
   let q,_=Semantic_opt.optimize p in
-  let a=Test_runner.execute(executable p)and b=Test_runner.execute(executable q)in
+  let a=Test_runner.execute ~write:Native_backend.write (executable p)and b=Test_runner.execute ~write:Native_backend.write (executable q)in
   expect(a=b && a=(Unix.WEXITED 0,"19\n",""))"storage version/restart changed preserved copy"
 let test_verification () =
   let p=compile "fn leaf(x:Int)->Int{return x+1;}fn main(){println(leaf(1));}"in

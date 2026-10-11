@@ -1,0 +1,42 @@
+(* SPDX-License-Identifier: MIT OR Apache-2.0 *)
+module M = Xen_arm64.Machine_ir
+let expect yes message = if not yes then failwith message
+let word bytes at =
+  let value=ref 0 in for i=0 to 3 do value:= !value lor (Char.code(Bytes.get bytes(at+i)) lsl (8*i))done;!value
+let rejects f = try f();false with M.Error _->true
+let () =
+  let m=M.create()in
+  M.imm m 0 0x123456789abcdef0L;M.mov m 3 4;
+  M.add m 1 2 3;M.sub m 1 2 3;M.mul m 1 2 3;M.cmp m 2 3;M.cset m 0 11;
+  M.rr m 0x8b206000 31 31 16;M.rr m 0xcb000000 9 29 16;
+  M.load m ~bytes:1 ~signed:true 0 15 0;M.load m ~bytes:2 ~signed:true 1 15 2;
+  M.load m ~bytes:4 ~signed:true 2 15 4;M.load m 3 31 8;
+  M.store m ~bytes:1 0 15 0;M.store m ~bytes:2 1 15 2;
+  M.store m ~bytes:4 2 15 4;M.store m 3 31 8;
+  M.rr m 0x9ac00800 2 0 1;M.rr m 0x9ac00c00 2 0 1;
+  List.iter(M.word m)[0xa9bf7bfd;0x910003fd;0x910003bf;0xa8c17bfd;0xd63f0220];
+  M.syscall m;M.ret m;
+  (* Independently assembled with GNU aarch64-linux-gnu-as; see the instruction
+     meanings in machine_ir.ml and linux_runtime.ml. No assembler needed here. *)
+  let expected=[0xd29bde00;0xf2b35780;0xf2cacf00;0xf2e24680;0xaa0403e3;
+    0x8b030041;0xcb030041;0x9b037c41;0xeb03005f;0x9a9fa7e0;0x8b3063ff;0xcb1003a9;
+    0x398001e0;0x798005e1;0xb98005e2;0xf94007e3;0x390001e0;0x790005e1;
+    0xb90005e2;0xf90007e3;0x9ac10802;0x9ac10c02;0xa9bf7bfd;0x910003fd;
+    0x910003bf;0xa8c17bfd;0xd63f0220;0xd4000001;0xd65f03c0]in
+  let bytes=M.encode m ~code_address:0L ~rodata_address:0L ~data_address:0L in
+  List.iteri(fun i n->expect(word bytes(i*4)=n)("encoding mismatch at "^string_of_int i))expected;
+  expect(M.branch_bits(-134217728)=0x2000000)"negative branch boundary";
+  expect(M.branch_bits 134217724=0x1ffffff)"positive branch boundary";
+  List.iter(fun n->expect(rejects(fun()->ignore(M.branch_bits n)))"unchecked branch overflow")
+    [-134217732;134217728;2];
+  expect(rejects(fun()->M.load m 0 1 32768))"unchecked memory offset";
+  let m=M.create()in M.label m "back";M.branch m "forward";M.branch m ~link:true "back";
+  M.label m "forward";M.cond m 0 "back";
+  let data=M.constant m "data"in M.address m 7 data;
+  let bytes=M.encode m ~code_address:0x410000L ~rodata_address:0x420000L ~data_address:0x430000L in
+  expect(word bytes 0=0x14000002 && word bytes 4=0x97ffffff)"branch relocation";
+  expect(word bytes 8=0x54000041 && word bytes 12=0x17fffffd)"long conditional branch";
+  expect(word bytes 16=0xd2800007 && word bytes 20=0xf2a00847)"address relocation";
+  M.branch m "missing";
+  expect(rejects(fun()->ignore(M.encode m ~code_address:0L ~rodata_address:0L ~data_address:0L)))"undefined label";
+  print_endline "ARM64 encodings, relocations and range checks passed"

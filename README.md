@@ -137,3 +137,5 @@ retain their own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
 The Xen logo and icons are **AI-generated artwork**, supplied by vmintf(minsung).
 Their [provenance, attribution and CC BY 4.0 terms](assets/branding/README.md)
 are separate from the code licenses.
+
+Compiler internals and the ARM64 extension path: [compiler architecture](compiler/README.md).
