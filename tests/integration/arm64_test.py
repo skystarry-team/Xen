@@ -142,6 +142,35 @@ fn main(){let a=choose(true);let b=a;println(a);println(b);println(choose(false)
  println(""=="");println("a"=="aa");print("embedded\0nul");println("");}
 ''', "literal\nliteral\nhello\n2\n6\ntrue\ntrue\ntrue\nfalse\nembedded\0nul\n", args=("hello", "한글"))
 
+    def test_recursive_function_field_types_and_label_names(self):
+        self.differential('''
+struct Callback { invoke: fn(Callback)->I64 }
+fn answer(value:Callback)->I64{return 7;}
+fn main_block_0()->I64{return 42;}
+fn main(){let value=Callback{invoke:answer};let call=value.invoke;
+ println(call(value));println(main_block_0());}
+''', "7\n42\n")
+
+    def test_string_cleanup_reference_replacement_and_exchange(self):
+        self.differential('''
+use std.mem;
+#global[explc]
+enum Label { Empty, Text(String) }
+fn read(value:&Label)->String{
+ return match *value{Label.Empty=>"empty",Label.Text(text)=>text};
+}
+fn main(){
+ let mut pair:(I64,String)=(1,"original");
+ {let r=&mut pair;*r=*r;r.0=7;println(r.1);}
+ println(pair.0);println(pair.1);
+ let mut label:Label=Label.Text("first");println(read(&label));
+ {let r=&mut label;*r=Label.Empty;}println(read(&label));
+ {let r=&mut label;*r=Label.Text("last");}println(read(&label));
+ let mut text="old";let previous=std.mem.replace(&mut text,"new");
+ println(previous);println(text);
+}
+''', "original\n7\noriginal\nfirst\nempty\nlast\nold\nnew\n")
+
     def test_large_frame_and_backward_branches(self):
         declarations = "".join(f"let v{i}:I64={i};" for i in range(600))
         expression = "+".join(f"v{i}" for i in range(600))

@@ -21,7 +21,9 @@ no C compiler, assembler, linker or libc. The compiler is written in OCaml;
 the standard library is written in Xen.
 
 **This is an early demo.** Syntax, APIs and diagnostics may change. Linux x86-64
-is the only supported host and target. [Scalar scope JIT](docs/en/jit.md) is
+is the default target with full current feature coverage. An initial
+[Linux ARM64 backend](compiler/cpu/arm64/README.md) supports the core language
+with `--target=aarch64-linux --jit=off`. [Scalar scope JIT](docs/en/jit.md) is
 experimental, and its current measurements do not establish a speedup over AOT.
 
 ## A small example
@@ -138,4 +140,4 @@ The Xen logo and icons are **AI-generated artwork**, supplied by vmintf(minsung)
 Their [provenance, attribution and CC BY 4.0 terms](assets/branding/README.md)
 are separate from the code licenses.
 
-Compiler internals and the ARM64 extension path: [compiler architecture](compiler/README.md).
+Compiler internals and target boundaries: [compiler architecture](compiler/README.md).

@@ -60,6 +60,7 @@ help:
 	@printf '%s\n' \
 	  'make build    Build the Xen compiler executable.' \
 	  'make test     Run regression and property tests.' \
+	  'make test-arm64  Verify ARM64 with a native host or qemu-aarch64.' \
 	  'make quickcheck  Run Python property tests only.' \
 	  'make semantic-test  Run Semantic IR generative/metamorphic properties.' \
 	  'make package  Create a Linux x86-64 distribution archive.' \

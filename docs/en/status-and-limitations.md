@@ -1,7 +1,11 @@
 # Supported features and limitations
 
-This page describes the current demo's implemented behavior. The target is
-Linux x86-64 static non-PIE ELF.
+This page describes the current demo's full feature set on the default
+Linux x86-64 static non-PIE ELF target. The initial Linux ARM64 backend supports
+an integer/Bool, control-flow, function, reference, aggregate and immutable-string
+subset with `--target=aarch64-linux --jit=off`. Floating point, heap producers,
+collections, files, raw syscalls and JIT are not yet supported on ARM64; see its
+[support matrix](../../compiler/cpu/arm64/README.md).
 
 ## Supported
 
@@ -46,7 +50,7 @@ Linux x86-64 static non-PIE ELF.
 
 - Generic function inference from expected return types or function bodies, partial
   type arguments, common type search, or implicit numeric conversions.
-- Other operating systems or architectures, dynamic linking, FFI,
+- Targets other than Linux x86-64 and the initial Linux ARM64 subset; dynamic linking, FFI,
   GPU execution, exceptions, or asynchronous I/O.
 - Pointer arithmetic, address-to-pointer conversion, or arbitrary address
   dereferencing.

@@ -19,6 +19,10 @@ positive
 
 ## Programs
 
+`arm64_core.xen` demonstrates the initial ARM64 subset. Build it with
+`compiler/dist/xen build examples/arm64_core.xen --target=aarch64-linux --jit=off -o app`,
+then execute it on Linux ARM64 or with `qemu-aarch64 ./app hello`.
+
 | File | Topic |
 | --- | --- |
 | `demo.xen` | README example: split a byte string and print each word |

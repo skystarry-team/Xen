@@ -15,12 +15,17 @@ type env = {
 let layout program name = List.find(fun(l:struct_layout)->l.name=name)program.layouts
 let size program = function
   |Named name->(layout program name).size|typ->(T.describe typ).size
-let rec validate_type program span = function
-  |I8|U8|I16|U16|I32|U32|I64|U64|Bool|Unit|String->()
-  |Ref(_,t)->validate_type program span t
-  |Function(args,result)->List.iter(validate_type program span)(result::args)
-  |Named n->List.iter(fun(f:struct_field)->validate_type program span f.typ)(layout program n).fields
-  |typ->unsupported ~span ("type "^string_of_typ typ^" is not implemented in the initial ARM64 backend")
+let validate_type program span typ =
+  (* Function signatures can refer back to their containing aggregate without
+     introducing a recursive value layout. Visit each named type once per path. *)
+  let rec visit seen = function
+    |I8|U8|I16|U16|I32|U32|I64|U64|Bool|Unit|String->()
+    |Ref(_,t)->visit seen t
+    |Function(args,result)->List.iter(visit seen)(result::args)
+    |Named n when List.mem n seen->()
+    |Named n->List.iter(fun(f:struct_field)->visit(n::seen)f.typ)(layout program n).fields
+    |typ->unsupported ~span ("type "^string_of_typ typ^" is not implemented in the initial ARM64 backend")
+  in visit [] typ
 
 let address e reg id = M.offset e.m reg 29 (-e.slots.(id))
 let load e reg (v:value) =
@@ -229,7 +234,7 @@ let emit_function m program (func:func) =
   M.offset m 31 31 (-frame);M.offset m 15 29 (-8);M.store m 8 15 0;
   List.iteri(fun reg id->M.mov m 10 reg;address e 9 id;copy m(size program func.locals.(id).typ))func.params;
   depth_enter e func.span;
-  let block_label id=Printf.sprintf "fn_%s_block_%d" func.name id in
+  let block_label id=Printf.sprintf "block_%d_%d" func.id id in
   M.branch m (block_label func.entry);
   Array.iter(fun(b:block)->M.label m (block_label b.id);
     List.iter(operation e)b.operations;
