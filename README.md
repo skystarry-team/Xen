@@ -45,11 +45,10 @@ separate lines.
 
 ## Try the demo
 
-Build from source with OCaml and Dune 3.18 or later. The demo was verified
-with OCaml 5.5.0. From the repository root:
+Install or build Xen using the [compiler build guide](docs/compiler-build/en/build.md).
+For a source build, run from the repository root:
 
 ```sh
-make build
 compiler/dist/xen version
 compiler/dist/xen check examples/demo.xen
 compiler/dist/xen run examples/demo.xen
@@ -58,7 +57,7 @@ compiler/dist/xen build examples/demo.xen -o /tmp/xen-demo
 compiler/dist/xen test std.string
 ```
 
-Linux ARM64 source builds use the same OCaml/Dune commands. The CLI defaults to
+The CLI defaults to
 the compiler's build architecture; ARM64 defaults to JIT off and x86-64 to on.
 Use explicit `--target` for cross compilation. ARM64 supports the core language
 and collections, managed `File` operations, `read_text`, raw POD memory/syscalls
@@ -67,50 +66,19 @@ numeric file readers. ARM64 JIT is unsupported. macOS on Intel and Apple Silicon
 is unsupported and has no planned support. CPU encoders and the internal Mach-O
 prototype are retained; see the
 [platform contract](compiler/platform/README.md). See the
-[ARM64 build and validation guide](compiler/cpu/arm64/README.md).
+[ARM64 support guide](compiler/cpu/arm64/README.md).
 
 `check` validates types, ownership and borrows; `build` writes an executable;
 `run` builds and executes it; `test` runs native `test fn` functions. See the
 [CLI reference](docs/en/cli.md) and [getting started](docs/en/getting-started.md).
 `xen version` (or `xen --version`) prints the embedded compiler version.
 
-To prepare relocatable Linux x86_64 and AArch64 compiler archives, configure the
-cross toolchain as described in the [packaging guide](scripts/PACKAGING.md), then:
-
-```sh
-make package VERSION=0.1.0-demo
-make source-package VERSION=0.1.0-demo
-```
-
-Each archive in `dist/` contains `bin/xen`, `stdlib/`, examples, documentation,
-branding and license notices. Keep its directory structure intact when moving
+Binary distributions contain `bin/xen`, `stdlib/`, learning examples and license
+notices. Keep the directory structure intact when moving
 it so Xen can discover the adjacent standard library.
-Archives are named `xen-<version>-linux-<architecture>.tar.gz`. Linux is the
-currently supported compiler platform; architecture (`x86_64` or `aarch64`)
-comes from the bundled compiler ELF, independently of a Xen program's target.
-`make package` builds both architectures by default; a missing cross toolchain
-fails rather than producing only the host package. `PACKAGE_ARCHS=x86_64` or
-`PACKAGE_ARCHS=aarch64` explicitly selects a subset.
-An individual ARM64 context can be packaged with an OCaml cross workspace:
-
-```sh
-make package-one DUNE_WORKSPACE=scripts/dune-workspace.arm64 PACKAGE_CONTEXT=arm64 \
-  PACKAGE_ARCH=aarch64 \
-  PACKAGE_RUNNER='["/usr/bin/qemu-aarch64","-L","/path/to/aarch64-sysroot"]'
-```
-
-First configure the workspace's cross compiler prefix as described in the
-[ARM64 guide](compiler/cpu/arm64/README.md). `PACKAGE_ARCH` rejects a mismatched
-ELF rather than relabeling it. To bundle an existing executable without building,
-set `PACKAGE_BINARY=/path/to/xen`; its embedded version must match `VERSION`.
-`PACKAGE_RUNNER` is a JSON argument array used for the compiler version check.
-Package context builds leave `compiler/dist/xen` untouched, and both architecture
-archives can coexist in `dist/`.
-The verified demo compiler build requires glibc 2.38 or later and uses the
-host's libm; source builds may have different requirements. Generated Xen
-executables do not use these libraries.
-The separate `*-source.tar.gz` includes the public source and tests without
-Git history or local development artifacts.
+Choose `xen-<version>-linux-x86_64.tar.gz` or `xen-<version>-linux-aarch64.tar.gz`
+for the compiler's host CPU. Native builds, OCaml cross toolchains and binary/source
+distribution commands are documented in [compiler builds](docs/compiler-build/README.md).
 
 After extracting it, change into the package directory and run:
 
@@ -145,12 +113,7 @@ and [word counting](examples/word_count.xen). [Korean documentation](docs/ko/REA
 is also available.
 
 Bug reports and small, reproducible improvements are welcome at
-[skystarry-team/Xen](https://github.com/skystarry-team/Xen). Compiler tests require
-Python 3.10 or later and binutils (`objdump`), with no third-party Python packages:
-
-```sh
-make test
-```
+[skystarry-team/Xen](https://github.com/skystarry-team/Xen).
 
 See [contributing](CONTRIBUTING.md) and
 [test layout and replay](https://github.com/skystarry-team/Xen/blob/main/tests/README.md).

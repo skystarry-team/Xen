@@ -191,6 +191,10 @@ class HostTests(unittest.TestCase):
             self.success(self.invoke("build", self.source, f"--opt={opt}", "-o", output, binary=binary))
             self.assertEqual(package.binary_architecture(output), ARCH)
             self.execute_generated(output)
+            example = relocated / "examples/demo.xen"
+            example_output = self.root / ("example-"+opt)
+            self.success(self.invoke("build", example, f"--opt={opt}", "-o", example_output, binary=binary))
+            self.execute_generated(example_output, "Hello\nfrom\nXen\n")
 
     def test_package_rejects_mismatch_and_invalid_runner(self):
         archive = self.root / "must-not-exist.tar.gz"

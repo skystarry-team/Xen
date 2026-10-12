@@ -1,20 +1,13 @@
 # Getting started
 
-Xen generates programs for Linux x86-64 by default, with an initial
-[ARM64 core-language target](../../compiler/cpu/arm64/README.md) available through
-`--target=aarch64-linux --jit=off`. Building the compiler from source
-requires OCaml and Dune 3.18 or later. A generated Xen program does not need a C compiler, assembler,
-linker, or libc.
+Xen generates static Linux ELF programs for x86_64 or AArch64. The default target
+follows the compiler's Linux build architecture. A generated program does not
+need a C compiler, assembler, linker or libc.
 
-From the repository root, build the compiler:
-
-```console
-$ dune build @release
-```
-
-The executable is `compiler/dist/xen`. A distribution archive can be created with
-`make package`; it contains `bin/xen`, the standard library, and documentation. Extract
-the archive and keep its directory structure intact so the compiler can find the
+Compiler installation, source builds and cross toolchains are documented in the
+[compiler build guide](../compiler-build/en/build.md). The source-built executable
+is `compiler/dist/xen`; a binary distribution provides `bin/xen`, the standard
+library and learning examples. Extract the archive and keep its directory structure intact so the compiler can find the
 adjacent standard library. Use `<package>/bin/xen`, or put that `bin` directory on
 `PATH`. If Xen is already on `PATH`, use `xen` in the commands below.
 

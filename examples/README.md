@@ -5,16 +5,16 @@ iteration and HashMap<Box<String>>. Run with `--target=aarch64-linux` on a
 compatible host, or build and execute explicitly under QEMU.
 
 The canonical learning examples and their expected output are embedded in the
-[English documentation](../docs/en/README.md). The `.xen` files in this directory are
+[English documentation](https://github.com/skystarry-team/Xen/blob/main/docs/en/README.md). The `.xen` files in this directory are
 additional runnable smoke and regression examples; documentation does not rely on
 these files for its source code.
 
-Build Xen from the repository root, then check and run a small example:
+Use `bin/xen` from a binary distribution or `compiler/dist/xen` from a source build.
+Place the executable's directory on `PATH` to use `xen` in these commands:
 
 ```console
-$ dune build @release
-$ compiler/dist/xen check examples/basics.xen
-$ compiler/dist/xen run examples/basics.xen
+$ xen check examples/basics.xen
+$ xen run examples/basics.xen
 120
 2.5
 7
@@ -24,7 +24,7 @@ positive
 ## Programs
 
 `arm64_core.xen` demonstrates the initial ARM64 subset. Build it with
-`compiler/dist/xen build examples/arm64_core.xen --target=aarch64-linux --jit=off -o app`,
+`xen build examples/arm64_core.xen --target=aarch64-linux --jit=off -o app`,
 then execute it on Linux ARM64 or with `qemu-aarch64 ./app hello`.
 `arm64_float.xen` demonstrates scalar F32/F64 operations, checked conversions,
 aggregate returns and decimal output with the same build flags.
@@ -57,7 +57,7 @@ on Linux x86-64 and ARM64.
 
 File examples may create or overwrite their destination. Pass a disposable path to
 `file_lifecycle.xen`, `copy_file.xen`, and other writing examples. Programs that read a
-file accept its path after `--`, as described in the [CLI reference](../docs/en/cli.md).
+file accept its path after `--`, as described in the [CLI reference](https://github.com/skystarry-team/Xen/blob/main/docs/en/cli.md).
 
 `key_values.xen` reads stdin without arguments or a file with one path argument. It
 ignores blank LF-separated lines, accepts empty values, and preserves whitespace,
@@ -75,7 +75,7 @@ expected, and they are not `run` targets. Each file includes a comment naming th
 intended diagnostic.
 
 For complete, stable error examples with their output, use the [diagnostics
-guide](../docs/en/diagnostics.md).
+guide](https://github.com/skystarry-team/Xen/blob/main/docs/en/diagnostics.md).
 
 `jit_regions.xen` demonstrates the experimental scalar runtime JIT: the first
 call compiles a region, and later calls reuse it with different arguments.

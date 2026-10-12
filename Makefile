@@ -80,6 +80,7 @@ help:
 	  'Override VERSION to choose the package version, for example:' \
 	  '  make package VERSION=0.1.0' \
 	  'Configure cross prefixes and runners in .package-toolchains.json.' \
+	  'See docs/compiler-build/README.md for compiler and toolchain setup.' \
 	  'PACKAGE_TOOLCHAINS selects another configuration file.' \
 	  'PACKAGE_ARCHS selects a subset; default: x86_64 aarch64.' \
 	  'For package-one, select DUNE_WORKSPACE and PACKAGE_CONTEXT as needed.' \

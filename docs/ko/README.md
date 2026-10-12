@@ -10,7 +10,10 @@
 이 문서는 현재 `main` 브랜치에 구현된 기능을 기준으로 한다. 계획 중인 문법은
 별도로 표시하며, 아직 구현되지 않은 기능을 언어 사양처럼 설명하지 않는다.
 
-- [시작하기](getting-started.md): 빌드, 검사, ELF 생성과 실행
+- [시작하기](getting-started.md): 컴파일러 사용, 검사, ELF 생성과 실행
+- [컴파일러 빌드](../compiler-build/ko/build.md): 설치와 네이티브 소스 빌드
+- [AArch64 크로스 툴체인](../compiler-build/ko/aarch64.md): OCaml 소스 빌드와 Dune 연결
+- [컴파일러 패키징](../compiler-build/ko/packaging.md): 바이너리·소스 배포
 - [언어 가이드](language-guide.md): 기능별 문서의 시작점과 빠른 참고
 - [기본 문법과 타입](language-basics.md): 변수, 숫자, 함수, 제어 흐름과 기본 builtin
 - [String과 Vec](strings-and-vectors.md): byte string, Vec API와 파일 읽기 builtin

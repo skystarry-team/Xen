@@ -98,13 +98,13 @@ levels and generated-program execution. Invalid runner JSON, architecture
 mismatch, unsupported platform, version mismatch and runner failure must not
 create an archive. To test context builds too, use the cross-workspace
 `make package-one ... PACKAGE_CONTEXT=arm64 PACKAGE_ARCH=aarch64` command in the
-ARM64 guide; the normal `make package` builds both Linux compiler architectures.
+[packaging guide](../docs/compiler-build/en/packaging.md); the normal `make package` builds both Linux compiler architectures.
 Set `XEN_HOST_ARCHIVE` to that context-built archive to verify its actual contents
 and relocated execution in the same host tests.
 The platform host test uses the extracted compiler to build and execute stdlib I/O,
 metadata/directory/cwd/process calls for both CPU targets, independently of the
 compiler's own architecture.
-See [ARM64 compiler validation](../compiler/cpu/arm64/README.md).
+See [AArch64 compiler builds and validation](../docs/compiler-build/en/aarch64.md).
 
 `python3 scripts/test.py --suite macos-prototype` validates the internal Mach-O writer for both CPUs,
 independent SHA-256 page signatures and ARM64 PIE relocations. It also generates

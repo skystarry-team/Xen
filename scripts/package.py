@@ -12,12 +12,10 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ("README.md", "CONTRIBUTING.md", "LICENSE", "LICENSE-MIT",
-         "LICENSE-APACHE", "NOTICE", "THIRD_PARTY.md", "VERSION")
+NOTICE_FILES = ("LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "THIRD_PARTY.md", "VERSION")
+FILES = ("README.md", "CONTRIBUTING.md", *NOTICE_FILES)
 DIRECTORIES = ("docs", "examples", "stdlib", "assets", "licenses")
-COMPILER_DOCS = ("compiler/README.md", "compiler/cpu/arm64/README.md", "compiler/platform/README.md",
-                 "compiler/platform/darwin/MACOS_VALIDATION.md", "scripts/PACKAGING.md",
-                 "scripts/package-toolchains.example.json")
+BINARY_DIRECTORIES = ("stdlib", "examples", "licenses")
 SOURCE_FILES = ("Makefile", "dune-project", ".gitignore")
 SOURCE_DIRECTORIES = ("compiler", "tests", "benchmarks", "scripts")
 EXCLUDED = {"__pycache__", "found_bugs", "dist"}
@@ -72,17 +70,19 @@ def package(name: str | None, output: Path | None, *, source: bool = False,
         raise ValueError("package name must contain only letters, digits, '.', '_', '+' and '-'")
     if output is None:
         output = (output_dir if output_dir is not None else ROOT / "dist") / f"{name}.tar.gz"
-    entries = [] if source else [(binary, "bin/xen")]
-    entries += [(ROOT / file, file) for file in FILES]
     if source:
-        entries += [(ROOT / file, file) for file in SOURCE_FILES]
+        entries = [(ROOT / file, file) for file in FILES + SOURCE_FILES]
+        directories = DIRECTORIES + SOURCE_DIRECTORIES
     else:
-        entries += [(ROOT / file, file) for file in COMPILER_DOCS]
-    directories = DIRECTORIES + (SOURCE_DIRECTORIES if source else ())
+        entries = [(binary, "bin/xen"),
+                   (ROOT / "docs/compiler-build/distribution-readme.md", "README.md")]
+        entries += [(ROOT / file, file) for file in NOTICE_FILES]
+        directories = BINARY_DIRECTORIES
     for directory in directories:
         entries += [(path, path.relative_to(ROOT).as_posix())
                     for path in sorted((ROOT / directory).rglob("*"))
                     if path.is_file() and not path.is_symlink()
+                    and (source or directory != "stdlib" or path.suffix == ".xen")
                     and not any(part.startswith(".") or part in EXCLUDED
                                 for part in path.relative_to(ROOT).parts)]
     output.parent.mkdir(parents=True, exist_ok=True)
