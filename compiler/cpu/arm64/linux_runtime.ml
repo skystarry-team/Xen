@@ -39,4 +39,5 @@ let emit m =
   M.load m 30 31 32;M.offset m 31 31 48;M.ret m;
   Float_runtime.emit m;
   Heap_runtime.emit m ~fail;
-  Collection_runtime.emit m ~fail
+  Collection_runtime.emit m ~fail;
+  File_runtime.emit m

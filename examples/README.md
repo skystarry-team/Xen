@@ -30,6 +30,10 @@ then execute it on Linux ARM64 or with `qemu-aarch64 ./app hello`.
 aggregate returns and decimal output with the same build flags.
 `arm64_heap.xen` demonstrates heap String production and a recursive Box list,
 including ownership transfer and cleanup, with the same build flags.
+`file_lifecycle.xen` also runs on ARM64: it transfers owned File descriptors,
+writes and reads bytes, and closes them on scope exit. Pass a disposable path;
+the program creates or overwrites it. This uses the managed File runtime rather
+than the platform-dependent std.fs module.
 
 | File | Topic |
 | --- | --- |
@@ -46,6 +50,7 @@ including ownership transfer and cleanup, with the same build flags.
 | `modules/app.xen` | Project imports and qualified names |
 | `sum_file.xen` | Parse and sum decimal integers in a file |
 | `copy_file.xen` | Recoverable binary file copy |
+| `file_lifecycle.xen` | Owned File transfer and lexical cleanup, including ARM64 |
 | `word_count.xen` | ASCII byte tokenization |
 | `key_values.xen` | Byte search, extraction and LF-separated `key=value` input |
 

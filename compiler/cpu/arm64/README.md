@@ -35,12 +35,13 @@ compile errors before an output executable is written.
 | Box<T>, recursive ownership | Yes, move-only allocation, borrowing, `into_inner`, and iterative recursive cleanup |
 | `print`/`println`, `assert`/`assert_msg`, `panic` | Yes, for supported types |
 | `--opt=off` / `--opt=basic` | Both |
-| Vec<T> | Supported elements: scalars, Unit, String, supported aggregates, Box and nested Vec; construction, growth, get/index, set, pop, swap, replace, deep clone, equality and cleanup |
+| Vec<T> | Supported elements: scalars, Unit, String, File, supported aggregates, Box and nested Vec; construction, growth, get/index for cloneable elements, set, pop, swap, replace, deep clone, equality and cleanup |
 | Slice<T>, String.as_bytes() | Read-only views with checked bounds and existing frontend borrow/escape rules; element references and field projections |
 | Numeric collections, byte conversion | `zeros`, `repeat`, Vec<I64/F64> output and Vec<U8>.into_string() |
 | std.string, std.iter, std.hashmap | Collection paths supported; Ptr iteration and platform-dependent imports remain unsupported |
 | JIT and JIT reports | Rejected when explicitly requested |
-| Ptr, raw memory, files, `read_text` | Rejected |
+| File, `read_text` | Owned move-only fd; open_read/open_write, read/write/close/is_open, aggregate transfer and recursive cleanup |
+| Ptr, raw memory, `read_ints`, `read_floats` | Rejected |
 | User raw syscalls, platform-dependent stdlib | Rejected; existing x86 syscall numbers are never emitted as ARM64 calls |
 
 The compiler generates every function retained in checked IR, so unsupported code
@@ -123,7 +124,7 @@ and inactive defaults; it does not interpret overlapping union storage.
 `heap_runtime.ml` emits Linux AArch64 `mmap`/`munmap` services with RW,
 private anonymous mappings. Size arithmetic and negative syscall errors are
 checked before pointers are used. Allocation failure is fatal and exits without
-unwinding, as in the existing runtime. Ptr, raw access and files remain rejected
+unwinding, as in the existing runtime. Ptr and raw access remain rejected
 until their own lifetime and platform contracts are implemented.
 
 ## Collections
@@ -154,6 +155,46 @@ source's headers are never modified. Thus recursive `Node -> Vec<Node>` clones
 and alternating Box/Vec drops do not consume a call frame per node. Helper
 definitions are registered before traversing child types. Equality handles
 scalar, String and nested-Vec elements, including NaN and signed-zero semantics.
+
+## Files
+
+`File` is the shared 8-byte, move-only descriptor. Every nonnegative fd, including
+zero, is active; moved or closed storage contains `-1`. File leaves participate
+in local drop flags, partial moves, aggregate reinitialization and iterative
+Box/Vec cleanup. They are never cloned. `close()` first invalidates the cell,
+then closes it once; closing an inactive File is a no-op. Explicit close reports
+errors, while lexical drop ignores close errors as on x86-64.
+
+`open_read` uses O_RDONLY; `open_write` creates/truncates with the existing
+O_WRONLY|O_CREAT|O_TRUNC flags and mode 0644, subject to umask. Paths are checked
+for embedded NUL before making a temporary terminated copy. That mapping is
+released on successful or failed open. `file_runtime.ml` uses Linux AArch64
+openat/read/write/close, retrying interrupted open/read/write and tracking partial
+progress. A nonempty write that makes no progress reports failure. Close is never
+retried, following Linux's [close error contract](https://raw.githubusercontent.com/mkerrisk/man-pages/master/man2/close.2).
+
+`File.read()` reads from the current offset through EOF and leaves the fd open.
+It handles regular files, proc files and FIFO streams without relying on fstat
+or seek. A geometric temporary buffer starts at 4096 bytes; size doubling and
+allocation errors are checked. The final String owns exactly its byte length
+with marker 1, or has a zero descriptor when empty. Temporary capacity is never
+stored in the String marker. All bytes, including NUL and non-UTF-8 data, survive
+read/write, cloning and return. `read_text(path)` shares this reader and always
+closes its own fd, including read/allocation failures. A read error takes priority
+over a simultaneous close error; close failure after a successful read releases
+the result before reporting the source-located diagnostic. Fatal diagnostics do
+not unwind unrelated user resources, matching the other runtime operations.
+
+```sh
+compiler/dist/xen build examples/file_lifecycle.xen --target=aarch64-linux -o /tmp/xen-file
+qemu-aarch64 /tmp/xen-file /tmp/xen-disposable-file
+```
+
+This example creates or overwrites the supplied path. Managed File support does
+not make `std.io`/`std.fs`/`std.env`/`std.process` portable: those modules still
+contain x86-specific raw syscalls, Ptr operations and kernel record layouts.
+`read_ints` and `read_floats` need their own checked token parsers and remain
+source-located compile errors in this stage.
 
 ## Running the compiler on ARM64
 
@@ -240,7 +281,7 @@ the [Linux generic syscall table](https://github.com/torvalds/linux/blob/master/
 
 ## Next stages
 
-Add file operations with differential execution tests. Full stdlib
+Add checked numeric file token parsing for `read_ints` and `read_floats`. Full stdlib
 support needs explicit platform services or target-selected module implementations,
 including ARM64 syscall numbers and kernel structures. Keep user raw syscall
 numbers raw; do not silently translate them. The future OS boundary is documented
@@ -257,6 +298,12 @@ cleanup. With QEMU, a guest syscall ledger matches every successful allocation's
 address and length to exactly one unmap, a 64KiB stack tests 20,000-node cleanup,
 10,000-level recursive Vec cloning and mixed Box/Vec cleanup, and a bounded
 guest address space verifies actual allocation failures.
+File tests cover binary bytes, exact/growing read buffers, repeated EOF, proc/FIFO
+reads, explicit close errors and closed-use diagnostics. A guest open/close ledger
+tracks fd reuse alongside mmap/munmap extents; tests also use fd 0, a low descriptor
+limit, mixed File/Box/Vec cleanup and allocation failure before read_text returns.
+A bounded fixture leaves one free guest page, proving EOF precedes final String
+allocation failure and that its temporary mapping and owned fd are then released.
 
 Implement ARM64 JIT encoding, relocation, executable permissions and instruction
 cache synchronization as a separate stage. Keep explicit JIT rejection until then.

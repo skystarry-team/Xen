@@ -1,6 +1,6 @@
 # Contributing to the demo
 
-Xen is an early demo for Linux x86-64 and an ARM64 core/collection subset. Reproducible bug reports, documentation
+Xen is an early demo for Linux x86-64 and an ARM64 core/collection/File subset. Reproducible bug reports, documentation
 corrections and small changes with a concrete use case are welcome at
 [skystarry-team/Xen](https://github.com/skystarry-team/Xen).
 

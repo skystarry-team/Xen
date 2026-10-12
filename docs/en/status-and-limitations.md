@@ -4,9 +4,9 @@ This page describes the current demo's full feature set on the
 Linux x86-64 static non-PIE ELF target. The Linux ARM64 backend supports
 an integer/float/Bool, control-flow, function, reference, aggregate, heap-string
 and recursive Box/Vec ownership with borrowed Slice views, `std.string`, `std.iter`
-and `std.hashmap`. The CLI defaults to the compiler's build architecture on Linux;
+and `std.hashmap`, managed `File` operations and `read_text`. The CLI defaults to the compiler's build architecture on Linux;
 explicit `--target` overrides it. ARM64 JIT defaults to off.
-Ptr, files, raw syscalls and JIT are not yet supported on ARM64; see its
+Ptr, numeric file readers, raw syscalls and JIT are not yet supported on ARM64; see its
 [support matrix](../../compiler/cpu/arm64/README.md).
 
 ## Supported

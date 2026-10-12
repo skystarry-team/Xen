@@ -23,7 +23,7 @@ let validate_type program span typ =
   (* Function signatures can refer back to their containing aggregate without
      introducing a recursive value layout. Visit each named type once per path. *)
   let rec visit seen = function
-    |I8|U8|I16|U16|I32|U32|I64|U64|F32|F64|Bool|Unit|String->()
+    |I8|U8|I16|U16|I32|U32|I64|U64|F32|F64|Bool|Unit|String|File->()
     |Ref(_,t)|Box t|Vec t|Slice t->visit seen t
     |Function(args,result)->List.iter(visit seen)(result::args)
     |Named n when List.mem n seen->()
@@ -79,7 +79,7 @@ let place_address e reg (p:place) =
 let copy_value e (dst:value) (src:value) =
   address e 9 dst.id;address e 10 src.id;copy e.m (size e.program dst.typ)
 let rec owned_leaves program offset = function
-  |(String|Box _|Vec _)as typ->[offset,typ]
+  |(String|Box _|Vec _|File)as typ->[offset,typ]
   |Named n->List.concat_map(fun(f:struct_field)->owned_leaves program (offset+f.offset) f.typ)
       (layout program n).fields
   |_->[]
@@ -101,7 +101,8 @@ let forget e p =
   (* Forget transfers ownership without freeing it. Dereferenced caller storage
      has no flag in this frame; leave its runtime representation inactive too. *)
   List.iter(fun(offset,typ)->place_address e 9 p;M.offset e.m 9 9 offset;
-    List.iter(fun d->M.store e.m 31 9 d)(match typ with String|Vec _->[0;8;16]|_->[0]))
+    if typ=File then (M.imm e.m 10 (-1L);M.store e.m 10 9 0)
+    else List.iter(fun d->M.store e.m 31 9 d)(match typ with String|Vec _->[0;8;16]|_->[0]))
     (owned_leaves e.program 0 p.typ)
 let drop e p =
   List.iter(fun(off,typ)->
@@ -111,6 +112,7 @@ let drop e p =
     place_address e 0 p;M.offset e.m 0 0 off;
     (match typ with
     |String->R.call e.m "runtime_string_drop"
+    |File->R.call e.m "runtime_file_close"
     |Box _->M.address e.m 1 (box_helper e.m e.box_helpers e.box_queue typ);
         R.call e.m "runtime_box_drop"
     |Vec t->M.address e.m 1 (box_helper e.m e.box_helpers e.box_queue typ);
@@ -123,7 +125,7 @@ let clone_value e (v:value) =
     |String->R.call e.m "runtime_string_clone"
     |Vec t->M.address e.m 1 (box_helper ~kind:"clone" e.m e.box_helpers e.box_queue typ);
         M.int e.m 2 (stride e.program t);R.call e.m "runtime_vec_clone"
-    |_->unsupported ~span:v.span "move-only Box cannot be cloned")
+    |_->unsupported ~span:v.span ("move-only "^string_of_typ typ^" cannot be cloned"))
     (owned_leaves e.program 0 v.typ)
 let depth_enter e span =
   let error=runtime_error e span "maximum call depth exceeded" in
@@ -300,6 +302,19 @@ let call e (v:value) name args =
   |"float",[a]->conversion e v a
   |"int",[a]->conversion e ~message:"Float cannot be converted to Int" v a
   |"int_to_str",[a]->load e 0 a;address e 1 v.id;R.call m "runtime_int_to_string"
+  |("open_read"|"open_write"),[path]->
+      let nul=runtime_error e v.span "file path contains an embedded NUL"
+      and failed=runtime_error e v.span "file open failed" in
+      address e 0 path.id;M.int m 1 (if name="open_read" then 0 else 577);
+      R.call m "runtime_file_open";M.int m 9 1;M.cmp m 1 9;M.cond m 0 nul;
+      M.cmp_zero m 1;M.cond m 1 failed;store e v 0
+  |"read_text",[path]->
+      let errors=List.map(fun(code,message)->code,runtime_error e v.span message)
+        [1,"file path contains an embedded NUL";2,"file open failed";
+         3,"file read failed";4,"file close failed";7,"string is too large";
+         8,"string allocation failed"] in
+      address e 0 v.id;address e 1 path.id;R.call m "runtime_read_text";
+      List.iter(fun(code,label)->M.int m 9 code;M.cmp m 0 9;M.cond m 0 label)errors
   |"$inactive_pair",[]->address e 9 v.id;M.store m 31 9 0;M.store m 31 9 8
   |"$vec_into_string",[a]->address e 0 v.id;address e 1 a.id;R.call m "runtime_vec_into_string"
   |("zeros"|"repeat"),args->
@@ -334,6 +349,21 @@ let rvalue e (v:value) node =
   |Unary("!",a)->load e 0 a;M.cmp_zero m 0;M.cset m 0 0;store e v 0
   |Binary(op,a,b)->binary e v op a b
   |Call(name,args)->call e v name args
+  |File_is_open target->load e 0 target;M.load m 0 0 0;
+      M.cmp_zero m 0;M.cset m 0 10;store e v 0
+  |File_close target->
+      let error=runtime_error e v.span "file close failed" in
+      load e 0 target;R.call m "runtime_file_close";M.cmp_zero m 0;M.cond m 11 error
+  |File_read target->
+      let closed=runtime_error e v.span "File is closed"
+      and failed=runtime_error e v.span "file read failed" in
+      load e 1 target;M.load m 1 1 0;M.cmp_zero m 1;M.cond m 11 closed;
+      address e 0 v.id;R.call m "runtime_file_read";M.cmp_zero m 0;M.cond m 1 failed
+  |File_write(target,a)->
+      let closed=runtime_error e v.span "File is closed"
+      and failed=runtime_error e v.span "file write failed" in
+      load e 0 target;M.load m 0 0 0;M.cmp_zero m 0;M.cond m 11 closed;
+      string_parts e 1 2 a;R.call m "runtime_file_write";M.cmp_zero m 0;M.cond m 11 failed
   |Function_address name->M.address m 0 ("fn_"^name);store e v 0
   |Indirect_call(callee,args)->
       List.iteri(fun reg(a:value)->address e reg a.id)args;
@@ -465,12 +495,13 @@ let emit_owned_helper m program helpers pending kind typ =
   List.iter(fun(off,leaf)->M.load m 0 31 16;M.offset m 0 0 off;
     match leaf with
     |String->R.call m (if kind="drop" then "runtime_string_drop" else "runtime_string_clone")
+    |File when kind="drop"->R.call m "runtime_file_close"
     |Box _ when kind="drop"->M.load m 1 31 8;
         M.address m 2 (box_helper m helpers pending leaf);R.call m "runtime_box_enqueue"
     |Vec t->M.load m 1 31 8;M.address m 2 (box_helper ~kind m helpers pending leaf);
         M.int m 3 (stride program t);
         R.call m (if kind="drop" then "runtime_vec_enqueue" else "runtime_vec_clone_enqueue")
-    |_->unsupported "move-only Box cannot be cloned")
+    |_->unsupported ("move-only "^string_of_typ leaf^" cannot be cloned"))
     (List.rev(owned_leaves program 0 element));
   M.load m 2 31 16;M.offset m 2 2 (stride program element);M.store m 2 31 16;
   M.load m 3 31 24;M.offset m 3 3 (-1);M.store m 3 31 24;M.branch m loop;

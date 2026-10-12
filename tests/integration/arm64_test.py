@@ -15,6 +15,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import threading
 import unittest
 
 REPO = Path(__file__).resolve().parents[2]
@@ -401,6 +402,7 @@ fn main(){
         if reserve:
             options.extend(("-R", str(reserve)))
         for opt in ("off", "basic"):
+            trace = None
             with self.subTest(opt=opt):
                 compiled, output = self.compile(source, opt=opt)
                 self.assertEqual(compiled.returncode, 0, compiled.stderr)
@@ -408,7 +410,9 @@ fn main(){
                                         text=True, timeout=30)
                 self.assertEqual(actual.returncode, status, actual.stderr[-4000:])
                 self.assertEqual(actual.stdout, expected)
-                yield actual.stderr
+                trace = actual.stderr
+            if trace is not None:
+                yield trace
 
     def test_collection_storage_operations_and_byte_views(self):
         self.differential('''
@@ -541,12 +545,14 @@ fn main(){
             self.assertEqual(built.returncode, 1, built.stderr)
             self.assertIn('JIT is not implemented', built.stderr)
 
-    def assert_balanced_heap(self, trace):
+    def assert_balanced_heap(self, trace, *, allow_failed=False):
         # Track addresses AND requested lengths. Counts alone hide double frees,
         # address reuse, leaked siblings, and wrong base/length for hidden headers.
         live, allocations = {}, 0
         for line in trace.splitlines():
             if " mmap(" in line:
+                if allow_failed and re.search(r"\) = -1 errno=12", line):
+                    continue
                 match = re.search(r"mmap\(NULL,(\d+),.*\) = (0x[0-9a-f]+)", line)
                 self.assertIsNotNone(match, line)
                 length, address = int(match[1]), int(match[2], 16)
@@ -737,6 +743,256 @@ fn main(){let mut list=List.Empty;let mut n=0;
                     self.assertEqual(result.returncode, 1, result.stderr)
                     self.assertIn("cannot execute target 'aarch64-linux' on this host", result.stderr)
 
+    def assert_balanced_files(self, trace):
+        live, opens = set(), 0
+        for line in trace.splitlines():
+            if " openat(" in line:
+                match = re.search(r"openat\(.*\) = (\d+)$", line)
+                if match:
+                    fd = int(match[1])
+                    self.assertNotIn(fd, live, "an active fd was overwritten")
+                    live.add(fd)
+                    opens += 1
+            elif " close(" in line:
+                match = re.search(r"close\((\d+)\) = 0$", line)
+                self.assertIsNotNone(match, line)
+                fd = int(match[1])
+                self.assertIn(fd, live, "closed unknown/already closed fd")
+                live.remove(fd)
+        self.assertEqual(live, set(), "owned file descriptors survive cleanup")
+        return opens
+
+    def test_file_creation_transfer_offsets_and_close(self):
+        source = '''
+#global[explc]
+fn relay<T>(v:T)->T{return v;}
+fn inspect(f:&File)->Bool{return f.is_open();}
+fn finish(f:&mut File){f.write("llo");f.close();f.close();}
+fn main(){
+ let mut out=open_write(arg(0));println(inspect(&out));out.write("hé");finish(&mut out);
+ println(out.is_open());let input=open_read(arg(0));let mut moved=relay(input);
+ println(moved.read());println(len(moved.read()));moved.close();moved.close();
+ {let mut overwrite=open_write(arg(0));overwrite.write("short");}
+ println(read_text(arg(0)));let mut file=open_read(arg(0));let view=file.read();
+ let saved=view;file.close();println(saved);println(view);
+}'''
+        path = self.root / "hé-file.dat"
+        self.differential(source, "true\nfalse\nhéllo\n0\nshort\nshort\nshort\n", args=(path,))
+        self.assertEqual(path.read_bytes(), b"short")
+        if QEMU:
+            for opt in ("off", "basic"):
+                built, output = self.compile(source, opt=opt)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                actual = subprocess.run([QEMU, "-strace", str(output), str(path)],
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(actual.returncode, 0, actual.stderr)
+                self.assertEqual(self.assert_balanced_files(actual.stderr), 5)
+                self.assertGreater(self.assert_balanced_heap(actual.stderr), 10)
+
+    def test_file_binary_bytes_and_growth_boundaries(self):
+        source = '''fn main(){let mut f=open_read(arg(0));let s=f.read();
+ let mut out=open_write(arg(1));out.write(s);out.close();f.close();
+ let text=read_text(arg(0));print(text);}'''
+        path, copy = self.root / "input.bin", self.root / "copy.bin"
+        for length in (0, 1, 4095, 4096, 4097, 8192, 200000):
+            data = (b"\0\xff\xc3\xa9abc" * ((length+6)//7))[:length]
+            path.write_bytes(data)
+            for opt in ("off", "basic"):
+                with self.subTest(length=length, opt=opt):
+                    built, output = self.compile(source, opt=opt)
+                    self.assertEqual(built.returncode, 0, built.stderr)
+                    actual = subprocess.run([*self.runner(), str(output), str(path), str(copy)],
+                                            capture_output=True, timeout=30)
+                    self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, data, b""))
+                    self.assertEqual(copy.read_bytes(), data)
+                    if QEMU:
+                        actual = subprocess.run([QEMU, "-strace", str(output), str(path), str(copy)],
+                                                capture_output=True, timeout=30)
+                        self.assertEqual((actual.returncode, actual.stdout), (0, data))
+                        trace = actual.stderr.decode()
+                        self.assertEqual(self.assert_balanced_files(trace), 3)
+                        self.assert_balanced_heap(trace)
+                        if length:
+                            self.assertIn(f"mmap(NULL,{length},", trace)
+            if platform.machine() == "x86_64":
+                built, output = self.compile(source, target="x86_64-linux")
+                self.assertEqual(built.returncode, 0, built.stderr)
+                actual = subprocess.run([str(output), str(path), str(copy)], capture_output=True, timeout=30)
+                self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, data, b""))
+                self.assertEqual(copy.read_bytes(), data)
+
+    def test_file_aggregate_and_recursive_cleanup(self):
+        source = '''
+use std.mem;
+#global[explc]
+struct Owner{file:File,label:String}
+struct Pair{left:Owner,right:Owner}
+struct Node{file:File,children:Vec<Box<Node>>}
+enum Event{File(File),Empty}
+fn owner()->Owner{return Owner{file:open_read("/dev/null"),label:"o"+"wned"};}
+fn take(f:File){}
+fn take_left(p:&mut Pair)->File{let f=p.left.file;p.left.file=open_read("/dev/null");return f;}
+fn early()->Int{let a=owner();let b=box(owner());return 7;}
+fn fail()->Result<Int,Int>{let a=owner();let b:Result<Int,Int>=Result.Err(1);return Result.Ok(b?);}
+fn main(){
+ let mut p=Pair{left:owner(),right:owner()};let mut f=take_left(&mut p);println(f.read());
+ let partial=p.right.file;p.right.file=open_read("/dev/null");take(partial);
+ let mut v:Vec<File>=[open_read("/dev/null"),open_read("/dev/null")];v.push(open_read("/dev/null"));
+ v.swap(0,2);v.swap(1,1);v.set(0,open_read("/dev/null"));take(v.replace(1,open_read("/dev/null")));
+ let mut popped=v.pop();popped.close();let moved=v;let wrapped=box(moved);
+ let values:Vec<Owner>=[owner(),owner()];let mut boxed=box(owner());
+ {let slot=boxed.as_mut();slot.file=open_read("/dev/null");}take(boxed.into_inner().file);
+ let e=Event.File(open_read("/dev/null"));match e{Event.File(file)=>take(file),Event.Empty=>()};
+ let empty=Event.Empty;let mut n=0;while n<500{let each=owner();n=n+1;if n%2==0{continue;}if n==499{break;}}
+ println(early());println(match fail(){Result.Err(_)=>0,Result.Ok(n)=>n});
+ let mut root=box(Node{file:open_read("/dev/null"),children:[]});let mut i=0;
+ while i<2000{root=box(Node{file:open_read("/dev/null"),children:[root]});i=i+1;}println(i);
+}'''
+        expected = "\n7\n0\n2000\n"
+        self.differential(source, expected)
+        if QEMU:
+            for trace in self.heap_trace(source, expected, stack=65536):
+                self.assertGreater(self.assert_balanced_files(trace), 2500)
+                self.assertGreater(self.assert_balanced_heap(trace), 4500)
+
+    def test_file_low_descriptor_limit_and_fd_zero(self):
+        source = '''#global[explc]
+struct Holder{file:File}
+fn take(h:&mut Holder)->File{let f=h.file;h.file=open_read("/dev/null");return f;}
+fn main(){let mut h=Holder{file:open_read("/dev/null")};let mut i=0;
+ while i<1000{{let f=take(&mut h);let v:Vec<File>=[open_read("/dev/null"),f];let b=box(v);}i=i+1;}
+ let held=&h.file;println(held.is_open());}'''
+        def limit_fds():
+            resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
+        def close_stdin():
+            os.close(0)
+        for opt in ("off", "basic"):
+            built, output = self.compile(source, opt=opt)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            actual = subprocess.run([*self.runner(), str(output)], capture_output=True, text=True,
+                                    preexec_fn=limit_fds, timeout=30)
+            self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, "true\n", ""))
+            built, output = self.compile('fn main(){let mut f=open_read("/dev/null");'
+                                         'println(f.is_open());f.close();println(f.is_open());}', opt=opt)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            runner = [QEMU, "-strace"] if QEMU else self.runner()
+            actual = subprocess.run([*runner, str(output)], capture_output=True, text=True,
+                                    preexec_fn=close_stdin, timeout=30)
+            self.assertEqual((actual.returncode, actual.stdout), (0, "true\nfalse\n"))
+            if QEMU:
+                self.assertRegex(actual.stderr, r'openat\(.*\) = 0\n')
+                self.assertEqual(self.assert_balanced_files(actual.stderr), 1)
+                self.assert_balanced_heap(actual.stderr)
+
+    def test_file_proc_and_short_fifo_reads(self):
+        self.differential('fn main(){let s=read_text("/proc/self/status");println(len(s)>0);}', "true\n")
+        fifo = self.root / "pipe"
+        os.mkfifo(fifo)
+        chunks = (b"ab", b"\0c", b"d"*5000, b"end")
+        for opt in ("off", "basic"):
+            for builtin in (False, True):
+                source = 'fn main(){'+('let s=read_text(arg(0));' if builtin else
+                                       'let mut f=open_read(arg(0));let s=f.read();f.close();')+'print(s);}'
+                built, output = self.compile(source, opt=opt)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                errors = []
+                def write_chunks():
+                    try:
+                        with fifo.open("wb", buffering=0) as stream:
+                            for chunk in chunks:
+                                stream.write(chunk)
+                    except Exception as error:
+                        errors.append(error)
+                writer = threading.Thread(target=write_chunks, daemon=True)
+                writer.start()
+                actual = subprocess.run([*self.runner(), str(output), str(fifo)], capture_output=True, timeout=30)
+                writer.join(timeout=5)
+                self.assertFalse(writer.is_alive(), "FIFO writer remained blocked")
+                self.assertEqual(errors, [])
+                self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, b"".join(chunks), b""))
+
+    def test_file_errors_and_read_text_failure_cleanup(self):
+        cases = [
+            ('let f=open_read("/definitely/missing/xen-arm64");', "file open failed"),
+            ('let f=open_write("/definitely/missing/xen-arm64/file");', "file open failed"),
+            ('read_text("/definitely/missing/xen-arm64");', "file open failed"),
+            ('let f=open_read("a\0b");', "file path contains an embedded NUL"),
+            ('let f=open_write("a\0b");', "file path contains an embedded NUL"),
+            ('read_text("a\0b");', "file path contains an embedded NUL"),
+            ('let mut f=open_read("/dev/null");f.close();f.read();', "File is closed"),
+            ('let mut f=open_write("/dev/null");f.close();f.write("x");', "File is closed"),
+            ('let mut f=open_read("/dev/null");f.write("x");', "file write failed"),
+            ('let mut f=open_write("/dev/null");f.read();', "file read failed"),
+            ('let mut f=open_write("/dev/full");f.write("x");', "file write failed"),
+            ('let mut f=open_read(".");f.read();', "file read failed"),
+            ('read_text(".");', "file read failed"),
+        ]
+        for body, error in cases:
+            with self.subTest(body=body):
+                self.differential("fn main(){"+body+"}", "", status=1, error=error)
+        if QEMU:
+            for body in ('read_text(".");', 'read_text("/definitely/missing/xen-arm64");', 'read_text("a\0b");'):
+                for trace in self.heap_trace("fn main(){"+body+"}", "", status=1):
+                    self.assert_balanced_files(trace)
+                    self.assert_balanced_heap(trace)
+
+    def test_read_text_allocation_failure_releases_buffer_and_fd(self):
+        if not QEMU:
+            self.skipTest("bounded guest VA requires qemu-aarch64")
+        path = self.root / "large-input"
+        path.write_bytes(b"x" * 20000000)
+        source = 'fn main(){read_text("'+str(path)+'");}'
+        for trace in self.heap_trace(source, "", stack=65536, reserve=33554432, status=1):
+            self.assertRegex(trace, r"mmap\(.*\) = -1 errno=12")
+            self.assertIn("string allocation failed", trace)
+            self.assertEqual(self.assert_balanced_files(trace), 1)
+            self.assertGreater(self.assert_balanced_heap(trace, allow_failed=True), 5)
+
+        # Geometric buffers leave reusable holes, so a VA limit alone cannot
+        # distinguish final allocation from growth. This fixture leaves exactly
+        # one free guest page and reads a short real proc file through EOF.
+        built = subprocess.run(["dune", "build", "tests/arm64_heap_fixture.exe"], cwd=REPO,
+                               capture_output=True, text=True, timeout=30)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        output = self.root / "final-allocation"
+        built = subprocess.run([str(REPO / "_build/default/tests/arm64_heap_fixture.exe"),
+                                 "file_final_allocation_failure", str(output)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        actual = subprocess.run([QEMU, "-strace", "-R", "16777216", "-s", "65536", str(output)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual((actual.returncode, actual.stdout), (0, "file-final-allocation\n"), actual.stderr[-4000:])
+        self.assertRegex(actual.stderr, r"read\(.*\) = 0\n.*mmap\(NULL,6,.*\) = -1 errno=12")
+        self.assertEqual(self.assert_balanced_files(actual.stderr), 1)
+        self.assertGreater(self.assert_balanced_heap(actual.stderr, allow_failed=True), 10)
+
+    def test_file_runtime_size_close_and_invalid_descriptor_contracts(self):
+        self.runner()
+        built = subprocess.run(["dune", "build", "tests/arm64_heap_fixture.exe"], cwd=REPO,
+                               capture_output=True, text=True, timeout=30)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        fixture = REPO / "_build/default/tests/arm64_heap_fixture.exe"
+        for mode, expected in (("file_path_large", "file-size\n"), ("file_path_negative", "file-size\n"),
+                               ("file_close_failure", "file-close\n"), ("file_read_failure", "file-read\n"),
+                               ("file_write_failure", "file-write\n")):
+            output = self.root / mode
+            built = subprocess.run([str(fixture), mode, str(output)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            actual = self.execute(output)
+            self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, expected, ""))
+            if QEMU:
+                traced = subprocess.run([QEMU, "-strace", str(output)], capture_output=True, text=True, timeout=30)
+                self.assertEqual((traced.returncode, traced.stdout), (0, expected))
+                self.assert_balanced_heap(traced.stderr)
+                if mode.startswith("file_path_"):
+                    self.assertNotIn(" mmap(", traced.stderr)
+                    self.assertNotIn(" openat(", traced.stderr)
+                if mode == "file_close_failure":
+                    self.assertEqual(len(re.findall(r" close\(", traced.stderr)), 1)
+                    self.assertIn("errno=9", traced.stderr)
+                if mode == "file_write_failure":
+                    self.assertEqual(len(re.findall(r"write\(-1,", traced.stderr)), 1)
+
     def test_runtime_failures(self):
         for body, error in [
             ("println(1/0);", "division by zero"),
@@ -760,8 +1016,8 @@ fn main(){let mut list=List.Empty;let mut n=0;
             ("fn main(){}", "JIT is not implemented", ("--jit=on",)),
             ("fn main(){}", "JIT is not implemented", ("--jit=on", "--jit-report")),
             ('#global[bb]\nfn main(){let p=raw_alloc_int(1);raw_free_int(p);}', "type Ptr", ("--jit=off",)),
-            ('fn main(){let f=open_read("missing");}', "type File", ("--jit=off",)),
-            ('fn main(){println(read_text("missing"));}', "builtin 'read_text'", ("--jit=off",)),
+            ('fn main(){println(read_ints("missing"));}', "builtin 'read_ints'", ("--jit=off",)),
+            ('fn main(){println(read_floats("missing"));}', "builtin 'read_floats'", ("--jit=off",)),
             ('#global[bb]\nfn main(){println(syscall0(172));}', "raw syscalls", ("--jit=off",)),
             ('use std.process;fn main(){println(std.process.id());}', "raw syscalls", ("--jit=off",)),
         ]:

@@ -72,7 +72,7 @@ the compiler's build architecture on Linux: x86-64 or AArch64. Explicit targets
 take precedence. `aarch64-linux` (alias `arm64-linux`) supports the core language,
 scalar F32/F64, heap Strings, recursive Box/Vec ownership and borrowed Slice.
 JIT defaults to off for ARM64 and on for x86-64 after target selection, regardless
-of option order. Explicit ARM64 JIT requests, Ptr, files and raw syscalls
+of option order. Explicit ARM64 JIT requests, Ptr, numeric file readers and raw syscalls
 are explicitly rejected. `x86_64-windows` remains unimplemented.
 Invalid or unavailable targets fail before source loading or output creation.
 `check` remains independent of backend selection.

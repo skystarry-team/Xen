@@ -10,6 +10,8 @@ relocations must not become a dependency of another CPU backend.
 
 The bundled stdlib still contains Linux x86-64 syscalls and kernel record layouts.
 The ARM64 backend provides heap String, Box and Vec allocation/cleanup with
-borrowed Slice views but rejects raw syscalls and file operations, including
-those in platform-dependent stdlib functions. Future support must select or lower
+borrowed Slice views, plus managed File operations and read_text using an explicit
+Linux AArch64 file runtime. It still rejects raw syscalls and Ptr operations in
+platform-dependent stdlib functions; numeric file token parsing is a later stage.
+Future stdlib support must select or lower
 platform services explicitly, while leaving user-supplied raw syscall numbers raw.

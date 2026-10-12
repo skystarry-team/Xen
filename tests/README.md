@@ -56,6 +56,14 @@ Box/Vec cleanup, deep recursive Vec cloning, aligned element storage, bounds,
 String byte bridges and std.string/iter/hashmap paths. When QEMU is installed, guest mmap/munmap ledgers verify exact
 allocation lifetimes, a 64KiB guest stack checks deep cleanup, and a bounded
 guest address space injects allocation failures without limiting the emulator.
+File tests add byte-preserving read/write, growth boundaries, proc/FIFO reads,
+aggregate and recursive Box/Vec ownership, source diagnostics, fd 0 and a low fd
+limit. QEMU open/close ledgers pair reused descriptors exactly; mmap/munmap ledgers
+also cover read_text's temporary cleanup after a read or allocation failure.
+Runtime fixtures check path-size overflow before access, failed-close cell
+invalidation and inactive-close/empty-write no-ops.
+A bounded guest-page filler distinguishes ENOMEM at the final exact-size String
+allocation, after EOF, from geometric buffer growth failure.
 
 `make test-host` checks compiler version, import/check, default-target build/run/test,
 both cross-build targets, relocated stdlib discovery and binary packaging. It

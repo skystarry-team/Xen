@@ -44,14 +44,35 @@ class HostTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
-    def execute_generated(self, output):
-        execution = [str(output)]
+    def execute_generated(self, output, expected="b\n", args=()):
+        execution = [str(output), *map(str, args)]
         if ARCH != HOST_ARCH:
             emulator = shutil.which("qemu-aarch64" if ARCH == "aarch64" else "qemu-x86_64")
             self.assertIsNotNone(emulator, "generated execution requires an explicit emulator")
             execution.insert(0, emulator)
         actual = subprocess.run(execution, capture_output=True, text=True, timeout=30)
-        self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, "b\n", ""))
+        self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, expected, ""))
+
+    def test_compiler_emits_managed_file_program(self):
+        self.source.write_text('use std.string;fn main(){let mut f=open_write(arg(0));'
+                               'f.write("file host\\n");f.close();'
+                               'println(std.string.split_byte(read_text(arg(0)),u8(10))[0]);}')
+        path = self.root / "host-file"
+        binary = XEN
+        if os.getenv("XEN_HOST_ARCHIVE"):
+            with tarfile.open(Path(os.environ["XEN_HOST_ARCHIVE"]).resolve()) as bundle:
+                name = bundle.getnames()[0].split("/")[0]
+                bundle.extractall(self.root / "file-archive", filter="data")
+            relocated = self.root / "file-package"
+            (self.root / "file-archive" / name).rename(relocated)
+            binary = relocated / "bin/xen"
+        self.success(self.invoke("check", self.source, binary=binary))
+        for opt in ("off", "basic"):
+            output = self.root / ("file-"+opt)
+            self.success(self.invoke("build", self.source, f"--opt={opt}", "-o", output, binary=binary))
+            self.assertEqual(package.binary_architecture(output), ARCH)
+            self.execute_generated(output, "file host\n", args=(path,))
+            self.assertEqual(path.read_bytes(), b"file host\n")
 
     def test_version_check_default_build_and_cross_build(self):
         self.assertEqual(self.success(self.invoke("version")), "xen "+(REPO / "VERSION").read_text().strip()+"\n")

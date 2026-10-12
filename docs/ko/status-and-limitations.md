@@ -135,7 +135,9 @@ ELF를 생성하며, 정수·F32/F64·Bool·제어 흐름·함수·참조·지�
 음의 0을 보존하며, NaN 부호는 CPU 연산 결과를 따릅니다.
 예를 들어 `0.0/0.0`은 ARM64에서 `nan`, x86-64에서 `-nan`으로 출력됩니다.
 
-현재 ARM64에서는 JIT, Ptr, 파일과 `read_text`,
+move-only `File`의 열기·읽기·쓰기·닫기·이동과 aggregate/Box/Vec 내부 정리,
+바이트를 보존하는 `read_text`도 지원합니다.
+현재 ARM64에서는 JIT, Ptr, `read_ints`·`read_floats`,
 raw syscall과 이를 사용하는 플랫폼 의존 표준 라이브러리를 명시적 오류로 거부합니다.
 JIT 기본값은 ARM64 타깃에서 off, x86-64 타깃에서 on입니다.
 명시적인 ARM64 `--jit=on`과 `--jit-report`는 계속 거부합니다.
