@@ -14,10 +14,8 @@ xen test [file.xen | directory | std.module] [--filter substring] [--target=<arc
 ## `version`
 
 `xen version` and `xen --version` print `xen <version>` to stdout and exit 0.
-They do not load source or the standard library. The default build version is
-declared in the repository's `VERSION` file. `make build VERSION=...` and
-`make package VERSION=...` embed the supplied version in the executable;
-source archives retain it in their exported `VERSION` file.
+They do not load source or the standard library. Version selection when building
+the compiler is documented in the [compiler build guide](../compiler-build/en/build.md#compiler-version).
 
 ## `check`
 

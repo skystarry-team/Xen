@@ -313,25 +313,28 @@ class ToolchainTests(unittest.TestCase):
         with tarfile.open(next(packages.glob("*.tar.gz"))) as archive:
             names = archive.getnames()
             prefix = names[0].split("/")[0]
-            for relative in ("LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "VERSION",
-                             "THIRD_PARTY.md", "licenses/OCaml.txt", "licenses/CC-BY-4.0.txt",
-                             "assets/branding/README.md", "assets/branding/full_logo.png",
-                             "assets/branding/full_logo.png.license", "docs/en/jit.md",
-                             "docs/ko/jit.md", "examples/demo.xen", "compiler/README.md",
-                             "compiler/cpu/arm64/README.md", "compiler/platform/README.md",
-                             "compiler/platform/darwin/MACOS_VALIDATION.md", "scripts/PACKAGING.md",
-                             "scripts/package-toolchains.example.json"):
+            for relative in ("README.md", "bin/xen", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE",
+                             "NOTICE", "VERSION", "THIRD_PARTY.md", "licenses/OCaml.txt",
+                             "examples/README.md", "examples/demo.xen", "stdlib/prelude.xen",
+                             "stdlib/platform/x86_64-linux/std/platform.xen",
+                             "stdlib/platform/aarch64-linux/std/platform.xen"):
                 self.assertIn(f"{prefix}/{relative}", names)
-            self.assertFalse(any(Path(name).suffix in (".ml", ".mli") for name in names))
-            for image in set(re.findall(r'assets/branding/[^"\s]+\.png', (REPO / "README.md").read_text())):
-                self.assertIn(f"{prefix}/{image}", names)
-                self.assertIn(f"{prefix}/{image}.license", names)
-            self.assertFalse(any("reference" in Path(name).parts or
-                                 Path(name).name in ("AGENTS.md", "CLAUDE.md")
-                                 for name in names))
-            for image in (REPO / "assets/branding").glob("*.png"):
-                relative = image.relative_to(REPO).as_posix()
-                self.assertEqual(archive.extractfile(f"{prefix}/{relative}").read(), image.read_bytes())
+            self.assertEqual({Path(name).parts[1] for name in names},
+                             {"README.md", "bin", "stdlib", "examples", "licenses", "VERSION",
+                              "LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "THIRD_PARTY.md"})
+            self.assertFalse(any(Path(name).suffix in (".ml", ".mli", ".py") for name in names))
+            expected_stdlib = {path.relative_to(REPO).as_posix()
+                               for path in (REPO / "stdlib").rglob("*.xen") if not path.is_symlink()}
+            actual_stdlib = {name.removeprefix(prefix+"/") for name in names if name.startswith(prefix+"/stdlib/")}
+            self.assertEqual(actual_stdlib, expected_stdlib)
+            for relative in expected_stdlib:
+                self.assertEqual(archive.extractfile(f"{prefix}/{relative}").read(), (REPO / relative).read_bytes())
+            for path in (REPO / "examples").rglob("*"):
+                if path.is_file():
+                    relative = path.relative_to(REPO).as_posix()
+                    self.assertEqual(archive.extractfile(f"{prefix}/{relative}").read(), path.read_bytes())
+            self.assertEqual(archive.extractfile(f"{prefix}/README.md").read(),
+                             (REPO / "docs/compiler-build/distribution-readme.md").read_bytes())
             self.assertEqual(archive.extractfile(f"{prefix}/licenses/OCaml.txt").read(),
                              (REPO / "licenses/OCaml.txt").read_bytes())
             self.assertEqual(archive.extractfile(f"{prefix}/VERSION").read(), b"loader-test\n")
@@ -367,8 +370,14 @@ class ToolchainTests(unittest.TestCase):
                              "compiler/cpu/arm64/native_backend.ml", "compiler/platform/README.md",
                              "compiler/backend.ml",
                              "tests/property/runner.py", "scripts/package.py", "scripts/package_build.py",
-                             "scripts/test.py", "scripts/PACKAGING.md", "scripts/package-toolchains.example.json", "LICENSE"):
+                             "scripts/test.py", "scripts/package-toolchains.example.json", "LICENSE",
+                             "docs/compiler-build/README.md", "docs/compiler-build/en/build.md",
+                             "docs/compiler-build/en/aarch64.md", "docs/compiler-build/en/packaging.md",
+                             "docs/compiler-build/ko/build.md", "docs/compiler-build/ko/aarch64.md",
+                             "docs/compiler-build/ko/packaging.md", "docs/compiler-build/distribution-readme.md",
+                             "examples/demo.xen", "assets/branding/full_logo.png", "assets/branding/full_logo.png.license"):
                 self.assertIn(f"{prefix}/{relative}", names)
+            self.assertNotIn(f"{prefix}/scripts/PACKAGING.md", names)
             banned = {".git", ".idea", "reference", "test", "__pycache__", "found_bugs", "dist"}
             self.assertFalse(any(banned.intersection(Path(name).parts) or
                                  Path(name).name in ("AGENTS.md", "CLAUDE.md", ".package-toolchains.json") for name in names))

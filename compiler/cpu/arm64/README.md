@@ -1,7 +1,6 @@
 # Linux ARM64 backend
 
 ```sh
-make build
 compiler/dist/xen build examples/arm64_core.xen --target=aarch64-linux --jit=off -o app
 qemu-aarch64 ./app hello
 python3 scripts/test.py --suite arm64
@@ -225,76 +224,15 @@ Input String storage and partial result mappings are released before any returne
 parse/range/allocation error. Numeric Vec results use the existing 32-byte private
 header and exact element-count capacity, with normal clone/move/drop behavior.
 
-## Running the compiler on ARM64
+## Compiler builds
 
-Xen's compiler is OCaml code, independently of the machine code it emits.
-Install native OCaml and Dune on Linux ARM64, then use the ordinary source build:
+Compiler installation and host validation are covered in the
+[native build guide](../../../docs/compiler-build/en/build.md),
+[AArch64 OCaml cross toolchain guide](../../../docs/compiler-build/en/aarch64.md)
+and [packaging guide](../../../docs/compiler-build/en/packaging.md).
+The compiler's host architecture is independent of its output target.
 
-```sh
-make build
-compiler/dist/xen version
-compiler/dist/xen run examples/arm64_collections.xen
-compiler/dist/xen test std.string
-python3 scripts/test.py --suite host
-python3 scripts/test.py --suite arm64
-make package
-```
-
-The compiler uses OCaml's build configuration to select its host default, so
-neither `uname` nor an external tool on PATH is required by compilation. Binary
-package names use the compiler ELF architecture, regardless of its output target.
-The full `make test` additionally executes x86-specific backend/JIT regressions;
-`python3 scripts/test.py --suite host` and `--suite arm64` provide focused host validation.
-`make package` builds both Linux compiler architectures by default. Configure the
-x86_64 cross toolchain on an ARM64 host; see [compiler packaging](../../../scripts/PACKAGING.md).
-
-An optional OCaml 5.5 cross-toolchain context is provided in
-[`scripts/dune-workspace.arm64`](../../../scripts/dune-workspace.arm64). With a
-matching native OCaml installation, adjust the two `/opt/ocaml-aarch64` paths
-in that workspace to your OCaml cross compiler prefix, then:
-
-```sh
-test "$(/path/to/ocaml-aarch64/bin/ocamlc -config-var architecture)" = arm64
-dune build --workspace=scripts/dune-workspace.arm64 _build/arm64/compiler/main.exe
-aarch64-linux-gnu-readelf -h _build/arm64/compiler/main.exe
-qemu-aarch64 -L /path/to/aarch64-sysroot _build/arm64/compiler/main.exe version
-make package-one DUNE_WORKSPACE=scripts/dune-workspace.arm64 PACKAGE_CONTEXT=arm64 \
-  PACKAGE_ARCH=aarch64 \
-  PACKAGE_RUNNER='["/usr/bin/qemu-aarch64","-L","/path/to/aarch64-sysroot"]'
-XEN_BIN="$PWD/_build/arm64/compiler/main.exe" \
-  XEN_HOST_ARCHIVE="$PWD/dist/xen-$(cat VERSION)-linux-aarch64.tar.gz" \
-  XEN_HOST_RUNNER='["/usr/bin/qemu-aarch64","-L","/path/to/aarch64-sysroot"]' \
-  python3 tests/integration/host_test.py
-```
-
-The ELF header must report `Machine: AArch64` (machine number 183). Verify both
-the prefix and the result: a missing prefix may otherwise fall back to a host
-OCaml installation on PATH.
-
-OCaml's cross compiler can be built from matching 5.5 sources with
-`./configure --target=aarch64-linux-gnu --prefix=...`, `make crossopt`, and
-`make installcross`; it needs an AArch64 C toolchain and target libc. These tools
-build the **OCaml compiler executable**, while Xen program emission still needs
-no assembler, linker or libc. See [OCaml's build instructions](https://github.com/ocaml/ocaml/blob/5.5/INSTALL.adoc)
-and [Dune contexts](https://dune.readthedocs.io/en/stable/reference/dune-workspace/context.html).
-
-The package command builds only `_build/arm64/compiler/main.exe`, preserving
-the default `compiler/dist/xen`. The result is
-`dist/xen-<version>-linux-aarch64.tar.gz`; the ordinary `make package` builds both
-architecture archives through the configured toolchains. `PACKAGE_ARCH` is an optional ELF
-check that catches a workspace accidentally falling back to x86_64. Linux is
-the supported compiler package platform (`PACKAGE_PLATFORM=linux`), not an OS
-inferred from ELF's `System V` ABI or the packaging machine. To package an
-already-built ARM compiler without Dune, replace the workspace/context options
-with `PACKAGE_BINARY=_build/arm64/compiler/main.exe`.
-
-The host integration suite checks compiler version, source validation, default
-ARM64 builds, explicit x86 cross-builds and relocated stdlib discovery. Set
-`XEN_BIN`, `XEN_HOST_ARCHIVE` and `XEN_HOST_RUNNER` as shown above to exercise a
-cross-built compiler and its extracted package through QEMU. A QEMU-user compiler process
-does not itself supply binfmt for `run`/`test` children; those commands require a
-native ARM64 host or a configured kernel handler. Compiler execution under QEMU
-does not validate native host builds or kernel-mediated child execution.
+## Backend structure
 
 `machine_ir.ml` owns A64 instructions, labels and checked relocations. Conditional
 branches use an inverted short condition plus a checked 26-bit branch. Addresses

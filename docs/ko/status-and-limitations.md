@@ -153,9 +153,6 @@ CPU 아키텍처와 기존 Darwin/Mach-O 프로토타입 구현은 보존합니�
 `run`과 `test`는 호스트 커널을 통해 실행하며 에뮬레이터를 자동 실행하지 않습니다.
 x86-64에서 만든 ARM64 실행 파일은 `qemu-aarch64 ./app`으로 검증할 수 있습니다.
 공통 계층은 Xen의 고정 64비트 값 배치와 기존 여섯 인자 제한을 유지합니다.
-컴파일러 자체도 native OCaml/Dune으로 Linux ARM64에서 빌드하는 경로를 제공합니다.
-`python3 scripts/test.py --suite host`는 기본 타깃·run/test·stdlib 탐색·패키징을 확인하며,
-`--suite arm64`는 ARM64 생성 코드를 검증합니다. 크로스 빌드한 ARM64 컴파일러는
-QEMU에서 검증할 수 있습니다. native 빌드·자식 실행에 필요한 환경은
-[ARM64 문서](../../compiler/cpu/arm64/README.md)를 참고하세요.
+컴파일러 자체의 네이티브 빌드와 크로스 툴체인 준비는
+[컴파일러 빌드 문서](../compiler-build/README.md)를 참고하세요.
 [컴파일러 구조](../../compiler/README.md)와 [ARM64 지원 범위](../../compiler/cpu/arm64/README.md)를 참고하세요.

@@ -89,7 +89,7 @@ def plan(architectures: list[str], toolchains: dict) -> tuple[Path, list[Build]]
         if not (prefix / "bin/ocamlc").is_file() or not (prefix / "bin/ocamlopt").is_file():
             raise ValueError(f"missing {architecture} OCaml cross compiler: {prefix}; "
                              "configure prefix and runner in .package-toolchains.json "
-                             "(see scripts/package-toolchains.example.json)")
+                             "(see docs/compiler-build/en/aarch64.md)")
         cross = compiler_pair(prefix / "bin")
         if cross["system"] != "linux" or OCAML_ARCHITECTURES.get(cross["architecture"]) != architecture:
             raise ValueError(f"cross compiler target mismatch: expected {architecture}-linux, "

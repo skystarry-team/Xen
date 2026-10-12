@@ -8,16 +8,9 @@ Reproducible bug reports, documentation
 corrections and small changes with a concrete use case are welcome at
 [skystarry-team/Xen](https://github.com/skystarry-team/Xen).
 
-Build with OCaml and Dune 3.18 or later (`make build`). Compiler tests require Python
-3.10 or later and binutils (`objdump`), with no third-party Python packages.
-The demo build was verified with OCaml 5.5.0 and Dune 3.24.2.
-Native ARM64 builds use the same dependencies and `make build`; use
-`python3 scripts/test.py --suite host` and `--suite arm64` there. The full `make test` includes
-x86-specific execution/JIT checks. The [ARM64 guide](compiler/cpu/arm64/README.md)
-records actual compiler execution evidence and the QEMU child-execution boundary.
-`VERSION` declares the default compiler version. Make's `VERSION=...` override
-is embedded in the compiler and carried into both archive formats. Direct
-Dune builds use `VERSION`, or an explicit `XEN_BUILD_VERSION` override.
+See [compiler builds](docs/compiler-build/README.md) for prerequisites, native
+OCaml installation, AArch64 cross toolchains and version configuration.
+Test dependencies and focused suites are documented in [tests/README.md](tests/README.md).
 
 ```sh
 make test
@@ -54,19 +47,8 @@ python3 benchmarks/optimization_benchmark.py
 python3 benchmarks/jit_benchmark.py
 ```
 
-`make package VERSION=0.1.0-demo` builds both Linux x86_64 and AArch64 compiler
-bundles by default. Configure the cross prefix and runner in `.package-toolchains.json`;
-see [compiler packaging](scripts/PACKAGING.md). Missing toolchains fail the build.
-`PACKAGE_ARCHS` explicitly selects a subset. For a single compiler, use `make package-one`.
-Archive names include the supported platform (Linux) and bundled ELF architecture.
-Use `DUNE_WORKSPACE=... PACKAGE_CONTEXT=arm64 PACKAGE_ARCH=aarch64` with
-`PACKAGE_RUNNER='["/usr/bin/qemu-aarch64","-L","/path/to/sysroot"]'` for a
-cross-built ARM64 bundle. `PACKAGE_BINARY=...` packages an existing compiler
-without building; context builds do not promote over `compiler/dist/xen`.
-See the [ARM64 guide](compiler/cpu/arm64/README.md) for workspace setup and QEMU
-verification of the extracted package.
-`make source-package VERSION=0.1.0-demo` exports the public source tree
-without Git history or local artifacts. Both include the license notices.
+Binary and source distribution commands are documented in the
+[packaging guide](docs/compiler-build/en/packaging.md).
 
 ## Licensing contributions
 
