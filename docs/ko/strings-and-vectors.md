@@ -67,6 +67,11 @@ Slice 및 이를 포함한 aggregate의 반환·owner 밖 escape와 Vec 저장�
 
 `zeros`와 `repeat`의 음수 길이는 runtime error이며 0 길이는 빈 Vec를 반환한다. `read_ints`/`read_floats`는 ASCII space, tab, CR, LF를 separator로 사용한다. 경로, 숫자, allocation, file 오류는 source location을 포함해 stderr에 기록되고 status 1로 종료된다.
 
+Linux AArch64에서도 두 숫자 reader를 지원한다. ARM64 실수 파서는 정확한 정수 비율을
+binary64로 nearest/ties-to-even 반올림하며 음의 0을 보존한다. 비영 값이 0 또는
+무한대로 반올림되면 범위 오류다. 소수점·지수 표기를 받지만 NaN, infinity,
+hex 표기는 받지 않는다. 자세한 계약은 [ARM64 문서](../../compiler/cpu/arm64/README.md#files)를 참고한다.
+
 Vec equality는 숫자, Bool, String과 그 중첩 Vec에 재귀적으로 제공된다. File 및
 struct/enum element는 compile-time error다. Vec 출력은 기존 `Vec<Int>`와
 `Vec<Float>` 범위를 유지한다.

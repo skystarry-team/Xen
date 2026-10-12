@@ -67,8 +67,8 @@ make test
 Xen 프로그램의 결과도 비교한다. property test만 선택해 실행할 수 있다.
 
 ```sh
-make quickcheck QUICKCHECK_MODE=mixed QUICKCHECK_DEPTH=smoke
-make quickcheck QUICKCHECK_MODE=all QUICKCHECK_DEPTH=deep QUICKCHECK_SEED=1234
+python3 scripts/test.py --suite quickcheck --mode mixed --depth smoke
+python3 scripts/test.py --suite quickcheck --mode all --depth deep --seed 1234
 ```
 
 mode는 `regress`, `mixed`, `pairs`, `kitchen`, `illtyped`, `nocrash`, `explore`,

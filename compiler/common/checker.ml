@@ -214,6 +214,7 @@ let check_internal ~entry (program : Ast.program) =
     if List.mem f.name builtins then invalid f.span ("builtin name '"^f.name^"' is reserved");
     if Hashtbl.mem signatures f.name then invalid f.span ("duplicate function '"^f.name^"'");
     if List.mem Jit effective_modes then invalid f.span "function-level jit mode is not supported; use #scope[jit] for experimental scalar JIT";
+    (* Current language limit; each backend owns machine argument placement. *)
     if List.length f.params > 6 then invalid f.span "functions support at most six parameters";
     let explc = List.mem Explc effective_modes in
     let bb = List.mem Bb effective_modes in

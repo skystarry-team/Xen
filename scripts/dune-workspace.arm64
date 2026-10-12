@@ -1,0 +1,14 @@
+(lang dune 3.18)
+; SPDX-License-Identifier: MIT OR Apache-2.0
+; Optional OCaml 5.5 cross compiler context. Normal ARM64 source builds use
+; make build directly with a native OCaml/Dune installation, without this file.
+; Edit the two prefix paths below to match your cross compiler installation.
+; Verify that PREFIX/bin/ocamlc -config-var architecture prints arm64 first;
+; an invalid prefix can otherwise fall back to the host compiler on PATH.
+(context (default (name default)))
+(context
+ (default
+  (name arm64)
+  (host default)
+  (paths (PATH ("/opt/ocaml-aarch64/bin" :standard)))
+  (env (_ (env-vars (OPAM_SWITCH_PREFIX /opt/ocaml-aarch64))))))

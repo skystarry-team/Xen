@@ -1,5 +1,5 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
-module M = Machine_ir
+module M = Xen_x86_64.Machine_ir
 
 let align value alignment = ((value + alignment - 1) / alignment) * alignment
 

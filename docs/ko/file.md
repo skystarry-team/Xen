@@ -27,12 +27,12 @@ write를 끝까지 진행한다. 본 작업 오류가 close 오류보다 우선�
 close만 실패하면 `Close(errno)`다.
 
 `std.fs.write`는 기존 파일을 truncate하며 새 파일은 `0644`와 process umask를 쓴다.
-`copy`는 현재 source 전체를 메모리에 읽은 뒤 쓴다. 모든 API는 blocking Linux x86-64
+`copy`는 현재 source 전체를 메모리에 읽은 뒤 쓴다. 모든 API는 blocking Linux x86-64/AArch64
 I/O이고 String byte를 UTF-8 검증 없이 보존한다.
 
 ## Owned `File` compatibility API
 
-`File`은 Linux x86-64의 blocking byte I/O를 제공하는 8바이트 move-only owned
+`File`은 Linux x86-64/AArch64의 blocking byte I/O를 제공하는 8바이트 move-only owned
 resource다. raw file descriptor는 언어에 노출되지 않는다.
 
 ## 열기

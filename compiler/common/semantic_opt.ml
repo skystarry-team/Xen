@@ -63,6 +63,7 @@ let fuse program stats =
   let functions=List.map(fun(f:func)->
     let locals=ref(Array.to_list f.locals) and scopes=ref(Array.to_list f.scopes) in
     let local_count=ref(Array.length f.locals) and scope_count=ref(Array.length f.scopes) in
+    (* Conservative 64-bit storage budget for fusion, not a machine frame layout. *)
     let slot_end start locals=Array.fold_left(fun offset (l:local)->
       let size,alignment=match l.typ with
         |Named name->let layout=List.find(fun(l:struct_layout)->l.name=name)program.layouts in layout.size,layout.alignment

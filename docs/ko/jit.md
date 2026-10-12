@@ -25,7 +25,8 @@ xen run calculation.xen --opt=basic --jit=off
 xen run calculation.xen --opt=basic --jit-report
 ```
 
-`build/run/test`의 `--jit=on|off` 기본값은 `on`이다. 명시한 jit scope에만 적용하며
+`build/run/test`의 `--jit=on|off` 기본값은 x86-64에서 `on`, ARM64에서 `off`이다.
+ARM64의 명시적 JIT 요청은 인코더와 런타임 구현 전까지 거부한다. 명시한 jit scope에만 적용하며
 일반 소스는 AOT로 실행한다. `off`는 같은 소스·checked IR을 기존 AOT emitter로
 실행하는 비교 기준이다. `--opt=off|basic`은 encoding 이전의 공통 최적화 패스를
 독립적으로 선택하며 기본값은 계속 `off`다. `check`는 소스 검사만 하고 JIT 옵션이나

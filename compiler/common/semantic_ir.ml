@@ -59,7 +59,7 @@ type func = { id : function_id; name : string; mode_set : mode list; params : lo
               blocks : block array; entry : block_id; span : span }
 type program = { layouts : struct_layout list; enums : enum_decl list; functions : func list; entry : string }
 (* The constructor is exposed only to the semantic pipeline, via this module's
-   checked factory. Native_backend cannot accept a frontend tree. *)
+   checked factory. Backends cannot accept a frontend tree. *)
 type checked_program = Checked of program
 let program (Checked p) = p
 

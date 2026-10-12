@@ -3,19 +3,54 @@
  (name native_core_test)
  (modules native_core_test)
  (deps (source_tree ../examples) (source_tree ../stdlib))
- (libraries unix xen_compiler))
+ (libraries unix xen_common xen_x86_64 xen_linux_x86_64))
 
 (test
  (name semantic_ir_test)
  (modules semantic_ir_test)
- (libraries unix xen_compiler))
+ (libraries unix xen_common))
 
 (test
  (name semantic_opt_test)
  (modules semantic_opt_test)
- (libraries unix xen_compiler))
+ (libraries unix xen_compiler xen_linux_x86_64))
 
 (test
  (name jit_ir_test)
  (modules jit_ir_test)
+ (libraries unix xen_common xen_x86_64 xen_linux_x86_64))
+
+(test
+ (name backend_contract_test)
+ (modules backend_contract_test)
  (libraries unix xen_compiler))
+
+(test
+ (name arm64_machine_test)
+ (modules arm64_machine_test)
+ (libraries xen_arm64))
+
+(executable
+ (name arm64_heap_fixture)
+ (modules arm64_heap_fixture)
+ (libraries xen_arm64 xen_linux_arm64))
+
+(test
+ (name mach_o_test)
+ (modules mach_o_test)
+ (libraries xen_darwin))
+
+(executable
+ (name mach_o_fixture)
+ (modules mach_o_fixture)
+ (libraries xen_darwin))
+
+(executable
+ (name darwin_fixture)
+ (modules darwin_fixture)
+ (libraries xen_darwin_arm64 xen_common))
+
+(executable
+ (name darwin_abi_fixture)
+ (modules darwin_abi_fixture)
+ (libraries xen_arm64 xen_linux_arm64 xen_darwin_arm64))

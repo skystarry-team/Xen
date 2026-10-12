@@ -1,6 +1,8 @@
 # Getting started
 
-Xen currently generates programs for Linux x86-64. Building the compiler from source
+Xen generates programs for Linux x86-64 by default, with an initial
+[ARM64 core-language target](../../compiler/cpu/arm64/README.md) available through
+`--target=aarch64-linux --jit=off`. Building the compiler from source
 requires OCaml and Dune 3.18 or later. A generated Xen program does not need a C compiler, assembler,
 linker, or libc.
 

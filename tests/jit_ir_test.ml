@@ -1,4 +1,6 @@
 (* SPDX-License-Identifier: MIT OR Apache-2.0 *)
+open Xen_x86_64
+module Jit_runtime = Xen_linux_x86_64.Jit_runtime
 open Semantic_ir
 let expect b message = if not b then failwith message
 let () =

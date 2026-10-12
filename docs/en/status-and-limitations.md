@@ -1,7 +1,18 @@
 # Supported features and limitations
 
-This page describes the current demo's implemented behavior. The target is
-Linux x86-64 static non-PIE ELF.
+This page describes the current demo's full feature set on the
+Linux x86-64 static non-PIE ELF target. The Linux ARM64 backend supports
+an integer/float/Bool, control-flow, function, reference, aggregate, heap-string
+and recursive Box/Vec ownership with borrowed Slice views, `std.string`, `std.iter`
+and `std.hashmap`, managed `File` operations and `read_text`. The CLI defaults to the compiler's build architecture on Linux;
+explicit `--target` overrides it. ARM64 JIT defaults to off.
+ARM64 also supports Ptr/raw POD memory/syscalls and target-selected std.io/fs/env/process.
+ARM64 supports checked numeric file readers; JIT remains unsupported. See its
+[support matrix](../../compiler/cpu/arm64/README.md).
+
+macOS on Intel and Apple Silicon is unsupported and has no planned support.
+CPU encoders and internal Darwin/Mach-O prototypes are retained for implementation
+testing. No macOS compiler or binary package is supplied.
 
 ## Supported
 
@@ -34,7 +45,7 @@ Linux x86-64 static non-PIE ELF.
 - Project `module`/`import`, file-local module aliases, toolchain `use std.*` and `use core.*`, bundled Xen-source
   standard library, and concrete named function values.
 - `explc` and `bb` lexical capabilities; typed raw pointers for scalar/POD values and
-  Linux x86-64 syscalls 0 through 6 within `bb`.
+  Linux x86-64/AArch64 syscall primitives with 0 through 6 arguments within `bb`.
 - `xen check`, `build`, `run`, and native `test` commands.
 - Optional AOT `--opt=basic` integer/Bool region optimization and bounded leaf fusion;
   see [optimization](optimization.md). Default optimization is off.
@@ -46,7 +57,7 @@ Linux x86-64 static non-PIE ELF.
 
 - Generic function inference from expected return types or function bodies, partial
   type arguments, common type search, or implicit numeric conversions.
-- Other operating systems or architectures, dynamic linking, FFI,
+- Targets other than Linux x86-64 and the initial Linux ARM64 subset; dynamic linking, FFI,
   GPU execution, exceptions, or asynchronous I/O.
 - Pointer arithmetic, address-to-pointer conversion, or arbitrary address
   dereferencing.
