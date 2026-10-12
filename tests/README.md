@@ -52,6 +52,25 @@ execution tests for the ARM64 subset, including FP encoding, conversion boundari
 on x86 hosts. `make test` includes these tests but skips ARM64 execution when no
 runner is installed; ELF and unsupported-feature checks still run.
 Heap ownership tests cover String clones, field reinitialization and recursive
-Box cleanup. When QEMU is installed, guest mmap/munmap ledgers verify exact
+Box/Vec cleanup, deep recursive Vec cloning, aligned element storage, bounds,
+String byte bridges and std.string/iter/hashmap paths. When QEMU is installed, guest mmap/munmap ledgers verify exact
 allocation lifetimes, a 64KiB guest stack checks deep cleanup, and a bounded
 guest address space injects allocation failures without limiting the emulator.
+
+`make test-host` checks compiler version, import/check, default-target build/run/test,
+both cross-build targets, relocated stdlib discovery and binary packaging. It
+runs natively on Linux x86-64 or ARM64. The optional `XEN_BIN` and JSON
+`XEN_HOST_RUNNER` variables run an actual emulated compiler binary explicitly;
+in that mode native run/test checks are skipped because QEMU user does not
+provide binfmt for children. ARM64 program execution is checked separately.
+Packaging uses the selected compiler even in QEMU mode: the tests run
+`make package PACKAGE_BINARY=...`, inspect the archive name and ELF bytes,
+then extract and move it before checking stdlib imports, both optimization
+levels and generated-program execution. Invalid runner JSON, architecture
+mismatch, unsupported platform, version mismatch and runner failure must not
+create an archive. To test context builds too, use the cross-workspace
+`make package ... PACKAGE_CONTEXT=arm64 PACKAGE_ARCH=aarch64` command in the
+ARM64 guide; the normal `make package` builds the default context independently.
+Set `XEN_HOST_ARCHIVE` to that context-built archive to verify its actual contents
+and relocated execution in the same host tests.
+See [ARM64 compiler validation](../compiler/cpu/arm64/README.md).

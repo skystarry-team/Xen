@@ -26,6 +26,9 @@ let () =
   let bytes=M.encode m ~code_address:0L ~rodata_address:0L ~data_address:0L in
   List.iteri(fun i n->expect(word bytes(i*4)=n)("encoding mismatch at "^string_of_int i))expected;
   expect(M.branch_bits(-134217728)=0x2000000)"negative branch boundary";
+  let product=M.create() in M.multiply_high product 9 1 2;
+  let encoded=M.encode product ~code_address:0L ~rodata_address:0L ~data_address:0L in
+  expect(word encoded 0=0x9bc27c29) "UMULH encoding mismatch (fixtures/arm64_heap.s)";
   expect(M.branch_bits 134217724=0x1ffffff)"positive branch boundary";
   List.iter(fun n->expect(rejects(fun()->ignore(M.branch_bits n)))"unchecked branch overflow")
     [-134217732;134217728;2];

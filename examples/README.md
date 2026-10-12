@@ -1,5 +1,9 @@
 # Runnable example corpus
 
+`arm64_collections.xen` exercises deep Vec clones, Slice views, consuming
+iteration and HashMap<Box<String>>. Run with `--target=aarch64-linux` on a
+compatible host, or build and execute explicitly under QEMU.
+
 The canonical learning examples and their expected output are embedded in the
 [English documentation](../docs/en/README.md). The `.xen` files in this directory are
 additional runnable smoke and regression examples; documentation does not rely on

@@ -410,6 +410,137 @@ fn main(){
                 self.assertEqual(actual.stdout, expected)
                 yield actual.stderr
 
+    def test_collection_storage_operations_and_byte_views(self):
+        self.differential('''
+#global[explc]
+struct P{tag:U8,text:String,number:F32}
+fn first<T>(v:Vec<T>)->T{return v.get(0);}
+fn six(a:Vec<I16>,b:String,c:F32,d:Vec<P>,e:U64,f:Vec<Unit>)->String{
+ println(a[0]);println(c);println(d[0].number);println(e);println(f.len());return b;
+}
+fn main(){
+ let mut v=[1,2,3];v.push(4);v.push(5);v.swap(0,4);v.swap(2,2);println(v);
+ println(v.replace(1,8));println(v.pop());v.push(9);println(v);
+ let mut p:Vec<P>=[P{tag:u8(7),text:"hel"+"lo",number:f32(2.5)}];let saved=p;
+ p.set(0,p.get(0));p[0]=P{tag:u8(8),text:"new"+" text",number:f32(3.5)};
+ println(saved[0].text);println(p[0].tag);let borrowed=&saved[0];println(borrowed.text);
+ let field=&saved[0].text;println(*field);let view=saved.as_slice();println(view.get(0).number);
+ let empty=saved.slice(1,1);println(len(empty));println(first<I16>([i16(-7)]));
+ let call=six;println(call([i16(-8)],"re"+"turn",f32(-0.0),saved,
+  u64(18446744073709551615),[(),(),()]));
+ println([["a"],["b"]]==[["a"],["b"]]);println([["a"]]!=[["c"]]);
+ println([0.0]==[-0.0]);println([0.0/0.0]==[0.0/0.0]);
+ let q:F32=0.0;println([f32(0.0)]==[f32(-0.0)]);println([q/q]==[q/q]);
+ println(zeros(4));println(repeat(1.5,2));println(repeat(-7,3));println(zeros(0));
+ let mut bytes:Vec<U8>=[];bytes.push(u8(97));bytes.push(u8(0));bytes.push(u8(255));
+ let text=bytes.into_string();let byte_view=text.as_bytes();println(byte_view.len());println(byte_view[1]);println(byte_view[2]);
+ let mut empty_bytes:Vec<U8>=[u8(1)];empty_bytes.pop();println(len(empty_bytes.into_string()));
+ let mut units:Vec<Unit>=[(),()];units.pop();units.push(());units.swap(0,1);println(units.len());
+}''', '[5, 2, 3, 4, 1]\n2\n1\n[5, 8, 3, 4, 9]\nhello\n8\nhello\nhello\n2.5\n0\n-7\n'
+             '-8\n-0.0\n2.5\n18446744073709551615\n3\nreturn\ntrue\ntrue\ntrue\nfalse\ntrue\nfalse\n'
+             '[0, 0, 0, 0]\n[1.5, 1.5]\n[-7, -7, -7]\n[]\n3\n0\n255\n0\n2\n')
+
+    def test_collection_owned_elements_and_cleanup(self):
+        source = '''
+use std.iter;
+use std.mem;
+#global[explc]
+struct Bag{items:Vec<String>,keep:String}
+impl Bag{fn refill(&mut self){self.items=["af"+"ter"];}}
+struct Tree{text:String,children:Vec<Box<Tree>>}
+fn tree()->Box<Tree>{return box(Tree{text:"root",children:[
+ box(Tree{text:"a"+"b",children:[]}),box(Tree{text:"c"+"d",children:[]})]});}
+fn main(){
+ let mut b=Bag{items:["be"+"fore"],keep:"ke"+"pt"};let old=b.items;b.refill();
+ println(old[0]);println(b.items[0]);println(b.keep);
+ let mut nested:Vec<Vec<String>>=[["a"+"b"],["c"+"d"]];let saved=nested;
+ nested[0]=["ne"+"w"];println(saved[0][0]);println(nested[0][0]);
+ let mut i=0;while i<25{
+  let mut values:Vec<Box<Tree>>=[];values.push(tree());values.push(tree());values.push(tree());
+  values.swap(0,2);let previous=values.replace(0,tree());let last=values.pop();values.push(tree());
+  {let r=&mut values;*r=std.mem.replace(r,[tree()]);}
+  for item in values.into_iter(){let inner=item.into_inner();}
+  i=i+1;if i%2==0{let pending=tree();continue;}if i==23{let pending=tree();break;}
+ }println(i);
+}'''
+        expected = 'before\nafter\nkept\nab\nnew\n23\n'
+        self.differential(source, expected)
+        if QEMU:
+            for trace in self.heap_trace(source, expected):
+                self.assertGreater(self.assert_balanced_heap(trace), 500)
+
+    def test_deep_recursive_vec_clone_and_mixed_box_cleanup(self):
+        programs = [
+            ('''use std.mem;
+#global[explc]
+struct Node{text:String,children:Vec<Node>}
+fn main(){let mut root=Node{text:"end",children:[]};let mut i=0;
+ while i<10000{root=Node{text:"x"+"y",children:[std.mem.replace(&mut root,Node{text:"",children:[]})]};i=i+1;}
+ let saved=root;root=Node{text:"new",children:[]};println(saved.text);println(root.text);}''', 'xy\nnew\n'),
+            ('''struct Node{children:Vec<Box<Node>>}
+fn main(){let mut root=box(Node{children:[]});let mut i=0;
+ while i<10000{root=box(Node{children:[root]});i=i+1;}println(i);}''', '10000\n'),
+        ]
+        if QEMU:
+            for source, expected in programs:
+                for trace in self.heap_trace(source, expected, stack=65536):
+                    self.assertGreaterEqual(self.assert_balanced_heap(trace), 20000)
+        else:
+            for source, expected in programs:
+                self.differential(source, expected)
+
+    def test_collection_stdlib(self):
+        source = '''
+use std.string;
+use std.iter;
+use std.hashmap;
+#global[explc]
+fn main(){
+ let parts=std.string.split_byte("=a==",u8(61));println(parts.len());println(parts[1]);
+ let words=std.string.split_ascii_whitespace(" a  b\\nc\\t");println(words.len());
+ println(std.string.contains("abc","bc"));
+ let mut map=std.hashmap.new<Box<String>>();let mut i=0;
+ while i<40{map.insert(int_to_str(i),box("v"+int_to_str(i)));i=i+1;}
+ println(map.len());let key=int_to_str(7);println(map.contains_key(&key));
+ let value=map.remove(&key);println(match value{Option.Some(s)=>s.into_inner(),Option.None=>"missing"});
+ println(map.len());let mut count=0;for (key,item) in map.into_iter(){count=count+1;}println(count);
+ let mut sum=0;for value in [1,2,3].into_iter(){sum=sum+value;}println(sum);
+}'''
+        expected = '4\na\n3\ntrue\n40\ntrue\nv7\n39\n39\n6\n'
+        self.differential(source, expected)
+        if QEMU:
+            for trace in self.heap_trace(source, expected):
+                self.assertGreater(self.assert_balanced_heap(trace), 100)
+
+    def test_collection_runtime_failures(self):
+        for body, message in [
+            ('let v=[1];println(v[-1]);', 'vector index out of bounds'),
+            ('let v=[1];println(v[1]);', 'vector index out of bounds'),
+            ('let mut v=[1];v.set(2,3);', 'vector index out of bounds'),
+            ('let mut v=[1];v.replace(-1,3);', 'vector index out of bounds'),
+            ('let mut v=[1];v.swap(0,1);', 'vector index out of bounds'),
+            ('let mut v:Vec<Unit>=[];v.pop();', 'cannot pop from an empty vector'),
+            ('let v=[1];let s=v.slice(-1,1);', 'slice range out of bounds'),
+            ('let v=[1];let s=v.slice(1,0);', 'slice range out of bounds'),
+            ('let v=[1];let s=v.slice(0,2);', 'slice range out of bounds'),
+            ('let v=[1];let s=v.as_slice();println(s.get(-1));', 'slice index out of bounds'),
+            ('let v=[1];let s=v.as_slice();println(s[1]);', 'slice index out of bounds'),
+            ('zeros(-1);', 'zeros length cannot be negative'),
+            ('repeat(1.5,-1);', 'repeat length cannot be negative'),
+        ]:
+            with self.subTest(body=body):
+                self.differential('fn main(){'+body+'}', '', status=1, error=message)
+
+    def test_arm64_target_defaults_and_option_order(self):
+        for flags in ((), ('--opt=basic',), ('--jit=off',)):
+            built, output = self.compile('fn main(){println([1,2]);}', flags=flags)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            self.assertEqual(self.execute(output).stdout, '[1, 2]\n')
+        for flags in (('--jit-report',), ('--jit=on',), ('--jit=on','--target=arm64-linux')):
+            built, _ = self.compile('fn main(){}', flags=flags)
+            self.assertEqual(built.returncode, 1, built.stderr)
+            self.assertIn('JIT is not implemented', built.stderr)
+
     def assert_balanced_heap(self, trace):
         # Track addresses AND requested lengths. Counts alone hide double frees,
         # address reuse, leaked siblings, and wrong base/length for hidden headers.
@@ -570,6 +701,26 @@ fn main(){let mut list=List.Empty;let mut n=0;
                         self.assertNotIn(" mmap(", trace.stderr,
                                          "empty/overflow must be handled before allocation")
 
+    def test_collection_size_boundaries_and_allocation_failure(self):
+        self.runner()
+        for mode in ('vec_multiply_overflow', 'vec_header_overflow', 'vec_growth_overflow'):
+            output = self.root / mode
+            built = subprocess.run(['dune','exec','tests/arm64_heap_fixture.exe','--',mode,str(output)],
+                                   cwd=REPO, capture_output=True, text=True, timeout=60)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            actual = self.execute(output)
+            self.assertEqual((actual.returncode,actual.stdout), (1,''))
+            self.assertIn('vector is too large', actual.stderr)
+            if QEMU:
+                trace = subprocess.run([QEMU,'-strace',str(output)],capture_output=True,text=True,timeout=20)
+                self.assertNotIn(' mmap(', trace.stderr)
+        if QEMU:
+            for source in ('fn main(){zeros(50000000);}',
+                           'fn main(){let mut v:Vec<I64>=[];let mut n=0;while n<5000000{v.push(n);n=n+1;}}'):
+                for trace in self.heap_trace(source, '', stack=65536, reserve=33554432, status=1):
+                    self.assertRegex(trace, r'mmap\(.*\) = -1 errno=12')
+                    self.assertIn('vector allocation failed', trace)
+
     def test_run_and_test_host_execution_diagnostics(self):
         self.source.write_text('test fn works(){assert(true);}fn main(){println(42);}')
         for command in ("run", "test"):
@@ -606,10 +757,9 @@ fn main(){let mut list=List.Empty;let mut n=0;
 
     def test_unsupported_features_do_not_overwrite_output(self):
         for text, message, flags in [
-            ("fn main(){}", "JIT is not implemented", ()),
+            ("fn main(){}", "JIT is not implemented", ("--jit=on",)),
             ("fn main(){}", "JIT is not implemented", ("--jit=on", "--jit-report")),
-            ("fn main(){println([1,2]);}", "type Vec", ("--jit=off",)),
-            ("fn main(){let value=box([1,2]);}", "type Vec", ("--jit=off",)),
+            ('#global[bb]\nfn main(){let p=raw_alloc_int(1);raw_free_int(p);}', "type Ptr", ("--jit=off",)),
             ('fn main(){let f=open_read("missing");}', "type File", ("--jit=off",)),
             ('fn main(){println(read_text("missing"));}', "builtin 'read_text'", ("--jit=off",)),
             ('#global[bb]\nfn main(){println(syscall0(172));}', "raw syscalls", ("--jit=off",)),

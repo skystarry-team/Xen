@@ -39,6 +39,7 @@ let rr m base rd rn rm = reg rd;reg rn;reg rm;
 let add m = rr m 0x8b000000
 let sub m = rr m 0xcb000000
 let mul m rd rn rm = rr m 0x9b007c00 rd rn rm
+let multiply_high m = rr m 0x9bc07c00
 let cmp m rn rm = rr m 0xeb000000 31 rn rm
 let cmp_zero m rn = cmp m rn 31
 let cset m rd cond = word m (0x9a9f07e0 lor ((cond lxor 1) lsl 12) lor rd)

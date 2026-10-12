@@ -21,7 +21,8 @@ no C compiler, assembler, linker or libc. The compiler is written in OCaml;
 the standard library is written in Xen.
 
 **This is an early demo.** Syntax, APIs and diagnostics may change. Linux x86-64
-is the default target with full current feature coverage. An initial
+has full current feature coverage. The CLI defaults to the compiler's Linux
+build architecture. An initial
 [Linux ARM64 backend](compiler/cpu/arm64/README.md) supports the core language
 with `--target=aarch64-linux --jit=off`. [Scalar scope JIT](docs/en/jit.md) is
 experimental, and its current measurements do not establish a speedup over AOT.
@@ -57,6 +58,12 @@ compiler/dist/xen build examples/demo.xen -o /tmp/xen-demo
 compiler/dist/xen test std.string
 ```
 
+Linux ARM64 source builds use the same OCaml/Dune commands. The CLI defaults to
+the compiler's build architecture; ARM64 defaults to JIT off and x86-64 to on.
+Use explicit `--target` for cross compilation. ARM64 supports the core language
+and collections; files/raw syscalls/JIT remain unsupported. See the
+[ARM64 build and validation guide](compiler/cpu/arm64/README.md).
+
 `check` validates types, ownership and borrows; `build` writes an executable;
 `run` builds and executes it; `test` runs native `test fn` functions. See the
 [CLI reference](docs/en/cli.md) and [getting started](docs/en/getting-started.md).
@@ -72,6 +79,24 @@ make source-package VERSION=0.1.0-demo
 The archive in `dist/` contains `bin/xen`, `stdlib/`, examples, documentation,
 branding and license notices. Keep its directory structure intact when moving
 it so Xen can discover the adjacent standard library.
+Archives are named `xen-<version>-linux-<architecture>.tar.gz`. Linux is the
+currently supported compiler platform; architecture (`x86_64` or `aarch64`)
+comes from the bundled compiler ELF, independently of a Xen program's target.
+An ARM64 cross build can be packaged on x86_64 with an OCaml cross workspace:
+
+```sh
+make package DUNE_WORKSPACE=scripts/dune-workspace.arm64 PACKAGE_CONTEXT=arm64 \
+  PACKAGE_ARCH=aarch64 \
+  PACKAGE_RUNNER='["/usr/bin/qemu-aarch64","-L","/path/to/aarch64-sysroot"]'
+```
+
+First configure the workspace's cross compiler prefix as described in the
+[ARM64 guide](compiler/cpu/arm64/README.md). `PACKAGE_ARCH` rejects a mismatched
+ELF rather than relabeling it. To bundle an existing executable without building,
+set `PACKAGE_BINARY=/path/to/xen`; its embedded version must match `VERSION`.
+`PACKAGE_RUNNER` is a JSON argument array used for the compiler version check.
+Package context builds leave `compiler/dist/xen` untouched, and both architecture
+archives can coexist in `dist/`.
 The verified demo compiler build requires glibc 2.38 or later and uses the
 host's libm; source builds may have different requirements. Generated Xen
 executables do not use these libraries.

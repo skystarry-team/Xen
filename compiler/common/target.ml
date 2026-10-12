@@ -8,7 +8,8 @@ let os_name = function Linux -> "linux" | Windows -> "windows"
 let to_string target =
   architecture_name target.architecture ^ "-" ^ os_name target.operating_system
 
-(* This default preserves existing commands, independently of the compiler host. *)
+(* Legacy explicit target for library callers. The driver selects its host's
+   default from generated OCaml configuration; this layer has no host probes. *)
 let default = { architecture = X86_64; operating_system = Linux }
 
 let parse name =

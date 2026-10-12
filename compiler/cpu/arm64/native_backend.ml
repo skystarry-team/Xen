@@ -5,6 +5,7 @@ module M = Machine_ir
 module T = Type_desc
 module R = Linux_runtime
 module H = Heap_runtime
+module C = Collection_runtime
 
 exception Unsupported of Backend_intf.error
 let unsupported ?span message =
@@ -12,7 +13,7 @@ let unsupported ?span message =
 type env = {
   m:M.t; program:program; func:func; slots:int array;
   flags:(int * int,int)Hashtbl.t;
-  box_helpers:(typ,string)Hashtbl.t; box_queue:typ Queue.t;
+  box_helpers:(string * typ,string)Hashtbl.t; box_queue:(string * typ) Queue.t;
   result_slot:int; epilogue:string;
 }
 let layout program name = List.find(fun(l:struct_layout)->l.name=name)program.layouts
@@ -23,7 +24,7 @@ let validate_type program span typ =
      introducing a recursive value layout. Visit each named type once per path. *)
   let rec visit seen = function
     |I8|U8|I16|U16|I32|U32|I64|U64|F32|F64|Bool|Unit|String->()
-    |Ref(_,t)|Box t->visit seen t
+    |Ref(_,t)|Box t|Vec t|Slice t->visit seen t
     |Function(args,result)->List.iter(visit seen)(result::args)
     |Named n when List.mem n seen->()
     |Named n->List.iter(fun(f:struct_field)->visit(n::seen)f.typ)(layout program n).fields
@@ -55,24 +56,38 @@ let copy m bytes =
     M.offset m 9 9 1;M.offset m 10 10 1;M.offset m 11 11 (-1);
     M.cmp_zero m 11;M.cond m 1 loop
   end
+let stride program typ = max 1 (size program typ)
+let runtime_error e span message =
+  let label=M.fresh e.m "error_" and after=M.fresh e.m "after_error_" in
+  M.branch e.m after;M.label e.m label;
+  R.fail e.m (Printf.sprintf "%s:%d:%d: xen runtime error: %s\n"
+    span.file span.line span.column message);
+  M.label e.m after;label
 let place_address e reg (p:place) =
+  let typ=ref e.func.locals.(p.root).typ in
   address e reg p.root;
   List.iter(function
-    |Field field->M.offset e.m reg reg field.offset
-    |Deref->M.load e.m reg reg 0
-    |Element _->unsupported ~span:p.span "collection projections are not implemented")p.projections
+    |Field field->M.offset e.m reg reg field.offset;typ:=field.typ
+    |Deref->M.load e.m reg reg 0;typ:=(match !typ with Ref(_,t)|Box t->t|_->assert false)
+    |Element index->
+        let element,message=match !typ with Vec t->t,"vector index out of bounds"
+          |Slice t->t,"slice index out of bounds"|_->assert false in
+        let error=runtime_error e p.span message in
+        load e 11 index;M.load e.m 12 reg 8;M.cmp e.m 11 12;M.cond e.m 2 error;
+        M.load e.m reg reg 0;M.int e.m 12 (stride e.program element);
+        M.mul e.m 11 11 12;M.add e.m reg reg 11;typ:=element)p.projections
 let copy_value e (dst:value) (src:value) =
   address e 9 dst.id;address e 10 src.id;copy e.m (size e.program dst.typ)
 let rec owned_leaves program offset = function
-  |(String|Box _)as typ->[offset,typ]
+  |(String|Box _|Vec _)as typ->[offset,typ]
   |Named n->List.concat_map(fun(f:struct_field)->owned_leaves program (offset+f.offset) f.typ)
       (layout program n).fields
   |_->[]
-let box_helper m helpers pending typ = match Hashtbl.find_opt helpers typ with
+let box_helper ?(kind="drop") m helpers pending typ = match Hashtbl.find_opt helpers (kind,typ) with
   |Some name->name
   |None->let name=M.fresh m "box_type_drop_" in
       (* Register before chasing child types, including mutually recursive ones. *)
-      Hashtbl.add helpers typ name;Queue.add typ pending;name
+      Hashtbl.add helpers (kind,typ) name;Queue.add (kind,typ) pending;name
 let flag_offset e p leaf =
   let offset=List.fold_left(fun acc->function
     |Field f->Option.map(fun n->n+f.offset)acc|_->None)(Some 0)p.projections in
@@ -86,7 +101,7 @@ let forget e p =
   (* Forget transfers ownership without freeing it. Dereferenced caller storage
      has no flag in this frame; leave its runtime representation inactive too. *)
   List.iter(fun(offset,typ)->place_address e 9 p;M.offset e.m 9 9 offset;
-    List.iter(fun d->M.store e.m 31 9 d)(if typ=String then [0;8;16]else[0]))
+    List.iter(fun d->M.store e.m 31 9 d)(match typ with String|Vec _->[0;8;16]|_->[0]))
     (owned_leaves e.program 0 p.typ)
 let drop e p =
   List.iter(fun(off,typ)->
@@ -98,14 +113,18 @@ let drop e p =
     |String->R.call e.m "runtime_string_drop"
     |Box _->M.address e.m 1 (box_helper e.m e.box_helpers e.box_queue typ);
         R.call e.m "runtime_box_drop"
+    |Vec t->M.address e.m 1 (box_helper e.m e.box_helpers e.box_queue typ);
+        M.int e.m 2 (stride e.program t);R.call e.m "runtime_vec_drop"
     |_->assert false);
     M.label e.m skip)(List.rev(owned_leaves e.program 0 p.typ))
-let runtime_error e span message =
-  let label=M.fresh e.m "error_" and after=M.fresh e.m "after_error_" in
-  M.branch e.m after;M.label e.m label;
-  R.fail e.m (Printf.sprintf "%s:%d:%d: xen runtime error: %s\n"
-    span.file span.line span.column message);
-  M.label e.m after;label
+let clone_value e (v:value) =
+  List.iter(fun(off,typ)->address e 0 v.id;M.offset e.m 0 0 off;
+    match typ with
+    |String->R.call e.m "runtime_string_clone"
+    |Vec t->M.address e.m 1 (box_helper ~kind:"clone" e.m e.box_helpers e.box_queue typ);
+        M.int e.m 2 (stride e.program t);R.call e.m "runtime_vec_clone"
+    |_->unsupported ~span:v.span "move-only Box cannot be cloned")
+    (owned_leaves e.program 0 v.typ)
 let depth_enter e span =
   let error=runtime_error e span "maximum call depth exceeded" in
   M.address e.m 9 "call_depth";M.load e.m 10 9 0;M.int e.m 11 4096;
@@ -134,7 +153,11 @@ let string_equal e (v:value) operator a b =
   M.label m unequal;M.int m 0 (if operator="==" then 0 else 1);M.label m done_;store e v 0
 let binary e (v:value) operator (a:value) (b:value) =
   let m=e.m in
-  if a.typ=String then begin
+  if (match a.typ with Vec _->true|_->false) then begin
+    address e 0 a.id;address e 1 b.id;
+    R.call m (box_helper ~kind:"equal" m e.box_helpers e.box_queue a.typ);
+    if operator="!=" then (M.cmp_zero m 0;M.cset m 0 0);store e v 0
+  end else if a.typ=String then begin
     if operator="+" then begin
       address e 0 v.id;address e 1 a.id;address e 2 b.id;R.call m "runtime_string_concat"
     end else string_equal e v operator a b
@@ -232,6 +255,20 @@ let output e (a:value) =
   |F32|F64->load_float e 0 a;
       if a.typ=F32 then M.fp_convert m ~single:false 0 0;
       M.fp_to_bits m ~single:false 0 0;R.call m "runtime_float"
+  |Vec (I64|F64 as element)->
+      (* Keep iteration state in a fixed aligned frame across output helpers. *)
+      M.offset m 31 31 (-32);string_parts e 0 1 a;
+      M.store m 0 31 0;M.store m 1 31 8;M.store m 31 31 16;
+      R.write_constant m 1 "[";
+      let loop=M.fresh m "print_vec_" and done_=M.fresh m "printed_vec_"
+      and first=M.fresh m "print_vec_first_" in
+      M.label m loop;M.load m 9 31 16;M.load m 10 31 8;M.cmp m 9 10;M.cond m 2 done_;
+      M.cmp_zero m 9;M.cond m 0 first;R.write_constant m 1 ", ";M.label m first;
+      M.load m 9 31 16;M.int m 10 8;M.mul m 9 9 10;M.load m 10 31 0;
+      M.add m 10 10 9;M.load m 0 10 0;
+      if element=I64 then (M.int m 1 1;R.call m "runtime_integer")else R.call m "runtime_float";
+      M.load m 9 31 16;M.offset m 9 9 1;M.store m 9 31 16;M.branch m loop;
+      M.label m done_;R.write_constant m 1 "]";M.offset m 31 31 32
   |_->unsupported ~span:a.span ("printing "^string_of_typ a.typ^" is not implemented")
 let call e (v:value) name args =
   let m=e.m in
@@ -263,6 +300,19 @@ let call e (v:value) name args =
   |"float",[a]->conversion e v a
   |"int",[a]->conversion e ~message:"Float cannot be converted to Int" v a
   |"int_to_str",[a]->load e 0 a;address e 1 v.id;R.call m "runtime_int_to_string"
+  |"$inactive_pair",[]->address e 9 v.id;M.store m 31 9 0;M.store m 31 9 8
+  |"$vec_into_string",[a]->address e 0 v.id;address e 1 a.id;R.call m "runtime_vec_into_string"
+  |("zeros"|"repeat"),args->
+      let count=List.hd(List.rev args) in
+      let error=runtime_error e v.span (name^" length cannot be negative") in
+      load e 1 count;M.cmp_zero m 1;M.cond m 11 error;
+      address e 0 v.id;M.int m 2 8;R.call m "runtime_vec_new";
+      if name="repeat" then begin
+        let a=List.hd args in load e 0 a;string_parts e 1 2 v;
+        let loop=M.fresh m "repeat_" and done_=M.fresh m "repeated_" in
+        M.label m loop;M.cmp_zero m 2;M.cond m 0 done_;
+        M.store m 0 1 0;M.offset m 1 1 8;M.offset m 2 2 (-1);M.branch m loop;M.label m done_
+      end
   |_->
       if not(List.exists(fun(f:func)->f.name=name)e.program.functions)then
         unsupported ~span:v.span ("builtin '"^name^"' is not implemented");
@@ -291,6 +341,47 @@ let rvalue e (v:value) node =
   |Struct_lit(_,fields)->List.iter(fun((field:struct_field),(a:value))->
       address e 9 v.id;M.offset m 9 9 field.offset;
       address e 10 a.id;copy m (size e.program a.typ))fields
+  |Vec_lit values->
+      let element=match v.typ with Vec t->t|_->assert false in
+      address e 0 v.id;M.int m 1 (List.length values);M.int m 2 (stride e.program element);
+      R.call m "runtime_vec_new";
+      List.iteri(fun i(a:value)->address e 15 v.id;M.load m 9 15 0;
+        M.offset m 9 9 (i*stride e.program element);address e 10 a.id;
+        copy m (size e.program element))values
+  |Index(a,index)|Vec_get(a,index)|Slice_get(a,index)->
+      let p={root=a.id;projections=[Element index];typ=v.typ;span=v.span} in
+      place_address e 10 p;address e 9 v.id;copy m(size e.program v.typ);clone_value e v
+  |Vec_len a|Slice_len a->address e 15 a.id;M.load m 0 15 8;store e v 0
+  |Slice_make(a,start,finish)->
+      let error=runtime_error e v.span "slice range out of bounds" in
+      load e 0 start;load e 1 finish;address e 15 a.id;M.load m 2 15 8;
+      M.cmp m 1 2;M.cond m 8 error;M.cmp m 0 1;M.cond m 8 error;
+      M.sub m 2 1 0;M.load m 1 15 0;
+      let element=match v.typ with Slice t->t|_->assert false in
+      M.int m 3 (stride e.program element);M.mul m 0 0 3;M.add m 0 1 0;
+      address e 15 v.id;M.store m 0 15 0;M.store m 2 15 8
+  |Vec_push(target,a)->load e 0 target;address e 1 a.id;
+      M.int m 2 (stride e.program a.typ);M.int m 3 (size e.program a.typ);R.call m "runtime_vec_push"
+  |Vec_pop target->
+      let error=runtime_error e v.span "cannot pop from an empty vector" in
+      load e 15 target;M.load m 0 15 8;M.cmp_zero m 0;M.cond m 0 error;
+      M.offset m 0 0 (-1);M.store m 0 15 8;M.load m 10 15 0;
+      M.int m 1 (stride e.program v.typ);M.mul m 0 0 1;M.add m 10 10 0;
+      address e 9 v.id;copy m(size e.program v.typ)
+  |Vec_set(target,index,a)|Vec_replace(target,index,a)->
+      let p={root=target.id;projections=[Deref;Element index];typ=a.typ;span=v.span} in
+      (match node with Vec_set _->drop e p|_->place_address e 10 p;
+        address e 9 v.id;copy m(size e.program v.typ));
+      place_address e 9 p;address e 10 a.id;copy m(size e.program a.typ)
+  |Vec_swap(target,left,right)->
+      let element=match target.typ with Ref(_,Vec t)->t|_->assert false in
+      let p index={root=target.id;projections=[Deref;Element index];typ=element;span=v.span} in
+      place_address e 0 (p left);place_address e 1 (p right);
+      let loop=M.fresh m "swap_" and done_=M.fresh m "swapped_" in
+      M.int m 2 (size e.program element);M.label m loop;M.cmp_zero m 2;M.cond m 0 done_;
+      M.load m ~bytes:1 3 0 0;M.load m ~bytes:1 4 1 0;
+      M.store m ~bytes:1 4 0 0;M.store m ~bytes:1 3 1 0;
+      M.offset m 0 0 1;M.offset m 1 1 1;M.offset m 2 2 (-1);M.branch m loop;M.label m done_
   |Box_new a->
       let error=runtime_error e v.span "Box allocation failed" in
       M.int m 0 (H.box_bytes(size e.program a.typ));R.call m "runtime_alloc";
@@ -314,10 +405,7 @@ let operation e (op:operation) = match op.node with
       if e.func.locals.(v.id).owned then set_flags e (place_of_value v) true
   |Acquire(v,kind,p)->place_address e 10 p;address e 9 v.id;
       copy e.m(size e.program v.typ);
-      if kind=Clone then List.iter(fun(off,typ)->match typ with
-        |String->address e 0 v.id;M.offset e.m 0 0 off;R.call e.m "runtime_string_clone"
-        |_->unsupported ~span:v.span "move-only Box cannot be cloned")
-          (owned_leaves e.program 0 v.typ);
+      if kind=Clone then clone_value e v;
       if kind=Move then forget e p;
       if e.func.locals.(v.id).owned then set_flags e (place_of_value v) true
   |Borrow(v,_,_,p)->place_address e 0 p;store e v 0
@@ -360,6 +448,74 @@ let emit_function m program box_helpers box_queue (func:func) =
   M.word m 0x910003bf; (* mov sp,x29 *)
   M.word m 0xa8c17bfd; (* ldp x29,x30,[sp],#16 *)
   M.ret m
+(* Drop and clone traverse allocation-owned work records. Helpers never call a
+   dispatcher, so Node -> Vec<Node> and Box/Vec cycles use bounded stack space. *)
+let emit_owned_helper m program helpers pending kind typ =
+  let name=Hashtbl.find helpers (kind,typ) in
+  let element=match typ with Box t|Vec t->t|_->assert false in
+  M.label m name;M.offset m 31 31 (-64);M.store m 0 31 0;
+  M.store m 1 31 8;M.store m 30 31 56;
+  (match typ with
+  |Box _->M.offset m 2 0 H.box_header_bytes;M.int m 3 1
+  |Vec _->M.offset m 2 0 C.header;M.load m 3 0 16
+  |_->assert false);
+  M.store m 2 31 16;M.store m 3 31 24;
+  let loop=M.fresh m "owned_elements_" and done_=M.fresh m "owned_done_" in
+  M.label m loop;M.load m 3 31 24;M.cmp_zero m 3;M.cond m 0 done_;
+  List.iter(fun(off,leaf)->M.load m 0 31 16;M.offset m 0 0 off;
+    match leaf with
+    |String->R.call m (if kind="drop" then "runtime_string_drop" else "runtime_string_clone")
+    |Box _ when kind="drop"->M.load m 1 31 8;
+        M.address m 2 (box_helper m helpers pending leaf);R.call m "runtime_box_enqueue"
+    |Vec t->M.load m 1 31 8;M.address m 2 (box_helper ~kind m helpers pending leaf);
+        M.int m 3 (stride program t);
+        R.call m (if kind="drop" then "runtime_vec_enqueue" else "runtime_vec_clone_enqueue")
+    |_->unsupported "move-only Box cannot be cloned")
+    (List.rev(owned_leaves program 0 element));
+  M.load m 2 31 16;M.offset m 2 2 (stride program element);M.store m 2 31 16;
+  M.load m 3 31 24;M.offset m 3 3 (-1);M.store m 3 31 24;M.branch m loop;
+  M.label m done_;
+  if kind="drop" then begin
+    M.load m 0 31 0;
+    (match typ with Box _->M.int m 1 (H.box_bytes(size program element))
+      |Vec _->M.load m 1 0 24|_->assert false);
+    R.call m "runtime_unmap"
+  end;
+  M.load m 30 31 56;M.offset m 31 31 64;M.ret m
+
+let emit_equal_helper m program helpers pending typ =
+  let element=match typ with Vec t->t|_->assert false in
+  M.label m (Hashtbl.find helpers ("equal",typ));M.offset m 31 31 (-48);M.store m 30 31 40;
+  M.load m 2 0 8;M.load m 3 1 8;
+  let unequal=M.fresh m "vec_unequal_" and equal=M.fresh m "vec_equal_"
+  and loop=M.fresh m "vec_compare_" and return=M.fresh m "vec_compared_" in
+  M.cmp m 2 3;M.cond m 1 unequal;
+  M.load m 0 0 0;M.load m 1 1 0;
+  M.store m 0 31 0;M.store m 1 31 8;M.store m 2 31 16;
+  M.label m loop;M.load m 2 31 16;M.cmp_zero m 2;M.cond m 0 equal;
+  M.load m 0 31 0;M.load m 1 31 8;
+  (match element with
+  |Unit->()
+  |String->
+      M.load m 2 0 8;M.load m 3 1 8;M.cmp m 2 3;M.cond m 1 unequal;
+      M.load m 0 0 0;M.load m 1 1 0;
+      let bytes=M.fresh m "vec_string_compare_" and done_=M.fresh m "vec_string_equal_" in
+      M.label m bytes;M.cmp_zero m 2;M.cond m 0 done_;
+      M.load m ~bytes:1 3 0 0;M.load m ~bytes:1 4 1 0;M.cmp m 3 4;M.cond m 1 unequal;
+      M.offset m 0 0 1;M.offset m 1 1 1;M.offset m 2 2 (-1);M.branch m bytes;M.label m done_
+  |Vec _->R.call m (box_helper ~kind:"equal" m helpers pending element);
+      M.cmp_zero m 0;M.cond m 0 unequal
+  |F32|F64->M.load m ~bytes:(size program element) 2 0 0;
+      M.load m ~bytes:(size program element) 3 1 0;
+      M.fp_from_bits m ~single:(element=F32) 0 2;M.fp_from_bits m ~single:(element=F32) 1 3;
+      M.fp_cmp m ~single:(element=F32) 0 1;M.cond m 1 unequal
+  |t when T.is_integer t || t=Bool->M.load m ~bytes:(size program t) 2 0 0;
+      M.load m ~bytes:(size program t) 3 1 0;M.cmp m 2 3;M.cond m 1 unequal
+  |_->unsupported "vector equality element is not implemented");
+  List.iter(fun off->M.load m 9 31 off;M.offset m 9 9 (stride program element);M.store m 9 31 off)[0;8];
+  M.load m 2 31 16;M.offset m 2 2 (-1);M.store m 2 31 16;M.branch m loop;
+  M.label m equal;M.int m 0 1;M.branch m return;M.label m unequal;M.int m 0 0;
+  M.label m return;M.load m 30 31 40;M.offset m 31 31 48;M.ret m
 let generate ?(jit=true) ?(jit_report=false) checked =
   try
     if jit || jit_report then unsupported "JIT is not implemented; use --jit=off without --jit-report";
@@ -377,13 +533,9 @@ let generate ?(jit=true) ?(jit_report=false) checked =
     let box_helpers=Hashtbl.create 16 and box_queue=Queue.create() in
     R.emit m;List.iter(emit_function m program box_helpers box_queue)program.functions;
     while not(Queue.is_empty box_queue)do
-      let typ=Queue.take box_queue in
-      let element=match typ with Box t->t|_->assert false in
-      let leaves=List.rev(owned_leaves program 0 element)|>List.map(fun(off,typ)->
-        off,(match typ with String->None|Box _->Some(box_helper m box_helpers box_queue typ)
-          |_->assert false))in
-      H.emit_box_helper m (Hashtbl.find box_helpers typ)
-        ~bytes:(H.box_bytes(size program element))leaves
+      let kind,typ=Queue.take box_queue in
+      if kind="equal" then emit_equal_helper m program box_helpers box_queue typ
+      else emit_owned_helper m program box_helpers box_queue kind typ
     done;
     Ok(Elf_writer.static_linux ~entry:0 m)
   with Unsupported error->Error error

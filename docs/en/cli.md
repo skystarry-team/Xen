@@ -29,7 +29,8 @@ project is valid. Compiler diagnostics go to stderr and a failed check exits 1.
 
 `xen build file.xen` writes `a.out` in the current directory. Use `-o path` to choose
 the output path; parent directories are created when needed. A successful build emits
-no output and exits 0. The result is a Linux x86-64 static non-PIE ELF executable.
+no output and exits 0. The result is a static non-PIE ELF executable for the
+selected Linux target.
 
 ## `run`
 
@@ -66,11 +67,12 @@ and discovery rules.
 ## Target selection
 
 `build`, `run`, and `test` accept `--target=x86_64-linux` or
-`--target x86_64-linux`, before or after the source/test path. The default remains
-`x86_64-linux`, with the same existing static ELF support.
-`aarch64-linux` (alias `arm64-linux`) supports the initial core language subset
-with `--jit=off`, including scalar F32/F64, heap Strings and recursive Box ownership;
-JIT, Vec/Slice/Ptr, files and raw syscalls
+`--target x86_64-linux`, before or after the source/test path. The default follows
+the compiler's build architecture on Linux: x86-64 or AArch64. Explicit targets
+take precedence. `aarch64-linux` (alias `arm64-linux`) supports the core language,
+scalar F32/F64, heap Strings, recursive Box/Vec ownership and borrowed Slice.
+JIT defaults to off for ARM64 and on for x86-64 after target selection, regardless
+of option order. Explicit ARM64 JIT requests, Ptr, files and raw syscalls
 are explicitly rejected. `x86_64-windows` remains unimplemented.
 Invalid or unavailable targets fail before source loading or output creation.
 `check` remains independent of backend selection.
@@ -91,7 +93,7 @@ counts to stderr. `check` always examines the original source. See the
 
 ## Experimental runtime JIT
 
-`--jit=on|off` (default `on`) selects execution of explicitly annotated
+`--jit=on|off` (default `on` for x86-64, `off` for ARM64) selects execution of explicitly annotated
 `#scope[jit]` regions. `off` uses AOT for the same IR. `--jit-report` requires `on`
 and embeds runtime compile/cache/timing output. See [runtime JIT](jit.md).
 

@@ -119,23 +119,34 @@ RW data segment를 분리한다.
 `compiler/cpu/arm64/`의 별도 Dune 라이브러리로 분리되어 있습니다.
 향후 OS별 서비스와 실행 파일 형식 경계는 `compiler/platform/`에서 관리합니다.
 
-기본 타깃은 기존 `x86_64-linux`입니다. `build`, `run`, `test`에
-`--target=aarch64-linux --jit=off`를 지정하면 초기 ARM64 백엔드를 사용합니다.
+기본 타깃은 Linux에서 컴파일러를 빌드한 아키텍처를 따릅니다.
+`build`, `run`, `test`에 명시한 `--target`이 기본값보다 우선합니다.
+`--target=aarch64-linux`를 지정하면 ARM64 백엔드를 사용합니다.
 `arm64-linux` 별칭도 허용합니다. 외부 assembler/linker 없이 정적 Linux AArch64
 ELF를 생성하며, 정수·F32/F64·Bool·제어 흐름·함수·참조·지원 타입의 구조체와 enum·
 문자열 리터럴/프로그램 인자와 기본 출력을 지원합니다.
 문자열 연결·`int_to_str`·독립 복제·해제와 `Box<T>` 생성·참조·이동·추출을 지원합니다.
 재귀 Box 정리는 추가 할당 없이 반복형으로 수행하며, 깊이에 비례해 호출 스택을 쓰지 않습니다.
+범용 `Vec<T>`의 생성·성장·조회·교체·교환·pop과 독립 복제·재귀 정리를 지원합니다.
+`Slice<T>`와 요소 참조는 기존 빌림 규칙을 유지하며, String의 byte view와
+`Vec<U8>.into_string()`, `zeros`·`repeat`, `std.string`·`std.iter`·`std.hashmap` 경로도 지원합니다.
+재귀 Vec 복제와 Box/Vec 혼합 정리는 반복형 작업 목록을 사용합니다.
 부동소수점은 사칙연산·비교·검사된 숫자 변환·유효 숫자 17자리 출력을 지원합니다.
 음의 0을 보존하며, NaN 부호는 CPU 연산 결과를 따릅니다.
 예를 들어 `0.0/0.0`은 ARM64에서 `nan`, x86-64에서 `-nan`으로 출력됩니다.
 
-현재 ARM64에서는 JIT, Vec/Slice/Ptr, 파일과 `read_text`,
+현재 ARM64에서는 JIT, Ptr, 파일과 `read_text`,
 raw syscall과 이를 사용하는 플랫폼 의존 표준 라이브러리를 명시적 오류로 거부합니다.
-기본 JIT 설정은 기존 호환성을 위해 on이므로 ARM64에서는 반드시 `--jit=off`를 지정합니다.
+JIT 기본값은 ARM64 타깃에서 off, x86-64 타깃에서 on입니다.
+명시적인 ARM64 `--jit=on`과 `--jit-report`는 계속 거부합니다.
 `x86_64-windows`와 `aarch64-windows`는 아직 미구현입니다.
 
 `run`과 `test`는 호스트 커널을 통해 실행하며 에뮬레이터를 자동 실행하지 않습니다.
 x86-64에서 만든 ARM64 실행 파일은 `qemu-aarch64 ./app`으로 검증할 수 있습니다.
 공통 계층은 Xen의 고정 64비트 값 배치와 기존 여섯 인자 제한을 유지합니다.
+컴파일러 자체도 native OCaml/Dune으로 Linux ARM64에서 빌드하는 경로를 제공합니다.
+`make test-host`는 기본 타깃·run/test·stdlib 탐색·패키징을 확인하며,
+`make test-arm64`는 ARM64 생성 코드를 검증합니다. 현재 세션에서는 실제 ARM64
+컴파일러 ELF를 크로스 빌드해 QEMU에서 실행했습니다. 물리 ARM64 호스트의
+native 빌드·자식 실행 검증 범위는 [ARM64 문서](../../compiler/cpu/arm64/README.md)에 명시합니다.
 [컴파일러 구조](../../compiler/README.md)와 [ARM64 지원 범위](../../compiler/cpu/arm64/README.md)를 참고하세요.

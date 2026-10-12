@@ -37,7 +37,7 @@ let stdlib_candidates () =
     if Filename.basename directory="dist" && Filename.basename parent="compiler" then
       [Filename.concat directory "../../stdlib"]
     else if List.mem(Filename.basename directory)["compiler";"tests";"benchmarks"] &&
-      Filename.basename parent="default" && Filename.basename(Filename.dirname parent)="_build" then
+      Filename.basename(Filename.dirname parent)="_build" then
       [Filename.concat directory "../../../stdlib"]
     else [] in
   [Filename.concat directory "../lib/xen";

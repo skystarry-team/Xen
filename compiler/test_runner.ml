@@ -79,8 +79,9 @@ let execute ?target ~write executable =
     let status=snd(Unix.waitpid[]pid)in
     status,Project_loader.read_file stdout_path,Project_loader.read_file stderr_path)
 
-let run ?(backend=Backend.default) ?(opt=Semantic_opt.Off) ?(opt_report=false) ?(jit=true) ?(jit_report=false) case =
+let run ?(backend=Backend.default) ?(opt=Semantic_opt.Off) ?(opt_report=false) ?jit ?(jit_report=false) case =
   let module B = (val backend : Backend_intf.S) in
+  let jit=Option.value jit ~default:(Backend.default_jit B.description.target) in
   let checked=if case.single then Checker.check ~entry:case.function_name(List.hd case.programs)
     else Checker.check_project ~entry_module:case.owner ~entry_function:case.function_name case.programs in
   match checked with

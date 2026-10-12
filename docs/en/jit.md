@@ -26,7 +26,9 @@ xen run calculation.xen --opt=basic --jit=off
 xen run calculation.xen --opt=basic --jit-report
 ```
 
-`build`, `run`, and `test` accept `--jit=on|off` (default `on`) and `--jit-report`.
+`build`, `run`, and `test` accept `--jit=on|off` and `--jit-report`.
+JIT defaults to on for the x86-64 target. ARM64 defaults to off and rejects
+explicit JIT requests until its JIT encoder/runtime is implemented.
 Only explicitly marked scopes produce JIT regions. Unmarked source uses AOT.
 `off` runs the same marked source and checked IR through the AOT emitter, providing
 a reference for comparisons. `--opt=off|basic` independently controls the shared

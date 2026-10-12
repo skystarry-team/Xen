@@ -72,13 +72,13 @@ let usage () =
 type options = {
   opt : Semantic_opt.level;
   report : bool;
-  jit : bool;
+  jit : bool option;
   jit_report : bool;
   source : string option;
   output : string;
   filter : string;
   args : string list;
-  target : string;
+  target : string option;
 }
 
 let parse_options command arguments =
@@ -87,30 +87,37 @@ let parse_options command arguments =
     | "--opt=off" :: rest -> loop {options with opt=Semantic_opt.Off} rest
     | "--opt=basic" :: rest -> loop {options with opt=Semantic_opt.Basic} rest
     | "--opt-report" :: rest -> loop {options with report=true} rest
-    | "--jit=on" :: rest -> loop {options with jit=true} rest
-    | "--jit=off" :: rest -> loop {options with jit=false} rest
+    | "--jit=on" :: rest -> loop {options with jit=Some true} rest
+    | "--jit=off" :: rest -> loop {options with jit=Some false} rest
     | "--jit-report" :: rest -> loop {options with jit_report=true} rest
     | "--target" :: value :: rest when value<>"" && not(String.starts_with ~prefix:"-" value) ->
-        loop {options with target=value} rest
+        loop {options with target=Some value} rest
     | value :: rest when String.starts_with ~prefix:"--target=" value ->
         let target=String.sub value 9 (String.length value-9) in
         if target="" then usage();
-        loop {options with target} rest
+        loop {options with target=Some target} rest
     | "-o" :: path :: rest when command="build" -> loop {options with output=path} rest
     | "--filter" :: value :: rest when command="test" -> loop {options with filter=value} rest
     | "--" :: args when command="run" -> {options with args}
     | value :: rest when not(String.starts_with ~prefix:"-" value) && options.source=None ->
         loop {options with source=Some value} rest
     | _ -> usage() in
-  let options=loop {opt=Semantic_opt.Off;report=false;jit=true;jit_report=false;
-    source=None;output="a.out";filter="";args=[];target=Target.to_string Target.default} arguments in
+  let options=loop {opt=Semantic_opt.Off;report=false;jit=None;jit_report=false;
+    source=None;output="a.out";filter="";args=[];target=None} arguments in
   if (options.report && options.opt<>Semantic_opt.Basic) ||
-     (options.jit_report && not options.jit) then usage();
+     (options.jit_report && options.jit=Some false) then usage();
   options
 
-let select_backend target = match Backend.of_string target with
+let select_backend target =
+  let target=match target with Some name->name|None->
+    match Backend.default_target () with Ok t->Target.to_string t|Error message->fail message in
+  match Backend.of_string target with
   | Ok backend -> backend
   | Error message -> fail ("target error: " ^ message)
+
+let jit_option backend options =
+  let module B = (val backend : Backend_intf.S) in
+  Option.value options.jit ~default:(Backend.default_jit B.description.target)
 
 let () =
   match Array.to_list Sys.argv with
@@ -120,17 +127,19 @@ let () =
       let o=parse_options command options in
       let source=match o.source with Some source->source|None->usage() in
       let backend=select_backend o.target in
-      if command="build" then build backend o.opt o.report o.jit o.jit_report source o.output
-      else run backend o.opt o.report o.jit o.jit_report source o.args
+      let jit=jit_option backend o in
+      if command="build" then build backend o.opt o.report jit o.jit_report source o.output
+      else run backend o.opt o.report jit o.jit_report source o.args
   | _ :: "test" :: options ->
       let o=parse_options "test" options in
       let backend=select_backend o.target in
+      let jit=jit_option backend o in
       let target=Option.value ~default:"." o.source in
       let cases,errors=Test_runner.discover ~target ~filter:o.filter in
       List.iter print_diagnostic errors;
       let failed=ref(List.length errors)and passed=ref 0 in
       List.iter(fun(case:Test_runner.case)->
-        match Test_runner.run ~backend ~opt:o.opt ~opt_report:o.report ~jit:o.jit ~jit_report:o.jit_report case with
+        match Test_runner.run ~backend ~opt:o.opt ~opt_report:o.report ~jit ~jit_report:o.jit_report case with
         |Test_runner.Passed->incr passed;Printf.printf "PASS %s\n%!" case.name
         |Test_runner.Compilation_error d->incr failed;Printf.printf "FAIL %s (compilation)\n%!" case.name;
             print_diagnostic d

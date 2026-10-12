@@ -4,6 +4,7 @@
 module M = Xen_arm64.Machine_ir
 module R = Xen_arm64.Linux_runtime
 module H = Xen_arm64.Heap_runtime
+module C = Xen_arm64.Collection_runtime
 let () =
   if Array.length Sys.argv<>3 then failwith "usage: arm64_heap_fixture MODE OUTPUT";
   let m=M.create() in
@@ -13,6 +14,16 @@ let () =
     M.offset m 9 31 address;M.store m 31 9 0;M.imm m 10 length;
     M.store m 10 9 8;M.store m 31 9 16 in
   (match Sys.argv.(1) with
+  |("vec_multiply_overflow"|"vec_header_overflow"|"vec_growth_overflow" as mode)->
+      M.offset m 31 31 (-32);M.offset m 0 31 0;
+      if mode="vec_growth_overflow" then begin
+        M.store m 31 0 0;M.imm m 9 0x4000000000000000L;
+        M.store m 9 0 8;M.store m 9 0 16;
+        M.offset m 1 31 24;M.int m 2 1;M.int m 3 1;R.call m "runtime_vec_push"
+      end else begin
+        M.imm m 1 (if mode="vec_header_overflow" then Int64.max_int else 0x4000000000000000L);
+        M.int m 2 (if mode="vec_header_overflow" then 1 else 8);R.call m "runtime_vec_new"
+      end;M.branch m "fixture_failed"
   |"large_box"->
       (* The header makes this span a second 64KiB page too, and the String
          leaf needs a computed address beyond the memory immediate range. *)

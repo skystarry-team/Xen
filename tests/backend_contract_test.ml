@@ -1,5 +1,6 @@
 (* SPDX-License-Identifier: MIT OR Apache-2.0 *)
 let expect condition message = if not condition then failwith message
+let probe_jit = ref false
 
 module Probe : Backend_intf.S = struct
   let description : Backend_intf.description = {
@@ -9,7 +10,7 @@ module Probe : Backend_intf.S = struct
   type executable = unit
   let generate ?(jit=true) ?(jit_report=false) checked =
     Semantic_ir.verify (Semantic_ir.program checked);
-    expect (not jit && not jit_report) "runner lost backend options";
+    expect (jit= !probe_jit && not jit_report) "runner lost backend options";
     Error ({span=None; message="probe backend reached"} : Backend_intf.error)
   let write _ () = failwith "error result must not be written"
 end
@@ -31,15 +32,23 @@ let () =
   List.iter (fun name -> expect (Result.is_ok (Backend.of_string name))
     ("missing ARM64 backend: " ^ name)) ["aarch64-linux"; "arm64-linux"];
   let module Default = (val Backend.default : Backend_intf.S) in
-  expect (Default.description.target=Target.default) "registry default mismatch";
+  expect (Ok Default.description.target=Backend.default_target ()) "registry default mismatch";
+  List.iter(fun (architecture,expected)->
+    expect (Backend.host_target ~architecture ~system:"linux"=Ok (parsed expected)) "host target mismatch")
+    ["amd64","x86_64-linux";"arm64","aarch64-linux"];
+  expect (Result.is_error(Backend.host_target ~architecture:"other" ~system:"linux")) "unknown host accepted";
+  expect (Result.is_error(Backend.host_target ~architecture:"arm64" ~system:"macosx")) "non-Linux host accepted";
+  expect (not(Backend.default_jit (parsed "arm64-linux"))) "ARM64 JIT default enabled";
+  expect (Backend.default_jit (parsed "x86_64-linux")) "x86 JIT default disabled";
   let program=Parser.parse ~file:"probe.xen" "fn main(){}" in
   let case : Test_runner.case = {
     name="probe";function_name="main";owner="$entry";single=true;
     programs=[program];span={file="probe.xen";line=1;column=1};
   } in
-  (match Test_runner.run ~backend:(module Probe) ~jit:false case with
+  List.iter(fun jit->probe_jit:=Option.value jit ~default:false;
+  match Test_runner.run ~backend:(module Probe) ?jit case with
    | Test_runner.Compilation_error error ->
        expect (error.message="native backend error: probe backend reached")
          "runner did not use the injected backend"
-   | _ -> failwith "probe backend error was lost");
+   | _ -> failwith "probe backend error was lost") [None;Some false;Some true];
   print_endline "Backend target selection and driver contract passed"

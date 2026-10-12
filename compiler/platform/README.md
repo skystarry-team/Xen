@@ -9,7 +9,7 @@ They can move here when a shared platform contract is useful; the x86 writer's
 relocations must not become a dependency of another CPU backend.
 
 The bundled stdlib still contains Linux x86-64 syscalls and kernel record layouts.
-The ARM64 backend provides heap String and Box allocation/cleanup but rejects
-raw syscalls, collections and file operations, including
+The ARM64 backend provides heap String, Box and Vec allocation/cleanup with
+borrowed Slice views but rejects raw syscalls and file operations, including
 those in platform-dependent stdlib functions. Future support must select or lower
 platform services explicitly, while leaving user-supplied raw syscall numbers raw.

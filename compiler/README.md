@@ -4,7 +4,7 @@ The frontend produces checked Semantic IR. The driver selects a backend for an
 explicit CPU/OS pair; that backend owns machine lowering, its calling convention,
 runtime emission and executable construction. `x86_64-linux` retains full existing support.
 `aarch64-linux` (alias `arm64-linux`) now has an initial static backend for the
-core language, requiring `--jit=off`. See its [support matrix](cpu/arm64/README.md).
+core language and collections, with JIT off by default. See its [support matrix](cpu/arm64/README.md).
 
 ```text
 compiler/
@@ -75,8 +75,9 @@ placeholder backend that accidentally emits x86-64 code for another target.
 execute locally through the host kernel, requiring a compatible CPU/OS or a
 user-configured binary handler. Process launch failures identify the requested
 target. Cross-build on x86-64 and invoke `qemu-aarch64 ./program` explicitly for
-ARM64 execution; the compiler does not start an emulator. The default remains `x86_64-linux` on every
-host for compatibility. Host filesystem/process utilities are distinct from target
+ARM64 execution; the compiler does not start an emulator. The CLI default follows
+the compiler's OCaml build architecture on Linux. Explicit targets override it;
+ARM64 defaults to JIT off. Host filesystem/process utilities are distinct from target
 runtime operations.
 
 ## Future bb-scoped inline assembly

@@ -38,4 +38,5 @@ let emit m =
   M.label m "integer_output";M.int m 0 1;call m "runtime_write";
   M.load m 30 31 32;M.offset m 31 31 48;M.ret m;
   Float_runtime.emit m;
-  Heap_runtime.emit m ~fail
+  Heap_runtime.emit m ~fail;
+  Collection_runtime.emit m ~fail

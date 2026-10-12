@@ -2,7 +2,7 @@
 (library
  (name xen_compiler)
  (wrapped false)
- (modules backend test_runner)
+ (modules backend host_config test_runner)
  (libraries unix xen_common xen_x86_64 xen_arm64))
 
 (executable
@@ -27,3 +27,9 @@
  (deps main.exe)
  (mode (promote (into dist) (until-clean)))
  (action (copy main.exe xen)))
+
+(rule
+ (targets host_config.ml)
+ (action
+  (with-stdout-to host_config.ml
+   (echo "(* Generated from the OCaml compiler configuration, never uname/PATH. *)\nlet architecture = \"%{ocaml-config:architecture}\"\nlet system = \"%{ocaml-config:system}\"\n"))))

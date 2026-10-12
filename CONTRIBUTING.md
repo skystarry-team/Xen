@@ -1,12 +1,16 @@
 # Contributing to the demo
 
-Xen is an early demo for Linux x86-64. Reproducible bug reports, documentation
+Xen is an early demo for Linux x86-64 and an ARM64 core/collection subset. Reproducible bug reports, documentation
 corrections and small changes with a concrete use case are welcome at
 [skystarry-team/Xen](https://github.com/skystarry-team/Xen).
 
 Build with OCaml and Dune 3.18 or later (`make build`). Compiler tests require Python
 3.10 or later and binutils (`objdump`), with no third-party Python packages.
 The demo build was verified with OCaml 5.5.0 and Dune 3.24.2.
+Native ARM64 builds use the same dependencies and `make build`; use
+`make test-host` plus `make test-arm64` there. The full `make test` includes
+x86-specific execution/JIT checks. The [ARM64 guide](compiler/cpu/arm64/README.md)
+records actual compiler execution evidence and the QEMU child-execution boundary.
 `VERSION` declares the default compiler version. Make's `VERSION=...` override
 is embedded in the compiler and carried into both archive formats. Direct
 Dune builds use `VERSION`, or an explicit `XEN_BUILD_VERSION` override.
@@ -47,6 +51,13 @@ python3 benchmarks/jit_benchmark.py
 ```
 
 `make package VERSION=0.1.0-demo` creates the binary bundle;
+its name includes the supported platform (Linux) and bundled ELF architecture.
+Use `DUNE_WORKSPACE=... PACKAGE_CONTEXT=arm64 PACKAGE_ARCH=aarch64` with
+`PACKAGE_RUNNER='["/usr/bin/qemu-aarch64","-L","/path/to/sysroot"]'` for a
+cross-built ARM64 bundle. `PACKAGE_BINARY=...` packages an existing compiler
+without building; context builds do not promote over `compiler/dist/xen`.
+See the [ARM64 guide](compiler/cpu/arm64/README.md) for workspace setup and QEMU
+verification of the extracted package.
 `make source-package VERSION=0.1.0-demo` exports the public source tree
 without Git history or local artifacts. Both include the license notices.
 
