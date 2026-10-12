@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Shared Linux record decoders, used only by explicit Linux target services.
+module std.platform_linux;
+
+struct Stat {
+    size: Int,
+    modified_seconds: Int,
+    is_directory: Bool,
+    is_file: Bool,
+}
+
+#![bb]
+fn decode_stat(data: Ptr<Int>, mode_word: Int) -> Stat {
+    let mode = (raw_load(data, mode_word) % 65536 + 65536) % 65536;
+    let kind = mode / 4096;
+    return Stat {
+        size: raw_load(data, 6),
+        modified_seconds: raw_load(data, 11),
+        is_directory: kind == 4,
+        is_file: kind == 8,
+    };
+}
+
+fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, Int> {
+    let mut names: Vec<String> = [];
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if bytes.len() - offset < 20 { return Result<Vec<String>, Int>.Err(0); }
+        let length = i64(bytes.get(offset + 16)) + 256 * i64(bytes.get(offset + 17));
+        if length < 20 || length > bytes.len() - offset { return Result<Vec<String>, Int>.Err(0); }
+        let mut name: Vec<U8> = [];
+        let mut index = offset + 19;
+        while index < offset + length && bytes.get(index) != u8(0) {
+            name.push(bytes.get(index));
+            index = index + 1;
+        }
+        if index == offset + length || index == offset + 19 { return Result<Vec<String>, Int>.Err(0); }
+        let text = name.into_string();
+        if text != "." && text != ".." { names.push(text); }
+        offset = offset + length;
+    }
+    return Result<Vec<String>, Int>.Ok(names);
+}
+
+// Linux getcwd includes the NUL in its count and limits output to 4096 bytes.
+fn cwd(number: Int) -> Result<String, Int> {
+    #scope[bb] {
+        let buffer = raw_alloc<U8>(4096);
+        let mut count = syscall2(number, ptr_addr(buffer), 4096);
+        while count == -4 { count = syscall2(number, ptr_addr(buffer), 4096); }
+        if count < 0 {
+            raw_free(buffer);
+            return Result<String, Int>.Err(-count);
+        }
+        if count < 1 || count > 4096 || raw_load(buffer, 0) != u8(47) {
+            raw_free(buffer);
+            return Result<String, Int>.Err(2);
+        }
+        let mut bytes: Vec<U8> = [];
+        for index in 0..(count - 1) { bytes.push(raw_load(buffer, index)); }
+        raw_free(buffer);
+        return Result<String, Int>.Ok(bytes.into_string());
+    }
+}

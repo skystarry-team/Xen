@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Target services; raw results are negative errno or nonnegative success.
+module std.platform;
+use std.platform_linux;
+
+#![bb]
+fn read(fd: Int, address: Int, count: Int) -> Int { return syscall3(0, fd, address, count); }
+#![bb]
+fn write(fd: Int, address: Int, count: Int) -> Int { return syscall3(1, fd, address, count); }
+#![bb]
+fn open(address: Int, flags: Int, mode: Int) -> Int { return syscall3(2, address, flags, mode); }
+#![bb]
+fn close(fd: Int) -> Int { return syscall1(3, fd); }
+#![bb]
+fn directory(fd: Int, address: Int, count: Int) -> Int { return syscall3(217, fd, address, count); }
+#![bb]
+fn id() -> Int { return syscall0(39); }
+#![bb]
+fn parent_id() -> Int { return syscall0(110); }
+fn interrupted(raw: Int) -> Bool { return raw == -4; }
+fn read_flags() -> Int { return 0; }
+fn write_flags() -> Int { return 577; }
+fn append_flags() -> Int { return 1089; }
+fn directory_flags() -> Int { return 65536; }
+fn file_mode() -> Int { return 420; }
+fn cwd() -> Result<String, Int> { return std.platform_linux.cwd(79); }
+fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, Int> {
+    return std.platform_linux.decode_directory(bytes);
+}
+#![bb]
+fn metadata(path: Ptr<U8>) -> Result<std.platform_linux.Stat, Int> {
+    // x86-64 struct stat: 144 bytes, mode at byte 24.
+    let data = raw_alloc<Int>(18);
+    let mut result = syscall2(4, ptr_addr(path), ptr_addr(data));
+    while interrupted(result) { result = syscall2(4, ptr_addr(path), ptr_addr(data)); }
+    if result < 0 {
+        raw_free(data);
+        return Result<std.platform_linux.Stat, Int>.Err(-result);
+    }
+    let value = std.platform_linux.decode_stat(data, 3);
+    raw_free(data);
+    return Result<std.platform_linux.Stat, Int>.Ok(value);
+}
