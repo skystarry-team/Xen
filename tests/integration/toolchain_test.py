@@ -82,8 +82,8 @@ class ToolchainTests(unittest.TestCase):
     def test_unavailable_target_fails_before_loading_or_writing(self):
         output = self.cwd / "preserved"
         output.write_bytes(b"preserve existing output")
-        for command in ("build", "run", "test"):
-            for target in ("aarch64-windows", "x86_64-windows"):
+        for command in ("check", "build", "run", "test"):
+            for target in ("aarch64-windows", "x86_64-windows", "x86_64-macos", "arm64-darwin"):
                 with self.subTest(command=command, target=target):
                     args = [command, self.cwd / "missing.xen", f"--target={target}"]
                     if command == "build":
@@ -104,6 +104,36 @@ class ToolchainTests(unittest.TestCase):
             result = self.invoke("build", "missing.xen", *flags)
             self.assertEqual(result.returncode, 2)
             self.assertIn("Usage:", result.stderr)
+
+    def test_platform_modules_follow_target_without_fallback(self):
+        override = self.root / "override"
+        shutil.copytree(REPO / "stdlib", override)
+        arm = override / "platform/aarch64-linux/std/platform.xen"
+        x86 = override / "platform/x86_64-linux/std/platform.xen"
+        x86.write_text('module std.platform;fn marker()->Int{return 64;}')
+        arm.write_text('module std.platform;fn marker()->Bool{return true;}')
+        env = dict(self.env, XEN_STDLIB_ROOT=str(override))
+        source = self.source('use std.platform;fn main(){let x:Int=std.platform.marker();println(x);}')
+        self.success(self.invoke("check", source, "--target=x86_64-linux", env=env))
+        for target in ("aarch64-linux", "arm64-linux"):
+            for command in ("check", "build"):
+                result = self.invoke(command, source, f"--target={target}", env=env)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Bool", result.stderr)
+        # Discovery also resolves the requested ABI, before any attempt to exec.
+        arm.write_text('module std.platform;test fn selected(){let x:Int=true;}')
+        result = self.invoke("test", "std.platform", "--target=arm64-linux", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(str(arm), result.stderr)
+        arm.unlink()
+        (override / "std/platform.xen").write_text('module std.platform;fn marker()->Int{return 0;}')
+        (self.cwd / "std").mkdir()
+        (self.cwd / "std/platform.xen").write_text('module std.platform;fn marker()->Int{return 0;}')
+        for command, entry in (("check", source), ("build", source), ("test", "std.platform")):
+            result = self.invoke(command, entry, "--target=arm64-linux", env=env)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("target aarch64-linux", result.stderr)
+            self.assertIn(str(arm), result.stderr)
 
     def test_module_aliases(self):
         self.source('module guide.model;struct Pair<T>{value:T}'

@@ -24,7 +24,7 @@ let validate_type program span typ =
      introducing a recursive value layout. Visit each named type once per path. *)
   let rec visit seen = function
     |I8|U8|I16|U16|I32|U32|I64|U64|F32|F64|Bool|Unit|String|File->()
-    |Ref(_,t)|Box t|Vec t|Slice t->visit seen t
+    |Ref(_,t)|Box t|Vec t|Slice t|Ptr t->visit seen t
     |Function(args,result)->List.iter(visit seen)(result::args)
     |Named n when List.mem n seen->()
     |Named n->List.iter(fun(f:struct_field)->visit(n::seen)f.typ)(layout program n).fields
@@ -63,6 +63,13 @@ let runtime_error e span message =
   R.fail e.m (Printf.sprintf "%s:%d:%d: xen runtime error: %s\n"
     span.file span.line span.column message);
   M.label e.m after;label
+let raw_address e span typ (pointer:value) (index:value) =
+  let error=runtime_error e span "raw pointer offset out of bounds" in
+  address e 15 pointer.id;M.load e.m 9 15 0;M.load e.m 12 15 8;
+  load e 11 index;
+  (* Unsigned >= catches negative indices as well as the upper bound. *)
+  M.cmp e.m 11 12;M.cond e.m 2 error;
+  M.int e.m 13 (stride e.program typ);M.mul e.m 11 11 13;M.add e.m 9 9 11
 let place_address e reg (p:place) =
   let typ=ref e.func.locals.(p.root).typ in
   address e reg p.root;
@@ -424,8 +431,36 @@ let rvalue e (v:value) node =
       M.int m 1 (H.box_bytes(size e.program v.typ));R.call m "runtime_unmap"
   |Exchange(target,a)->load e 10 target;address e 9 v.id;copy m(size e.program v.typ);
       load e 9 target;address e 10 a.id;copy m(size e.program a.typ)
-  |Syscall _->unsupported ~span:v.span
-      "raw syscalls and platform-dependent stdlib modules are not implemented; x86-64 syscall numbers cannot run on ARM64"
+  |Raw_alloc(typ,count)->
+      let negative=runtime_error e v.span "raw allocation count must be non-negative"
+      and overflow=runtime_error e v.span "raw allocation size overflow"
+      and failed=runtime_error e v.span "raw allocation failed"
+      and empty=M.fresh m "raw_empty_" and done_=M.fresh m "raw_allocated_" in
+      load e 0 count;M.cmp_zero m 0;M.cond m 11 negative;M.cond m 0 empty;
+      M.imm m 1 (Int64.div Int64.max_int (Int64.of_int(stride e.program typ)));
+      M.cmp m 0 1;M.cond m 8 overflow;
+      M.int m 1 (stride e.program typ);M.mul m 0 0 1;R.call m "runtime_alloc";
+      M.imm m 9 (-4095L);M.cmp m 0 9;M.cond m 2 failed;
+      load e 1 count;M.branch m done_;
+      M.label m empty;M.int m 0 0;M.int m 1 0;
+      M.label m done_;address e 15 v.id;M.store m 0 15 0;M.store m 1 15 8
+  |Raw_load(typ,pointer,index)->
+      raw_address e v.span typ pointer index;M.mov m 10 9;
+      address e 9 v.id;copy m (size e.program typ)
+  |Raw_store(typ,pointer,index,a)->
+      raw_address e v.span typ pointer index;address e 10 a.id;copy m (size e.program typ)
+  |Raw_free(typ,pointer)->
+      let failed=runtime_error e v.span "raw free failed" and done_=M.fresh m "raw_freed_" in
+      address e 15 pointer.id;M.load m 0 15 0;M.load m 1 15 8;
+      M.cmp_zero m 1;M.cond m 0 done_;
+      M.int m 2 (stride e.program typ);M.mul m 1 1 2;R.call m "runtime_unmap";
+      M.cmp_zero m 0;M.cond m 11 failed;M.label m done_
+  |Ptr_addr(_,pointer)->address e 15 pointer.id;M.load m 0 15 0;store e v 0
+  |Ptr_len pointer->address e 15 pointer.id;M.load m 0 15 8;store e v 0
+  |Syscall(number::args)->
+      load e 8 number;List.iteri(fun reg arg->load e reg arg)args;
+      M.syscall m;store e v 0
+  |Syscall []->assert false
   |_->unsupported ~span:v.span "this operation is not implemented in the initial ARM64 backend"
 let operation e (op:operation) = match op.node with
   |Storage_live _|Storage_dead _->()

@@ -1,10 +1,10 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
 type architecture = X86_64 | Aarch64
-type operating_system = Linux | Windows
+type operating_system = Linux | MacOS | Windows
 type t = { architecture : architecture; operating_system : operating_system }
 
 let architecture_name = function X86_64 -> "x86_64" | Aarch64 -> "aarch64"
-let os_name = function Linux -> "linux" | Windows -> "windows"
+let os_name = function Linux -> "linux" | MacOS -> "macos" | Windows -> "windows"
 let to_string target =
   architecture_name target.architecture ^ "-" ^ os_name target.operating_system
 
@@ -20,7 +20,8 @@ let parse name =
         | "aarch64" | "arm64" -> Some Aarch64
         | _ -> None in
       let os = match operating_system with
-        | "linux" -> Some Linux | "windows" -> Some Windows | _ -> None in
+        | "linux" -> Some Linux | "macos" | "darwin" -> Some MacOS
+        | "windows" -> Some Windows | _ -> None in
       (match arch, os with
        | Some architecture, Some operating_system -> Ok { architecture; operating_system }
        | None, _ -> Error ("unknown target architecture '" ^ architecture ^ "'")

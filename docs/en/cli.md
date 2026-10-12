@@ -5,7 +5,7 @@ The Xen command-line interface has five subcommands:
 ```text
 xen version
 xen --version
-xen check <file.xen>
+xen check <file.xen> [--target=<architecture>-<os>]
 xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]
 xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]
 xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]
@@ -24,6 +24,8 @@ source archives retain it in their exported `VERSION` file.
 `xen check file.xen` loads the entry file and its project imports, then checks syntax,
 types, ownership, references, and capabilities. It emits no output and exits 0 when the
 project is valid. Compiler diagnostics go to stderr and a failed check exits 1.
+It uses the selected target's platform stdlib profile; `--target` follows the same
+default and validation as build. It does not generate code or accept opt/JIT flags.
 
 ## `build`
 
@@ -66,16 +68,18 @@ and discovery rules.
 
 ## Target selection
 
-`build`, `run`, and `test` accept `--target=x86_64-linux` or
+`check`, `build`, `run`, and `test` accept `--target=x86_64-linux` or
 `--target x86_64-linux`, before or after the source/test path. The default follows
 the compiler's build architecture on Linux: x86-64 or AArch64. Explicit targets
 take precedence. `aarch64-linux` (alias `arm64-linux`) supports the core language,
 scalar F32/F64, heap Strings, recursive Box/Vec ownership and borrowed Slice.
 JIT defaults to off for ARM64 and on for x86-64 after target selection, regardless
-of option order. Explicit ARM64 JIT requests, Ptr, numeric file readers and raw syscalls
-are explicitly rejected. `x86_64-windows` remains unimplemented.
+of option order. ARM64 supports raw POD memory/syscalls and platform-dependent stdlib;
+numeric file readers and explicit JIT requests remain rejected.
+`x86_64-macos` and `aarch64-macos` (OS alias `darwin`) are recognized but unimplemented,
+as are Windows targets. They never select a Linux backend implicitly.
 Invalid or unavailable targets fail before source loading or output creation.
-`check` remains independent of backend selection.
+All source loading uses the generation target, even when the compiler host differs.
 
 `run`/`test` execute through the host kernel and require a compatible CPU/OS or
 a configured binary handler; selecting a target does not provide emulation.

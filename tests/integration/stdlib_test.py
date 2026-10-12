@@ -1,15 +1,22 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
-"""Small Linux stdlib integration tests through the unchanged native pipeline."""
+"""Common stdlib contracts on explicit targets and compiler/program runners."""
 import json
 import os
+import platform
 from pathlib import Path
 import resource
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 REPO = Path(__file__).resolve().parents[2]
-XEN = REPO / "compiler/dist/xen"
+XEN = Path(os.getenv("XEN_BIN", str(REPO / "compiler/dist/xen"))).resolve()
+HOST_RUNNER = json.loads(os.getenv("XEN_HOST_RUNNER", "[]"))
+RUNNER = json.loads(os.getenv("XEN_STDLIB_RUNNER", "[]"))
+TARGET = os.getenv("XEN_STDLIB_TARGET")
+OPT = os.getenv("XEN_STDLIB_OPT", "off")
 
 
 class StdlibTests(unittest.TestCase):
@@ -18,6 +25,21 @@ class StdlibTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    def build_source(self, path, output):
+        target = [f"--target={TARGET}"] if TARGET else []
+        built = subprocess.run([*HOST_RUNNER, str(XEN), "build", str(path),
+                                *target, f"--opt={OPT}", "-o", str(output)],
+                               cwd=self.root, capture_output=True, timeout=120)
+        self.assertEqual(built.returncode, 0, built.stderr.decode(errors="replace"))
+
+    def execution(self, executable, args=(), memory_limit=None):
+        runner = list(RUNNER)
+        if memory_limit and runner:
+            # This option limits guest VA; host QEMU requires its own mappings.
+            self.assertIn("qemu-", Path(runner[0]).name)
+            runner += ["-R", str(memory_limit), "-s", "65536"]
+        return [*runner, str(executable), *map(str, args)]
+
     def run_source(self, source, data=b"", limit=None, memory_limit=None):
         path = self.root / "app.xen"
         path.write_text(source)
@@ -25,18 +47,14 @@ class StdlibTests(unittest.TestCase):
             if limit:
                 _, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
                 resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
-            if memory_limit:
+            if memory_limit and not RUNNER:
                 _, hard = resource.getrlimit(resource.RLIMIT_AS)
                 resource.setrlimit(resource.RLIMIT_AS, (memory_limit, hard))
-        command = [str(XEN), "run", str(path)]
-        if memory_limit:
-            executable = self.root / "app"
-            built = subprocess.run([str(XEN), "build", str(path), "-o", str(executable)],
-                                   cwd=self.root, capture_output=True, timeout=30)
-            self.assertEqual(built.returncode, 0, built.stderr.decode(errors="replace"))
-            command = [str(executable)]
+        executable = self.root / "app"
+        self.build_source(path, executable)
+        command = self.execution(executable, memory_limit=memory_limit)
         result = subprocess.run(command, cwd=self.root,
-                                input=data, capture_output=True, timeout=30,
+                                input=data, capture_output=True, timeout=120,
                                 preexec_fn=restrict if limit or memory_limit else None)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         return result.stdout
@@ -87,8 +105,10 @@ class StdlibTests(unittest.TestCase):
 
     def test_key_values_cli(self):
         example = REPO / "examples/key_values.xen"
+        executable = self.root / "key-values"
+        self.build_source(example, executable)
         def run(data=b"", arguments=()):
-            return subprocess.run([str(XEN), "run", str(example), "--", *arguments],
+            return subprocess.run(self.execution(executable, arguments),
                                   cwd=self.root, input=data, capture_output=True, timeout=30)
         for data, expected in [(b"", b""), (b"\n", b""), (b"a=1\nb=\n", b"a: 1\nb: \n"),
                                (b"a=b=c", b"a: b=c\n"), (b"\nk=\0\xff\r\n\n", b"k: \0\xff\r\n")]:
@@ -305,6 +325,23 @@ fn main() {
                   'assert(match std.io.write_fd(-1,"x"){Result.Err(std.io.IoError.Write(9))=>true,_=>false});}')
         self.assertEqual(self.run_source(source, b"a\0\xff\n"), b"a\0\xff\n")
         self.assertEqual(self.run_source(source, b""), b"")
+        data = bytes(range(256)) * 65
+        self.assertEqual(self.run_source(source, data), data)
+
+    def test_recoverable_file_errors_and_copy(self):
+        path = self.root / "input"
+        path.write_bytes(b"a\0\xff\n")
+        source = ('use std.fs;use std.io;fn main(){'
+                  'assert(match std.fs.copy("input","output"){Result.Ok(4)=>true,_=>false});'
+                  'assert(match std.fs.read("."){Result.Err(std.io.IoError.Read(21))=>true,_=>false});'
+                  'assert(match std.fs.write("/dev/full","x"){Result.Err(std.io.IoError.Write(28))=>true,_=>false});'
+                  'assert(match std.fs.close_fd(-1){Result.Err(std.io.IoError.Close(9))=>true,_=>false});'
+                  'assert(match std.io.write_fd(-1,""){Result.Ok(0)=>true,_=>false});'
+                  'let nul:Vec<U8>=[97,0,98];'
+                  'assert(match std.fs.read(nul.into_string()){Result.Err(std.io.IoError.InvalidPath)=>true,_=>false});'
+                  'assert(match std.fs.read("missing"){Result.Err(std.io.IoError.Open(2))=>true,_=>false});}')
+        self.assertEqual(self.run_source(source, limit=32), b"")
+        self.assertEqual((self.root / "output").read_bytes(), path.read_bytes())
 
     def test_append_metadata_and_errors(self):
         path = self.root / "bytes"
@@ -366,16 +403,32 @@ fn main() {
         source.write_text('use std.env;use std.io;fn main(){println(match std.env.cwd(){'
                           'Result.Err(std.io.IoError.Cwd(code))=>code,_=>0});}')
         output = self.root / "cwd-test"
-        built = subprocess.run([str(XEN), "build", str(source), "-o", str(output)],
-                               capture_output=True, timeout=30)
-        self.assertEqual(built.returncode, 0, built.stderr)
+        self.build_source(source, output)
         vanished = self.root / "vanished"
         vanished.mkdir()
-        result = subprocess.run([str(output)], cwd=vanished,
+        result = subprocess.run(self.execution(output), cwd=vanished,
                                 preexec_fn=lambda: os.rmdir(vanished),
                                 capture_output=True, timeout=10)
         self.assertEqual((result.returncode, result.stdout), (0, b"2\n"))
 
 
 if __name__ == "__main__":
+    if "--arm64" in sys.argv:
+        sys.argv.remove("--arm64")
+        TARGET = "aarch64-linux"
+        if platform.system() == "Linux" and platform.machine() in ("aarch64", "arm64"):
+            RUNNER = []
+        else:
+            emulator = shutil.which("qemu-aarch64")
+            if not emulator:
+                if os.getenv("XEN_REQUIRE_ARM64") == "1":
+                    sys.exit("ARM64 stdlib execution requires qemu-aarch64 or a native ARM64 host")
+                print("SKIP ARM64 stdlib: no compatible native host or qemu-aarch64", flush=True)
+                sys.exit(0)
+            RUNNER = [emulator]
+        succeeded = True
+        for OPT in ("off", "basic"):
+            print(f"ARM64 stdlib ({OPT})", flush=True)
+            succeeded = unittest.main(exit=False).result.wasSuccessful() and succeeded
+        sys.exit(0 if succeeded else 1)
     unittest.main()

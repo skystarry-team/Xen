@@ -198,5 +198,11 @@ fn main() {
 
 `python3 tests/integration/stdlib_test.py`는 API 계약, binary stdin/append, symlink metadata,
 cwd 성공/실패, 여러 directory batch, malformed record와 제한된 fd 아래 반복 cleanup을
-검사한다. `make test`에도 포함된다. low-level syscall 번호·stat layout은 Linux x86-64
-UAPI header를 기준으로 하며 다른 platform abstraction은 도입하지 않았다.
+검사한다. `--arm64`를 추가하면 QEMU 또는 native ARM64에서 off/basic 모드를 모두
+검사하며 `make test`와 `make test-arm64`에 포함된다.
+`std.io`·`std.fs`·`std.env`·`std.process`는 내부 `std.platform` 서비스를 사용한다.
+loader는 호스트와 별개인 `--target`으로 `stdlib/platform/<target>/std/platform.xen`을
+선택하며 check와 test 발견 단계에도 같은 타깃을 전달한다. 없는 구현을 다른 타깃으로
+대체하지 않는다. Linux x86-64와 AArch64 구현을 모든 배포본에 포함한다.
+`open_path`의 flags/mode와 `decode_directory`의 record는 타깃 native ABI 값이다.
+macOS Intel/Apple Silicon 타깃은 인식하지만 Darwin/Mach-O 실행 지원은 미구현이다.

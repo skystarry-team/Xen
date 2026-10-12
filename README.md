@@ -61,8 +61,10 @@ compiler/dist/xen test std.string
 Linux ARM64 source builds use the same OCaml/Dune commands. The CLI defaults to
 the compiler's build architecture; ARM64 defaults to JIT off and x86-64 to on.
 Use explicit `--target` for cross compilation. ARM64 supports the core language
-and collections, managed `File` operations and `read_text`. Numeric file readers,
-Ptr, raw syscalls and JIT remain unsupported. See the
+and collections, managed `File` operations, `read_text`, raw POD memory/syscalls
+and platform-selected `std.io`/`std.fs`/`std.env`/`std.process`. Numeric file readers
+and JIT remain unsupported. Intel/Apple Silicon macOS targets are recognized for
+extension but remain unimplemented; see the [platform contract](compiler/platform/README.md). See the
 [ARM64 build and validation guide](compiler/cpu/arm64/README.md).
 
 `check` validates types, ownership and borrows; `build` writes an executable;

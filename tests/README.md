@@ -64,6 +64,19 @@ Runtime fixtures check path-size overflow before access, failed-close cell
 invalidation and inactive-close/empty-write no-ops.
 A bounded guest-page filler distinguishes ENOMEM at the final exact-size String
 allocation, after EOF, from geometric buffer growth failure.
+Raw memory tests add descriptor aliases, padded generic POD structs, FP bits,
+zero counts, signed/unsigned widths, negative/boundary indices, size overflow and
+allocation failure. Raw syscall tests cover all arities and argument order without
+number translation. Platform stdlib success/error tests check normalized metadata,
+directory flags, cwd and exact buffer/fd cleanup.
+
+`python3 tests/integration/stdlib_test.py --arm64` runs the common contract suite
+with both optimizers using native ARM64 or QEMU. It includes binary stdin/append,
+symlink metadata, malformed and multi-batch directory records, removed cwd, low fd
+limits and bounded guest VA. For a custom compiler/runner, use `XEN_BIN`, JSON
+`XEN_HOST_RUNNER`, `XEN_STDLIB_TARGET`, JSON `XEN_STDLIB_RUNNER` and `XEN_STDLIB_OPT`.
+Toolchain tests prove missing platform profiles cannot fall back to common/project
+files, and macOS Intel/Apple Silicon targets fail before source/output access.
 
 `make test-host` checks compiler version, import/check, default-target build/run/test,
 both cross-build targets, relocated stdlib discovery and binary packaging. It
@@ -81,4 +94,7 @@ create an archive. To test context builds too, use the cross-workspace
 ARM64 guide; the normal `make package` builds the default context independently.
 Set `XEN_HOST_ARCHIVE` to that context-built archive to verify its actual contents
 and relocated execution in the same host tests.
+The platform host test uses the extracted compiler to build and execute stdlib I/O,
+metadata/directory/cwd/process calls for both CPU targets, independently of the
+compiler's own architecture.
 See [ARM64 compiler validation](../compiler/cpu/arm64/README.md).

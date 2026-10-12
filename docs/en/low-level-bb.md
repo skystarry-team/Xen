@@ -56,10 +56,14 @@ dereferencing are not available.
 ## Linux syscalls
 
 `syscall0` through `syscall6` accept a syscall number and up to six `I64` arguments,
-evaluated left to right, and return the raw Linux result as `I64`. The ABI uses
-`rax/rdi/rsi/rdx/r10/r8/r9`. Negative kernel errno values are not converted to
+evaluated left to right, and return the raw Linux result as `I64`. x86-64 uses
+`rax/rdi/rsi/rdx/r10/r8/r9`; AArch64 uses `x8/x0/x1/x2/x3/x4/x5`.
+Syscall numbers are target-native and passed unchanged, including unknown numbers.
+Negative kernel errno values are not converted to
 `Result`; wrappers that need recoverable errors belong in Xen standard-library code.
-The only target is Linux x86-64.
+Both Linux x86-64 and AArch64 support these operations. Use std.io/fs/env/process
+for target-selected services rather than putting CPU-specific syscall numbers in
+portable application code.
 
 ## Capability error
 

@@ -37,7 +37,7 @@ explicitly. The x86-64 adapter translates existing emitter errors into this cont
 
 `Target.t` separates architecture from operating system. ABI, syscall conventions
 and executable formats belong to a concrete combination: Linux ELF/syscalls are
-not properties of every x86-64 target. A future Windows implementation needs its
+not properties of every x86-64 target. Future macOS/Windows implementations need their
 own adapter and platform implementation, even if it reuses instruction encoding.
 The existing ELF writer stays in `cpu/x86_64/` because its relocations and ELF machine
 identifier are x86-64 specific. Runtime blobs and the scalar JIT stay there too. See [platform boundaries](platform/README.md).
@@ -59,13 +59,12 @@ placeholder backend that accidentally emits x86-64 code for another target.
   behavior; it does not specify how a new backend assigns machine registers.
 - Fusion uses a conservative 8-byte-slot storage budget. This is an optimization
   heuristic, not a backend stack-frame allocation API.
-- Bundled `stdlib/` code currently contains Linux x86-64 syscall numbers and kernel
-  record layouts. It is **not portable merely because the frontend is shared**.
-  Examples include `std.io`, `std.fs`, `std.env`, and `std.process`. The ARM64 backend rejects raw syscalls and unsupported storage/operations,
-  so these modules cannot accidentally execute x86 syscall numbers. Full ARM64 support
-  must introduce platform runtime entry points or select a target-specific stdlib
-  root in the driver/project-loading pipeline before checking source. Do not change
-  executable-relative stdlib discovery based on the compiler's CPU.
+- `std.io`, `std.fs`, `std.env`, and `std.process` use target-selected `std.platform`
+  services. Profiles in `stdlib/platform/<target>/std/platform.xen` own syscall
+  numbers, flags and kernel layouts; missing profiles fail without fallback.
+  Both Linux profiles ship with every compiler. Executable-relative stdlib discovery
+  remains independent of the target. Checking and test discovery receive the same
+  target as generation; discovered test ASTs cannot be reused with another backend.
 - User `bb` `syscall0`–`syscall6` numbers remain raw values for the selected target's
   OS ABI. Backends must not silently translate x86-64 syscall numbers into ARM64
   numbers. Capability checking and arity/type checks stay in common; the syscall
@@ -79,6 +78,12 @@ ARM64 execution; the compiler does not start an emulator. The CLI default follow
 the compiler's OCaml build architecture on Linux. Explicit targets override it;
 ARM64 defaults to JIT off. Host filesystem/process utilities are distinct from target
 runtime operations.
+
+Intel/Apple Silicon macOS targets are recognized as x86_64-macos/aarch64-macos;
+arm64 and darwin aliases normalize to these names. They require separate Darwin
+services and Mach-O backends and remain explicitly unimplemented. Recognition of
+an unsupported host cannot crash module initialization or prevent `version` from
+running. See the [extension contract](platform/README.md).
 
 ## Future bb-scoped inline assembly
 

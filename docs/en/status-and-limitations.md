@@ -6,7 +6,8 @@ an integer/float/Bool, control-flow, function, reference, aggregate, heap-string
 and recursive Box/Vec ownership with borrowed Slice views, `std.string`, `std.iter`
 and `std.hashmap`, managed `File` operations and `read_text`. The CLI defaults to the compiler's build architecture on Linux;
 explicit `--target` overrides it. ARM64 JIT defaults to off.
-Ptr, numeric file readers, raw syscalls and JIT are not yet supported on ARM64; see its
+ARM64 also supports Ptr/raw POD memory/syscalls and target-selected std.io/fs/env/process.
+Numeric file readers and JIT are not yet supported on ARM64; see its
 [support matrix](../../compiler/cpu/arm64/README.md).
 
 ## Supported
@@ -40,7 +41,7 @@ Ptr, numeric file readers, raw syscalls and JIT are not yet supported on ARM64; 
 - Project `module`/`import`, file-local module aliases, toolchain `use std.*` and `use core.*`, bundled Xen-source
   standard library, and concrete named function values.
 - `explc` and `bb` lexical capabilities; typed raw pointers for scalar/POD values and
-  Linux x86-64 syscalls 0 through 6 within `bb`.
+  Linux x86-64/AArch64 syscall primitives with 0 through 6 arguments within `bb`.
 - `xen check`, `build`, `run`, and native `test` commands.
 - Optional AOT `--opt=basic` integer/Bool region optimization and bounded leaf fusion;
   see [optimization](optimization.md). Default optimization is off.

@@ -55,7 +55,7 @@ let stdlib_root span =
         raise(Error(span,"bundled stdlib not found; searched: "^String.concat ", " candidates^
           "; reinstall the toolchain or set XEN_STDLIB_ROOT for development")))
 
-let load_graph ~project_root ~expected entry =
+let load_graph ~target ~project_root ~expected entry =
   let states:(string,[`Visiting|`Done])Hashtbl.t=Hashtbl.create 16 in
   let order=ref [] in
   let parse path = Parser.parse ~file:path (read_file path) in
@@ -72,10 +72,14 @@ let load_graph ~project_root ~expected entry =
               Core_modules.program requested at
           | Project_root|Std_root->
               let base=if root=Std_root then stdlib_root at else project_root in
+              (* std.platform is an explicit target service contract. Never use
+                 a project or common module as a fallback for a missing ABI. *)
+              let base=if requested="std.platform" then
+                  Filename.concat base ("platform/"^Target.to_string target) else base in
               let path=module_path base requested in
               if not(Sys.file_exists path) || Sys.is_directory path then
                 raise(Error(at,(if root=Std_root then "std module" else "import file")^
-                  " not found for module '"^requested^"': "^path));
+                  " not found for module '"^requested^"' (target "^Target.to_string target^"): "^path));
               parse path in
         Hashtbl.add states requested `Visiting;
         (match program.module_decl with
@@ -107,7 +111,7 @@ let load_graph ~project_root ~expected entry =
     entry :: List.rev !order
   end
 
-let load ?root entry_path =
+let load ?(target=Target.default) ?root entry_path =
   let entry=Parser.parse ~file:entry_path (read_file entry_path)in
   let project_root=Option.value ~default:(Filename.dirname entry_path)root in
   let expected=match root with None->Filename.basename entry_path |> Filename.remove_extension
@@ -117,10 +121,10 @@ let load ?root entry_path =
           raise(Error({file=entry_path;line=1;column=1},"entry is outside project root"));
         let relative=String.sub path(String.length prefix)(String.length path-String.length prefix)in
         String.map(fun c->if c='/'then '.'else c)(Filename.remove_extension relative)in
-  load_graph ~project_root ~expected entry
+  load_graph ~target ~project_root ~expected entry
 
-let load_toolchain name =
+let load_toolchain ?(target=Target.default) name =
   let span={file="<xen test "^name^">";line=1;column=1}in
   let entry={ (Core_modules.program "$tests" span) with
     imports=[{import_name=name;import_origin=Toolchain;import_span=span;import_alias=None}]}in
-  load_graph ~project_root:"." ~expected:"$tests" entry
+  load_graph ~target ~project_root:"." ~expected:"$tests" entry

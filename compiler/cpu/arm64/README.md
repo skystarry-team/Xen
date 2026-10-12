@@ -38,11 +38,13 @@ compile errors before an output executable is written.
 | Vec<T> | Supported elements: scalars, Unit, String, File, supported aggregates, Box and nested Vec; construction, growth, get/index for cloneable elements, set, pop, swap, replace, deep clone, equality and cleanup |
 | Slice<T>, String.as_bytes() | Read-only views with checked bounds and existing frontend borrow/escape rules; element references and field projections |
 | Numeric collections, byte conversion | `zeros`, `repeat`, Vec<I64/F64> output and Vec<U8>.into_string() |
-| std.string, std.iter, std.hashmap | Collection paths supported; Ptr iteration and platform-dependent imports remain unsupported |
+| std.string, std.iter, std.hashmap | Supported, including bb-scoped Ptr iteration |
 | JIT and JIT reports | Rejected when explicitly requested |
 | File, `read_text` | Owned move-only fd; open_read/open_write, read/write/close/is_open, aggregate transfer and recursive cleanup |
-| Ptr, raw memory, `read_ints`, `read_floats` | Rejected |
-| User raw syscalls, platform-dependent stdlib | Rejected; existing x86 syscall numbers are never emitted as ARM64 calls |
+| Ptr, raw memory | Checked allocation/access/free for scalar and named POD elements; non-owning descriptors |
+| std.io, std.fs, std.env, std.process | Target-selected Linux AArch64 services, recoverable I/O and normalized metadata |
+| User raw syscalls | Supported in bb; numbers passed unchanged through x8 and x0..x5 |
+| `read_ints`, `read_floats` | Rejected pending checked token parsers |
 
 The compiler generates every function retained in checked IR, so unsupported code
 in an unused function or imported module may also reject a build. `check` only
@@ -124,8 +126,12 @@ and inactive defaults; it does not interpret overlapping union storage.
 `heap_runtime.ml` emits Linux AArch64 `mmap`/`munmap` services with RW,
 private anonymous mappings. Size arithmetic and negative syscall errors are
 checked before pointers are used. Allocation failure is fatal and exits without
-unwinding, as in the existing runtime. Ptr and raw access remain rejected
-until their own lifetime and platform contracts are implemented.
+unwinding, as in the existing runtime. `Ptr<T>` is a 16-byte non-owning address/count
+descriptor. Raw allocation uses zeroed mappings and aligned POD element strides;
+negative counts, multiplication overflow and out-of-bounds offsets are checked.
+Zero count returns a null descriptor; explicit free unmaps exactly count times stride.
+Descriptor copies alias storage: bb callers remain responsible for avoiding leaks,
+double free and use after free. FP raw access preserves bits, including negative zero.
 
 ## Collections
 
@@ -190,9 +196,10 @@ compiler/dist/xen build examples/file_lifecycle.xen --target=aarch64-linux -o /t
 qemu-aarch64 /tmp/xen-file /tmp/xen-disposable-file
 ```
 
-This example creates or overwrites the supplied path. Managed File support does
-not make `std.io`/`std.fs`/`std.env`/`std.process` portable: those modules still
-contain x86-specific raw syscalls, Ptr operations and kernel record layouts.
+This example creates or overwrites the supplied path. `std.io`/`std.fs`/`std.env`/
+`std.process` now use the selected `std.platform` service implementation, including
+ARM-specific openat/newfstatat, stat mode layout and directory flags. Recoverable
+I/O preserves binary bytes and releases temporary buffers/fds on returned errors.
 `read_ints` and `read_floats` need their own checked token parsers and remain
 source-located compile errors in this stage.
 
@@ -281,11 +288,11 @@ the [Linux generic syscall table](https://github.com/torvalds/linux/blob/master/
 
 ## Next stages
 
-Add checked numeric file token parsing for `read_ints` and `read_floats`. Full stdlib
-support needs explicit platform services or target-selected module implementations,
-including ARM64 syscall numbers and kernel structures. Keep user raw syscall
-numbers raw; do not silently translate them. The future OS boundary is documented
-in [platform/](../../platform/README.md).
+Add checked numeric file token parsing for `read_ints` and `read_floats`.
+Linux stdlib services are implemented through target-selected modules; the
+[platform boundary](../../platform/README.md) also specifies the next macOS Intel
+and Apple Silicon steps, with explicit unimplemented targets until Darwin runtimes
+and Mach-O writers exist. User raw syscall numbers remain untranslated.
 
 `make test-arm64` checks integer and FP instruction words against independent
 assembly, then runs both optimization levels under Linux ARM64 or QEMU.

@@ -107,7 +107,7 @@
 
 ## 플랫폼과 ABI
 
-현재 target은 Linux x86-64 하나다. compiler는 `_start`, stack frame, 내부 함수 ABI,
+Linux x86-64와 AArch64에서 compiler는 `_start`, stack frame, 내부 함수 ABI,
 instruction encoding과 ELF layout을 직접 만든다. 출력 ELF는 RX text, read-only data,
 RW data segment를 분리한다.
 
@@ -120,7 +120,7 @@ RW data segment를 분리한다.
 향후 OS별 서비스와 실행 파일 형식 경계는 `compiler/platform/`에서 관리합니다.
 
 기본 타깃은 Linux에서 컴파일러를 빌드한 아키텍처를 따릅니다.
-`build`, `run`, `test`에 명시한 `--target`이 기본값보다 우선합니다.
+`check`, `build`, `run`, `test`에 명시한 `--target`이 기본값보다 우선합니다.
 `--target=aarch64-linux`를 지정하면 ARM64 백엔드를 사용합니다.
 `arm64-linux` 별칭도 허용합니다. 외부 assembler/linker 없이 정적 Linux AArch64
 ELF를 생성하며, 정수·F32/F64·Bool·제어 흐름·함수·참조·지원 타입의 구조체와 enum·
@@ -137,11 +137,15 @@ ELF를 생성하며, 정수·F32/F64·Bool·제어 흐름·함수·참조·지�
 
 move-only `File`의 열기·읽기·쓰기·닫기·이동과 aggregate/Box/Vec 내부 정리,
 바이트를 보존하는 `read_text`도 지원합니다.
-현재 ARM64에서는 JIT, Ptr, `read_ints`·`read_floats`,
-raw syscall과 이를 사용하는 플랫폼 의존 표준 라이브러리를 명시적 오류로 거부합니다.
+ARM64에서 비소유 `Ptr<T>`, 검사된 raw POD 메모리 연산과 raw syscall도 지원합니다.
+`std.io`·`std.fs`·`std.env`·`std.process`는 출력 타깃별 `std.platform` 구현을 사용합니다.
+현재 ARM64에서는 JIT와 `read_ints`·`read_floats`를 명시적 오류로 거부합니다.
 JIT 기본값은 ARM64 타깃에서 off, x86-64 타깃에서 on입니다.
 명시적인 ARM64 `--jit=on`과 `--jit-report`는 계속 거부합니다.
 `x86_64-windows`와 `aarch64-windows`는 아직 미구현입니다.
+`x86_64-macos`와 `aarch64-macos`도 인식하지만 미구현입니다. `arm64`·`darwin` 별칭을
+정규화하며, macOS 호스트에서 Linux backend로 자동 대체하지 않습니다.
+Darwin 서비스·Mach-O·Intel/Apple Silicon 실행 검증은 다음 OS 확장 단계입니다.
 
 `run`과 `test`는 호스트 커널을 통해 실행하며 에뮬레이터를 자동 실행하지 않습니다.
 x86-64에서 만든 ARM64 실행 파일은 `qemu-aarch64 ./app`으로 검증할 수 있습니다.

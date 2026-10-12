@@ -74,6 +74,40 @@ class HostTests(unittest.TestCase):
             self.execute_generated(output, "file host\n", args=(path,))
             self.assertEqual(path.read_bytes(), b"file host\n")
 
+    def test_compiler_emits_platform_stdlib_program(self):
+        self.source.write_text('use std.fs;use std.env;use std.io;use std.process;fn main(){'
+                               'assert(std.process.id()>0 && std.process.parent_id()>0);'
+                               'assert(match std.env.cwd(){Result.Ok(p)=>p.len()>0,_=>false});'
+                               'assert(match std.fs.write(arg(0),"platform host"){Result.Ok(13)=>true,_=>false});'
+                               'assert(match std.fs.append(arg(0),"\\n"){Result.Ok(1)=>true,_=>false});'
+                               'assert(match std.fs.metadata(arg(0)){Result.Ok(m)=>m.is_file && !m.is_directory && m.size==14,_=>false});'
+                               'assert(match std.fs.read_dir("."){Result.Ok(names)=>names.len()>0,_=>false});'
+                               'let text=match std.fs.read(arg(0)){Result.Ok(s)=>s,_=>"bad"};'
+                               'std.io.write_stdout(text);}')
+        binary = XEN
+        if os.getenv("XEN_HOST_ARCHIVE"):
+            with tarfile.open(Path(os.environ["XEN_HOST_ARCHIVE"]).resolve()) as bundle:
+                name = bundle.getnames()[0].split("/")[0]
+                bundle.extractall(self.root / "platform-archive", filter="data")
+            relocated = self.root / "platform-package"
+            (self.root / "platform-archive" / name).rename(relocated)
+            binary = relocated / "bin/xen"
+        # An ARM compiler must select x86 services when explicitly cross-building.
+        for target in (ARCH, "x86_64" if ARCH == "aarch64" else "aarch64"):
+            self.success(self.invoke("check", self.source, f"--target={target}-linux", binary=binary))
+            for opt in ("off", "basic"):
+                output = self.root / ("platform-"+target+"-"+opt)
+                self.success(self.invoke("build", self.source, f"--target={target}-linux",
+                                         f"--opt={opt}", "-o", output, binary=binary))
+                self.assertEqual(package.binary_architecture(output), target)
+                execution = [str(output), str(self.root / "host-file")]
+                if target != HOST_ARCH:
+                    emulator = shutil.which("qemu-aarch64" if target == "aarch64" else "qemu-x86_64")
+                    self.assertIsNotNone(emulator)
+                    execution.insert(0, emulator)
+                actual = subprocess.run(execution, cwd=self.root, capture_output=True, text=True, timeout=30)
+                self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, "platform host\n", ""))
+
     def test_version_check_default_build_and_cross_build(self):
         self.assertEqual(self.success(self.invoke("version")), "xen "+(REPO / "VERSION").read_text().strip()+"\n")
         self.success(self.invoke("check", self.source))

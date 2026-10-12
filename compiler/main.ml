@@ -10,8 +10,8 @@ let print_diagnostic (diagnostic:Checker.diagnostic) =
     prerr_endline (location span ^ ": note: " ^ message)) diagnostic.notes;
   Option.iter (fun help -> prerr_endline ("help: " ^ help)) diagnostic.help
 
-let compile path =
-  let programs = try Project_loader.load path with
+let compile ~target path =
+  let programs = try Project_loader.load ~target path with
     | Sys_error message -> fail (path ^ ": " ^ message)
     | Lexer.Error (span, message) | Parser.Error (span, message) ->
         fail (location span ^ ": syntax error: " ^ message)
@@ -42,7 +42,7 @@ let optimize opt report checked =
       print_diagnostic {span;message="optimization error: "^message;notes;help=None};exit 1
 
 let build (module B : Backend_intf.S) opt report jit jit_report source output =
-  match B.generate ~jit ~jit_report (optimize opt report (compile source)) with
+  match B.generate ~jit ~jit_report (optimize opt report (compile ~target:B.description.target source)) with
   | Error error ->
       let prefix = match error.span with None -> "" | Some span -> location span ^ ": " in
       fail (prefix ^ "native backend error: " ^ error.message)
@@ -64,7 +64,7 @@ let run backend opt report jit jit_report source arguments =
         Printf.eprintf "program terminated by signal %d\n" signal; exit (128 + signal))
 
 let usage () =
-  prerr_endline "Usage:\n  xen version | --version\n  xen check <file.xen>\n  xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]\n  xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]\n  xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]";
+  prerr_endline "Usage:\n  xen version | --version\n  xen check <file.xen> [--target=<architecture>-<os>]\n  xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]\n  xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]\n  xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]";
   exit 2
 
 (* Compiler options may occur before or after the source/target. The run
@@ -84,6 +84,8 @@ type options = {
 let parse_options command arguments =
   let rec loop options = function
     | [] -> options
+    | flag :: _ when command="check" &&
+        (String.starts_with ~prefix:"--opt" flag || String.starts_with ~prefix:"--jit" flag) -> usage()
     | "--opt=off" :: rest -> loop {options with opt=Semantic_opt.Off} rest
     | "--opt=basic" :: rest -> loop {options with opt=Semantic_opt.Basic} rest
     | "--opt-report" :: rest -> loop {options with report=true} rest
@@ -122,7 +124,11 @@ let jit_option backend options =
 let () =
   match Array.to_list Sys.argv with
   | [_; ("version" | "--version")] -> Printf.printf "xen %s\n" Build_version.current
-  | [_; "check"; source] -> ignore (compile source)
+  | _ :: "check" :: options ->
+      let o=parse_options "check" options in
+      let source=match o.source with Some source->source|None->usage() in
+      let module B = (val select_backend o.target : Backend_intf.S) in
+      ignore (compile ~target:B.description.target source)
   | _ :: ("build"|"run" as command) :: options ->
       let o=parse_options command options in
       let source=match o.source with Some source->source|None->usage() in
@@ -135,7 +141,8 @@ let () =
       let backend=select_backend o.target in
       let jit=jit_option backend o in
       let target=Option.value ~default:"." o.source in
-      let cases,errors=Test_runner.discover ~target ~filter:o.filter in
+      let module B = (val backend : Backend_intf.S) in
+      let cases,errors=Test_runner.discover ~code_target:B.description.target ~target ~filter:o.filter in
       List.iter print_diagnostic errors;
       let failed=ref(List.length errors)and passed=ref 0 in
       List.iter(fun(case:Test_runner.case)->

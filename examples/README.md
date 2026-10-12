@@ -33,7 +33,8 @@ including ownership transfer and cleanup, with the same build flags.
 `file_lifecycle.xen` also runs on ARM64: it transfers owned File descriptors,
 writes and reads bytes, and closes them on scope exit. Pass a disposable path;
 the program creates or overwrites it. This uses the managed File runtime rather
-than the platform-dependent std.fs module.
+than the recoverable std.fs module. Both managed File and std.fs are supported
+on Linux x86-64 and ARM64.
 
 | File | Topic |
 | --- | --- |

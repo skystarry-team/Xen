@@ -44,12 +44,14 @@ test: build
 	python3 tests/integration/arm64_test.py
 	python3 tests/integration/host_test.py
 	python3 tests/integration/stdlib_test.py
+	python3 tests/integration/stdlib_test.py --arm64
 	python3 tests/integration/test_workflow_test.py
 	$(MAKE) quickcheck
 
 test-arm64: build
 	dune exec tests/arm64_machine_test.exe
 	XEN_REQUIRE_ARM64=1 python3 tests/integration/arm64_test.py
+	XEN_REQUIRE_ARM64=1 python3 tests/integration/stdlib_test.py --arm64
 
 # Runs the compiler's version/check/build/run/test/package paths on either host.
 # The full test target still includes x86 execution and JIT-specific regressions.

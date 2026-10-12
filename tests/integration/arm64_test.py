@@ -1015,11 +1015,8 @@ fn main(){let mut h=Holder{file:open_read("/dev/null")};let mut i=0;
         for text, message, flags in [
             ("fn main(){}", "JIT is not implemented", ("--jit=on",)),
             ("fn main(){}", "JIT is not implemented", ("--jit=on", "--jit-report")),
-            ('#global[bb]\nfn main(){let p=raw_alloc_int(1);raw_free_int(p);}', "type Ptr", ("--jit=off",)),
             ('fn main(){println(read_ints("missing"));}', "builtin 'read_ints'", ("--jit=off",)),
             ('fn main(){println(read_floats("missing"));}', "builtin 'read_floats'", ("--jit=off",)),
-            ('#global[bb]\nfn main(){println(syscall0(172));}', "raw syscalls", ("--jit=off",)),
-            ('use std.process;fn main(){println(std.process.id());}', "raw syscalls", ("--jit=off",)),
         ]:
             with self.subTest(text=text):
                 output = self.root / "aarch64-linux"
@@ -1030,6 +1027,98 @@ fn main(){let mut h=Holder{file:open_read("/dev/null")};let mut i=0;
                 if "JIT" not in message:
                     self.assertIn(": error:", compiled.stderr.replace("native backend error:", "error:"))
                 self.assertEqual(output.read_bytes(), b"preserve me")
+
+    def test_raw_memory_pod_and_descriptor_contract(self):
+        source = '''use std.iter;
+struct Pair<T>{tag:U8,value:T,small:I16,flag:Bool}
+#![bb]
+fn relay<T>(p:Ptr<T>)->Ptr<T>{return p;}
+fn main(){#scope[bb]{
+ let empty=raw_alloc<Int>(0);assert(ptr_addr(empty)==0);raw_free(empty);
+ let p=raw_alloc<Pair<F64>>(2);let alias=relay(p);
+ let zero=raw_load(p,1);assert(zero.tag==u8(0) && zero.value==0.0 && zero.small==i16(0) && !zero.flag);
+ raw_store(alias,1,Pair<F64>{tag:u8(255),value:-0.0,small:i16(-32768),flag:true});
+ let value=raw_load(p,1);assert(value.tag==u8(255) && value.value==0.0 && value.small==i16(-32768) && value.flag);
+ println(value.value);let mut n=0;for value in p.iter(){n=n+1;}assert(n==2);raw_free(alias);
+ let f=raw_alloc<F32>(1);raw_store(f,0,f32(-0.0));println(raw_load(f,0));raw_free(f);
+ let s=raw_alloc<I8>(1);raw_store(s,0,i8(-128));println(raw_load(s,0));raw_free(s);
+ let u=raw_alloc<U64>(1);raw_store(u,0,u64(18446744073709551615));println(raw_load(u,0));raw_free(u);
+ let wide=raw_alloc<I32>(1);raw_store(wide,0,i32(-2147483648));assert(raw_load(wide,0)==i32(-2147483648));raw_free(wide);
+ let half=raw_alloc<U16>(1);raw_store(half,0,u16(65535));assert(raw_load(half,0)==u16(65535));raw_free(half);
+}}'''
+        expected = "-0.0\n-0.0\n-128\n18446744073709551615\n"
+        self.differential(source, expected)
+        if QEMU:
+            for trace in self.heap_trace(source, expected):
+                self.assertEqual(self.assert_balanced_heap(trace), 6)
+                self.assertIn("mmap(NULL,48,", trace)  # padded Pair stride 24
+
+    def test_raw_memory_errors(self):
+        for body, message in [
+            ("raw_alloc<Int>(-1);", "raw allocation count must be non-negative"),
+            ("raw_alloc<Int>(9223372036854775807);", "raw allocation size overflow"),
+            ("let p=raw_alloc<Int>(0);raw_load(p,0);", "raw pointer offset out of bounds"),
+            ("let p=raw_alloc<Int>(1);raw_load(p,-1);", "raw pointer offset out of bounds"),
+            ("let p=raw_alloc<Int>(1);raw_store(p,1,7);", "raw pointer offset out of bounds"),
+        ]:
+            with self.subTest(body=body):
+                self.differential("fn main(){#scope[bb]{"+body+"}}", "", status=1, error=message)
+        if QEMU:
+            for trace in self.heap_trace("fn main(){#scope[bb]{raw_alloc<U8>(1073741824);}}",
+                                         "", reserve=33554432, status=1):
+                self.assertIn("raw allocation failed", trace)
+                self.assertRegex(trace, r"mmap\(NULL,1073741824,.*errno=12")
+
+    def test_raw_syscall_numbers_and_all_arities(self):
+        source = '''fn number()->Int{print("n");return 56;}
+fn argument(n:Int)->Int{print(n);return n;}
+fn main(){#scope[bb]{
+ assert(syscall0(172)>0);assert(syscall0(999999)==-38);
+ assert(syscall1(57,-1)==-9);
+ let p=raw_alloc<U8>(4096);
+ assert(syscall2(17,ptr_addr(p),4096)>1);assert(raw_load(p,0)==u8(47));
+ assert(syscall3(63,-1,ptr_addr(p),1)==-9);
+ // The cwd buffer is a terminated path; close every successful descriptor.
+ let fd=syscall4(56,-100,ptr_addr(p),0,0);assert(fd>=0);assert(syscall1(57,fd)==0);
+ assert(syscall5(63,-1,ptr_addr(p),1,0,0)==-9);
+ let address=syscall6(222,0,123,3,34,-1,0);assert(address>0);
+ assert(syscall2(215,address,123)==0);
+ assert(syscall4(number(),argument(-100),argument(0),argument(0),argument(0))==-14);
+ raw_free(p);println("done");
+}}'''
+        for opt in ("off", "basic"):
+            built, output = self.compile(source, opt=opt)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            result = self.execute(output)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "n-100000done\n", ""))
+        if QEMU:
+            for trace in self.heap_trace(source, "n-100000done\n"):
+                self.assertIn("close(-1) = -1 errno=9", trace)
+                self.assertEqual(self.assert_balanced_files("\n".join(
+                    line for line in trace.splitlines() if "close(-1)" not in line)), 1)
+                self.assertEqual(self.assert_balanced_heap(trace), 2)
+
+    def test_platform_stdlib_cleanup(self):
+        source = '''use std.io;use std.fs;use std.env;use std.process;
+fn main(){assert(std.process.id()>0 && std.process.parent_id()>0);
+ for pass in 0..24{
+  assert(match std.fs.read("/dev/null"){Result.Ok(s)=>s.len()==0,_=>false});
+  assert(match std.fs.read("/"){Result.Err(std.io.IoError.Read(21))=>true,_=>false});
+  assert(match std.fs.write("/dev/full","x"){Result.Err(std.io.IoError.Write(28))=>true,_=>false});
+  assert(match std.fs.metadata("/dev/null"){Result.Ok(m)=>!m.is_file && !m.is_directory,_=>false});
+  assert(match std.fs.metadata("/"){Result.Ok(m)=>m.is_directory && !m.is_file,_=>false});
+  assert(match std.fs.metadata("/xen-missing-directory/file"){Result.Err(std.io.IoError.Metadata(2))=>true,_=>false});
+  assert(match std.fs.read_dir("/dev/null"){Result.Err(_)=>true,_=>false});
+  assert(match std.fs.read_dir("/proc/self/fd"){Result.Ok(v)=>v.len()>0,_=>false});
+  assert(match std.io.read_fd(-1){Result.Err(std.io.IoError.Read(9))=>true,_=>false});
+  assert(match std.io.write_fd(-1,"x"){Result.Err(std.io.IoError.Write(9))=>true,_=>false});
+  assert(match std.env.cwd(){Result.Ok(p)=>p.len()>0,_=>false});
+ }println("platform");}'''
+        self.differential(source, "platform\n")
+        if QEMU:
+            for trace in self.heap_trace(source, "platform\n"):
+                self.assertEqual(self.assert_balanced_files(trace), 96)
+                self.assertGreater(self.assert_balanced_heap(trace), 200)
 
 
 if __name__ == "__main__":

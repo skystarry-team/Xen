@@ -2,7 +2,7 @@
 open Ast
 
 type case = { name:string; function_name:string; owner:string; single:bool;
-              programs:Ast.program list; span:span }
+              programs:Ast.program list; span:span; code_target:Target.t }
 type outcome = Passed | Compilation_error of Checker.diagnostic
              | Failed of Unix.process_status * string * string
 
@@ -25,7 +25,7 @@ let files directory =
       |_->[])in
   walk directory
 
-let discover ~target ~filter =
+let discover ~code_target ~target ~filter =
   let seen=Hashtbl.create 16 and cases=ref [] and errors=ref []in
   let add ~toolchain ~fallback programs =
     let single=match programs with [p] when p.imports=[]->true|_->false in
@@ -39,7 +39,7 @@ let discover ~target ~filter =
             (String.sub name i n=filter || loop(i+1))in loop 0 in
         let key=f.span.file,f.name in
         if matches && not(Hashtbl.mem seen key)then begin
-          Hashtbl.add seen key();cases:={name;function_name=f.name;owner;single;programs;span=f.span}::!cases
+          Hashtbl.add seen key();cases:={name;function_name=f.name;owner;single;programs;span=f.span;code_target}::!cases
         end
       end)p.functions)programs in
   let load file loader=match protect file loader with
@@ -48,15 +48,15 @@ let discover ~target ~filter =
   let root=if Sys.file_exists target then Project_loader.Project_root else Project_loader.namespace target in
   (match root with
    |Project_loader.Std_root|Project_loader.Core_root->
-       (match protect target(fun()->Project_loader.load_toolchain target)with
+       (match protect target(fun()->Project_loader.load_toolchain ~target:code_target target)with
         |Ok programs->add ~toolchain:(Some target) ~fallback:target programs
         |Error d->errors:=d::!errors)
    |Project_loader.Project_root->
        if Sys.file_exists target && Sys.is_directory target then
          (match protect target(fun()->files target)with
           |Error d->errors:=d::!errors
-          |Ok paths->List.iter(fun file->load file(fun()->Project_loader.load ~root:target file))paths)
-       else load target(fun()->Project_loader.load target));
+          |Ok paths->List.iter(fun file->load file(fun()->Project_loader.load ~target:code_target ~root:target file))paths)
+       else load target(fun()->Project_loader.load ~target:code_target target));
   List.sort(fun a b->String.compare a.name b.name)!cases,List.rev !errors
 
 let execute ?target ~write executable =
@@ -81,6 +81,9 @@ let execute ?target ~write executable =
 
 let run ?(backend=Backend.default) ?(opt=Semantic_opt.Off) ?(opt_report=false) ?jit ?(jit_report=false) case =
   let module B = (val backend : Backend_intf.S) in
+  if case.code_target<>B.description.target then Compilation_error(diagnostic case.span
+    ("test discovered for "^Target.to_string case.code_target^" cannot run with backend "^
+     Target.to_string B.description.target)) else
   let jit=Option.value jit ~default:(Backend.default_jit B.description.target) in
   let checked=if case.single then Checker.check ~entry:case.function_name(List.hd case.programs)
     else Checker.check_project ~entry_module:case.owner ~entry_function:case.function_name case.programs in

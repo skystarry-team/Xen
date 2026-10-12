@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 module std.io;
 use std.convert;
+use std.platform;
 
 enum IoError {
     InvalidPath,
@@ -32,8 +33,8 @@ fn write_fd(fd: Int, text: String) -> Result<Int, IoError> {
         let mut failed = false;
         let mut error = IoError.WriteZero;
         while offset < length && !failed {
-            let written = syscall3(1, fd, ptr_addr(buffer) + offset, length - offset);
-            if written == -4 {
+            let written = std.platform.write(fd, ptr_addr(buffer) + offset, length - offset);
+            if std.platform.interrupted(written) {
                 // EINTR: retry without advancing.
             } else if written < 0 {
                 failed = true;
@@ -83,8 +84,8 @@ fn read_fd(fd: Int) -> Result<String, IoError> {
         let mut failed = false;
         let mut error = IoError.Read(0);
         while !done {
-            let count = syscall3(0, fd, ptr_addr(buffer), 4096);
-            if count == -4 {
+            let count = std.platform.read(fd, ptr_addr(buffer), 4096);
+            if std.platform.interrupted(count) {
                 // EINTR: retry.
             } else if count < 0 {
                 error = IoError.Read(-count);
