@@ -2,9 +2,9 @@
 
 This page describes the current demo's full feature set on the default
 Linux x86-64 static non-PIE ELF target. The initial Linux ARM64 backend supports
-an integer/Bool, control-flow, function, reference, aggregate and immutable-string
-subset with `--target=aarch64-linux --jit=off`. Floating point, heap producers,
-collections, files, raw syscalls and JIT are not yet supported on ARM64; see its
+an integer/float/Bool, control-flow, function, reference, aggregate, heap-string
+and recursive Box subset with `--target=aarch64-linux --jit=off`.
+Vec/Slice/Ptr, files, raw syscalls and JIT are not yet supported on ARM64; see its
 [support matrix](../../compiler/cpu/arm64/README.md).
 
 ## Supported

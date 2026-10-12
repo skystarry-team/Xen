@@ -22,6 +22,10 @@ positive
 `arm64_core.xen` demonstrates the initial ARM64 subset. Build it with
 `compiler/dist/xen build examples/arm64_core.xen --target=aarch64-linux --jit=off -o app`,
 then execute it on Linux ARM64 or with `qemu-aarch64 ./app hello`.
+`arm64_float.xen` demonstrates scalar F32/F64 operations, checked conversions,
+aggregate returns and decimal output with the same build flags.
+`arm64_heap.xen` demonstrates heap String production and a recursive Box list,
+including ownership transfer and cleanup, with the same build flags.
 
 | File | Topic |
 | --- | --- |

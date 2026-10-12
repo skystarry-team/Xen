@@ -12,7 +12,7 @@ compiler/
                    project loading, Target and Backend_intf
   cpu/
     x86_64/        xen_x86_64: existing emitter, Linux runtime, JIT and ELF writer
-    arm64/         xen_arm64: A64 encoder, core emitter, Linux runtime and ELF writer
+    arm64/         xen_arm64: A64 encoder, core/ownership emitter, Linux runtime and ELF writer
   platform/        reserved OS boundary; see its README
   backend.ml       implementation registry in the xen_compiler driver library
   test_runner.ml   discovery and execution through Backend_intf.S
@@ -61,7 +61,7 @@ placeholder backend that accidentally emits x86-64 code for another target.
   heuristic, not a backend stack-frame allocation API.
 - Bundled `stdlib/` code currently contains Linux x86-64 syscall numbers and kernel
   record layouts. It is **not portable merely because the frontend is shared**.
-  Examples include `std.io`, `std.fs`, `std.env`, and `std.process`. The initial ARM64 backend rejects raw syscalls and unsupported storage/operations,
+  Examples include `std.io`, `std.fs`, `std.env`, and `std.process`. The ARM64 backend rejects raw syscalls and unsupported storage/operations,
   so these modules cannot accidentally execute x86 syscall numbers. Full ARM64 support
   must introduce platform runtime entry points or select a target-specific stdlib
   root in the driver/project-loading pipeline before checking source. Do not change
@@ -99,7 +99,7 @@ ordering and literal program arguments after `--`. During this refactor, all 16
 top-level examples were compared byte-for-byte with the original emitter across
 both optimization levels and both JIT settings.
 
-`make test-arm64` requires native Linux ARM64 or QEMU, checks the encoder against
+`make test-arm64` requires native Linux ARM64 or QEMU, checks integer and FP encodings against
 independently assembled instruction words, verifies ELF segments and diagnostics,
 and executes the supported language subset with both optimizer levels. On x86-64
 it also compares execution to the original backend. `make test` includes these

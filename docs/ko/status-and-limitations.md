@@ -122,10 +122,15 @@ RW data segment를 분리한다.
 기본 타깃은 기존 `x86_64-linux`입니다. `build`, `run`, `test`에
 `--target=aarch64-linux --jit=off`를 지정하면 초기 ARM64 백엔드를 사용합니다.
 `arm64-linux` 별칭도 허용합니다. 외부 assembler/linker 없이 정적 Linux AArch64
-ELF를 생성하며, 정수·Bool·제어 흐름·함수·참조·지원 타입의 구조체와 enum·
+ELF를 생성하며, 정수·F32/F64·Bool·제어 흐름·함수·참조·지원 타입의 구조체와 enum·
 문자열 리터럴/프로그램 인자와 기본 출력을 지원합니다.
+문자열 연결·`int_to_str`·독립 복제·해제와 `Box<T>` 생성·참조·이동·추출을 지원합니다.
+재귀 Box 정리는 추가 할당 없이 반복형으로 수행하며, 깊이에 비례해 호출 스택을 쓰지 않습니다.
+부동소수점은 사칙연산·비교·검사된 숫자 변환·유효 숫자 17자리 출력을 지원합니다.
+음의 0을 보존하며, NaN 부호는 CPU 연산 결과를 따릅니다.
+예를 들어 `0.0/0.0`은 ARM64에서 `nan`, x86-64에서 `-nan`으로 출력됩니다.
 
-현재 ARM64에서는 JIT, 부동소수점, 힙 문자열 생성, Vec/Slice/Box/Ptr, 파일,
+현재 ARM64에서는 JIT, Vec/Slice/Ptr, 파일과 `read_text`,
 raw syscall과 이를 사용하는 플랫폼 의존 표준 라이브러리를 명시적 오류로 거부합니다.
 기본 JIT 설정은 기존 호환성을 위해 on이므로 ARM64에서는 반드시 `--jit=off`를 지정합니다.
 `x86_64-windows`와 `aarch64-windows`는 아직 미구현입니다.

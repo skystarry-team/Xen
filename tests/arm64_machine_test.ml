@@ -39,4 +39,28 @@ let () =
   expect(word bytes 16=0xd2800007 && word bytes 20=0xf2a00847)"address relocation";
   M.branch m "missing";
   expect(rejects(fun()->ignore(M.encode m ~code_address:0L ~rodata_address:0L ~data_address:0L)))"undefined label";
+  (* Independent assembly is retained in fixtures/arm64_fp.s. *)
+  let m=M.create()in
+  M.fp_from_bits m ~single:true 0 3;M.fp_from_bits m ~single:false 1 4;
+  M.fp_to_bits m ~single:true 5 2;M.fp_to_bits m ~single:false 6 3;
+  M.fp_neg m ~single:true 0 1;M.fp_neg m ~single:false 2 3;
+  List.iter(fun op->M.fp_binary m ~single:true op 0 1 2)["+";"-";"*";"/"];
+  List.iter(fun op->M.fp_binary m ~single:false op 3 4 5)["+";"-";"*";"/"];
+  M.fp_cmp m ~single:true 1 2;M.fp_cmp m ~single:false 3 4;
+  M.fp_convert m ~single:true 0 1;M.fp_convert m ~single:false 2 3;
+  M.fp_of_int m ~single:true ~unsigned:false 0 1;
+  M.fp_of_int m ~single:true ~unsigned:true 2 3;
+  M.fp_of_int m ~single:false ~unsigned:false 4 5;
+  M.fp_of_int m ~single:false ~unsigned:true 6 7;
+  M.fp_to_int m ~single:true ~unsigned:false 0 1;
+  M.fp_to_int m ~single:true ~unsigned:true 2 3;
+  M.fp_to_int m ~single:false ~unsigned:false 4 5;
+  M.fp_to_int m ~single:false ~unsigned:true 6 7;
+  M.shift_right m 0 1 52;M.bit_and m 2 3 4;M.bit_or m 5 6 7;
+  let expected=[0x1e270060;0x9e670081;0x1e260045;0x9e660066;0x1e214020;0x1e614062;
+    0x1e222820;0x1e223820;0x1e220820;0x1e221820;0x1e652883;0x1e653883;0x1e650883;0x1e651883;
+    0x1e222020;0x1e642060;0x1e624020;0x1e22c062;0x9e220020;0x9e230062;0x9e6200a4;0x9e6300e6;
+    0x9e380020;0x9e390062;0x9e7800a4;0x9e7900e6;0xd374fc20;0x8a040062;0xaa0700c5]in
+  let bytes=M.encode m ~code_address:0L ~rodata_address:0L ~data_address:0L in
+  List.iteri(fun i n->expect(word bytes(i*4)=n)("FP encoding mismatch at "^string_of_int i))expected;
   print_endline "ARM64 encodings, relocations and range checks passed"

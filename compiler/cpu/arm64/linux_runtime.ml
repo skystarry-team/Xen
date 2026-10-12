@@ -36,4 +36,6 @@ let emit m =
   M.cmp_zero m 5;M.cond m 0 "integer_output";
   M.offset m 1 1 (-1);M.int m 0 45;M.store m ~bytes:1 0 1 0;M.offset m 2 2 1;
   M.label m "integer_output";M.int m 0 1;call m "runtime_write";
-  M.load m 30 31 32;M.offset m 31 31 48;M.ret m
+  M.load m 30 31 32;M.offset m 31 31 48;M.ret m;
+  Float_runtime.emit m;
+  Heap_runtime.emit m ~fail

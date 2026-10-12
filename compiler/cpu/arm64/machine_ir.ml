@@ -42,6 +42,30 @@ let mul m rd rn rm = rr m 0x9b007c00 rd rn rm
 let cmp m rn rm = rr m 0xeb000000 31 rn rm
 let cmp_zero m rn = cmp m rn 31
 let cset m rd cond = word m (0x9a9f07e0 lor ((cond lxor 1) lsl 12) lor rd)
+let shift_right m rd rn shift =
+  reg rd;reg rn;
+  if shift<0 || shift>63 then invalid_arg "A64 shift";
+  word m (0xd340fc00 lor (shift lsl 16) lor (rn lsl 5) lor rd)
+let bit_and m = rr m 0x8a000000
+let bit_or m = rr m 0xaa000000
+(* Scalar FP scratch registers are v0..v7; v8..v15 are never clobbered.
+   Values move through integer registers as bits, preserving the Xen storage ABI. *)
+let fp_unary m base rd rn = reg rd;reg rn;word m (base lor (rn lsl 5) lor rd)
+let fp_base ~single base = if single then base else base lor 0x00400000
+let fp_from_bits m ~single = fp_unary m (if single then 0x1e270000 else 0x9e670000)
+let fp_to_bits m ~single = fp_unary m (if single then 0x1e260000 else 0x9e660000)
+let fp_neg m ~single = fp_unary m (fp_base ~single 0x1e214000)
+let fp_binary m ~single operator =
+  let base=match operator with
+    |"+"->0x1e202800|"-"->0x1e203800|"*"->0x1e200800|"/"->0x1e201800
+    |_->invalid_arg "A64 FP operator" in
+  rr m (fp_base ~single base)
+let fp_cmp m ~single rn rm = rr m (fp_base ~single 0x1e202000) 0 rn rm
+let fp_convert m ~single = fp_unary m (if single then 0x1e624000 else 0x1e22c000)
+let fp_of_int m ~single ~unsigned =
+  fp_unary m (fp_base ~single (if unsigned then 0x9e230000 else 0x9e220000))
+let fp_to_int m ~single ~unsigned =
+  fp_unary m (fp_base ~single (if unsigned then 0x9e390000 else 0x9e380000))
 let offset m rd rn n =
   (* x16 is reserved scratch. Extended-register ADD/SUB also permits SP. *)
   if rd=16 || rn=16 then invalid_arg "offset scratch register";

@@ -69,7 +69,8 @@ and discovery rules.
 `--target x86_64-linux`, before or after the source/test path. The default remains
 `x86_64-linux`, with the same existing static ELF support.
 `aarch64-linux` (alias `arm64-linux`) supports the initial core language subset
-with `--jit=off`; JIT, floating point, heap collections, files and raw syscalls
+with `--jit=off`, including scalar F32/F64, heap Strings and recursive Box ownership;
+JIT, Vec/Slice/Ptr, files and raw syscalls
 are explicitly rejected. `x86_64-windows` remains unimplemented.
 Invalid or unavailable targets fail before source loading or output creation.
 `check` remains independent of backend selection.

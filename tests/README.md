@@ -47,6 +47,11 @@ preserve the expected-output oracle.
 
 `make test-arm64` requires Linux ARM64 or `qemu-aarch64` (Ubuntu package
 `qemu-user`). It runs instruction encoding/relocation checks and both-optimizer
-execution tests for the initial ARM64 subset, including x86 differential checks
+execution tests for the ARM64 subset, including FP encoding, conversion boundaries,
+17-digit decimal rounding and generated float output, with x86 differential checks
 on x86 hosts. `make test` includes these tests but skips ARM64 execution when no
 runner is installed; ELF and unsupported-feature checks still run.
+Heap ownership tests cover String clones, field reinitialization and recursive
+Box cleanup. When QEMU is installed, guest mmap/munmap ledgers verify exact
+allocation lifetimes, a 64KiB guest stack checks deep cleanup, and a bounded
+guest address space injects allocation failures without limiting the emulator.

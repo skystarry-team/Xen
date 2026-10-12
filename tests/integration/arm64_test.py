@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
-"""Initial Linux AArch64 contract and execution, using native ARM64 or QEMU.
+"""Linux AArch64 contract and execution, using native ARM64 or QEMU.
 
 Builds always run without external tools on PATH. Set XEN_REQUIRE_ARM64=1 to fail
 instead of skipping execution when no compatible runner is installed.
 """
 import os
+import math
 from pathlib import Path
 import platform
 import random
+import re
+import resource
 import shutil
 import struct
 import subprocess
@@ -188,6 +191,385 @@ fn main(){
             answers.append(str(value).lower())
         self.differential("fn main(){" + "".join(statements) + "}", "\n".join(answers)+"\n")
 
+    def test_float_arithmetic_calls_storage_and_comparisons(self):
+        self.differential('''
+#global[explc]
+struct Pair<T>{left:T,right:T}
+fn id<T>(x:T)->T{return x;}
+fn mix(a:F32,b:I64,c:Bool,d:F64,e:U64,f:F32)->F64{
+ if c{return f64(a)+float(b)*d-f64(e)/f64(f);}return -0.0;
+}
+fn recurse(n:I64,x:F64)->F64{if n==0{return x;}return recurse(n-1,x+0.5);}
+fn double(x:F32)->F32{return x*2.0;}
+fn bump(x:&mut F32){*x=*x+0.5;}
+fn main(){
+ let mut x:F32=1.5;bump(&mut x);println(x);let call=double;println(call(x));
+ let p=id(Pair{left:f32(1.25),right:f32(2.5)});println(p.left+p.right);
+ let tuple=id((1.5,f32(-2.25)));println(tuple.0);println(tuple.1);
+ println(mix(1.0,2,true,3.0,4,2.0));println(mix(1.0,2,false,3.0,4,2.0));
+ println(recurse(3,1.0));println(f32(16777216.0)+f32(1.0));
+ println(f32(0.0)*f32(-1.0));println(-(-0.0));
+ let n=0.0/0.0;let s:F32=0.0/0.0;
+ println(n==n);println(n!=n);println(n<1.0);println(n<=1.0);println(n>1.0);println(n>=1.0);
+ println(1.0<n);println(1.0<=n);println(1.0>n);println(1.0>=n);
+ println(s==s);println(s!=s);println(s<f32(1.0));println(s<=f32(1.0));
+ println(s>f32(1.0));println(s>=f32(1.0));
+ assert(f32(s)!=s);assert(f64(n)!=n);assert(f64(s)!=f64(s));
+ assert(f32(f32(1.0)/f32(0.0))>f32(1.0));
+ println(1.0<2.0);println(2.0<=2.0);println(3.0>2.0);println(3.0>=4.0);
+ println(match f32(1.5){1.5=>7,_=>0});
+}''', "2.0\n4.0\n3.75\n1.5\n-2.25\n5.0\n-0.0\n2.5\n16777216.0\n-0.0\n0.0\n"
+             "false\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\n"
+             "false\ntrue\nfalse\nfalse\nfalse\nfalse\ntrue\ntrue\ntrue\nfalse\n7\n")
+
+    def test_float_checked_conversions(self):
+        self.differential('''fn main(){
+ println(float(9007199254740993));println(int(3.9));println(int(-3.9));
+ println(int(-9223372036854775808.0));println(i8(-128.0));println(u8(255.99));
+ println(i16(f32(-12.75)));println(u16(65535.5));println(i32(-2147483648.0));
+ println(u32(4294967295.0));println(i64(9223372036854774784.0));
+ println(u64(9223372036854775808.0));println(u64(18446744073709549568.0));
+ println(f64(u64(18446744073709551615)));println(f32(u64(18446744073709551615)));
+ println(f64(i8(-128)));println(f32(u8(255)));println(f64(f32(0.1)));
+ println(f32(3.4028234663852886e38));println(f32(-3.4028234663852886e38));
+ println(f32(1e-100));println(f32(-1e-100));
+}''', "9007199254740992.0\n3\n-3\n-9223372036854775808\n-128\n255\n-12\n65535\n"
+             "-2147483648\n4294967295\n9223372036854774784\n9223372036854775808\n"
+             "18446744073709549568\n1.8446744073709552e+19\n1.8446744073709552e+19\n"
+             "-128.0\n255.0\n0.10000000149011612\n3.4028234663852886e+38\n"
+             "-3.4028234663852886e+38\n0.0\n-0.0\n")
+        failures = [
+            ("int", "0.0/0.0"), ("int", "1.0/0.0"), ("int", "9223372036854775808.0"),
+            ("f32", "0.0/0.0"), ("f32", "1.0/0.0"), ("f32", "-1.0/0.0"),
+            ("f32", "3.402823466385289e38"), ("f32", "-3.402823466385289e38"),
+        ]
+        for typ, lower, upper in [("i8", -128, 128), ("u8", 0, 256),
+                                  ("i16", -32768, 32768), ("u16", 0, 65536),
+                                  ("i32", -2147483648, 2147483648), ("u32", 0, 4294967296),
+                                  ("i64", -9223372036854775808, 9223372036854775808),
+                                  ("u64", 0, 18446744073709551616)]:
+            below = repr(math.nextafter(float(lower), -math.inf))
+            failures.extend((typ, expression) for expression in
+                            (below, f"{upper}.0", "0.0/0.0", "1.0/0.0"))
+        for typ, expression in failures:
+            with self.subTest(typ=typ, expression=expression):
+                message = ("Float cannot be converted to Int" if typ == "int" else
+                           f"numeric conversion to {typ.upper()} failed")
+                self.differential(f"fn main(){{let x:F64={expression};println(7);println({typ}(x));}}",
+                                  "7\n", status=1, error=message)
+
+    @staticmethod
+    def float_spelling(value):
+        # Python's independently implemented binary64 formatter is the oracle.
+        text = format(value, ".17g")
+        if -2**63 <= value < 2**63 and value == math.trunc(value):
+            text += ".0"
+        return text
+
+    def test_float_decimal_rounding_and_generated_values(self):
+        values = [0.0, -0.0, 0.1, 1.2345678901234567, 1e-4, 1e-5, 1e16, 1e17,
+                  5e-324, -5e-324, float.fromhex("0x1p-1022"),
+                  float.fromhex("0x0.fffffffffffffp-1022"),
+                  float.fromhex("0x1.fffffffffffffp+1023"),
+                  -2**63, 2**63, math.nextafter(float(2**63), -math.inf),
+                  # Exact halves with even/odd retained digits; decimal carry.
+                  1.00000762939453125, 1.00002288818359375,
+                  math.nextafter(1e-4, 0.0), math.nextafter(1e17, 0.0),
+                  9.999999999999999e-5, 1e-14, 1e-305, 1e98, 1e129]
+        rng = random.Random(20261012)
+        while len(values) < 160:
+            value = struct.unpack("<d", rng.getrandbits(64).to_bytes(8, "little"))[0]
+            if math.isfinite(value):
+                values.append(value)
+        statements = [f"println({repr(float(value))});" for value in values]
+        answers = [self.float_spelling(float(value)) for value in values]
+        for _ in range(40):
+            value = struct.unpack("<f", rng.getrandbits(32).to_bytes(4, "little"))[0]
+            if math.isfinite(value):
+                statements.append(f"{{let x:F32={repr(value)};println(x);}}")
+                answers.append(self.float_spelling(value))
+        self.differential("fn main(){"+"".join(statements)+"}", "\n".join(answers)+"\n")
+
+    def test_generated_float_arithmetic(self):
+        rng = random.Random(20261013)
+        statements, answers = [], []
+        for typ in ("F32", "F64"):
+            for _ in range(40):
+                a, b = rng.randint(-10000, 10000)/8, rng.randint(1, 10000)/8
+                op = rng.choice(("+", "-", "*", "/"))
+                value = {"+": lambda: a+b, "-": lambda: a-b,
+                         "*": lambda: a*b, "/": lambda: a/b}[op]()
+                if typ == "F32":
+                    value = struct.unpack("<f", struct.pack("<f", value))[0]
+                statements.append(f"{{let a:{typ}={a};let b:{typ}={b};println(a{op}b);}}")
+                answers.append(self.float_spelling(value))
+        self.differential("fn main(){"+"".join(statements)+"}", "\n".join(answers)+"\n")
+
+    def test_float_subnormal_arithmetic_and_overflow(self):
+        self.differential('''fn main(){
+ let tiny:F32=1.401298464324817e-45;
+ println(tiny/2.0);println(-tiny/2.0);println(tiny+tiny);
+ let dtiny:F64=4.9406564584124654e-324;
+ println(dtiny/2.0);println(-dtiny/2.0);println(dtiny+dtiny);
+ let normal:F32=1.1754943508222875e-38;println(normal/2.0);
+ let dnormal:F64=2.2250738585072014e-308;println(dnormal/2.0);
+ let largest:F32=3.4028234663852886e38;
+ println(largest*2.0);println(-largest*2.0);
+ let dlargest:F64=1.7976931348623157e308;
+ println(dlargest*2.0);println(-dlargest*2.0);
+}''', "0.0\n-0.0\n2.8025969286496341e-45\n0.0\n-0.0\n9.8813129168249309e-324\n"
+             "5.8774717541114375e-39\n1.1125369292536007e-308\ninf\n-inf\ninf\n-inf\n")
+
+    def test_float_nonfinite_spelling_preserves_target_nan_sign(self):
+        # Invalid A64 arithmetic produces positive default NaN; SSE produces
+        # negative default NaN. Negation must flip each target's actual sign.
+        source = "fn main(){println(1.0/0.0);println(-1.0/0.0);println(0.0/0.0);println(-(0.0/0.0));}"
+        for opt in ("off", "basic"):
+            compiled, output = self.compile(source, opt=opt)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            actual = self.execute(output)
+            self.assertEqual((actual.returncode, actual.stdout, actual.stderr),
+                             (0, "inf\n-inf\nnan\n-nan\n", ""))
+            if platform.machine() == "x86_64":
+                compiled, output = self.compile(source, target="x86_64-linux", opt=opt)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                actual = subprocess.run([str(output)], capture_output=True, text=True, timeout=20)
+                self.assertEqual((actual.returncode, actual.stdout, actual.stderr),
+                                 (0, "inf\n-inf\n-nan\nnan\n", ""))
+
+    def test_heap_strings_clone_move_fields_and_reference_replacement(self):
+        self.differential('''
+use std.mem;
+#global[explc]
+struct Pair<T>{left:T,right:T}
+enum Label{Empty,Text(String)}
+fn suffix(s:String)->String{return s+"!";}
+fn id<T>(x:T)->T{return x;}
+fn replace(p:&mut Pair<String>){p.left="ne"+"w";}
+fn main(){
+ let mut text="he"+"llo";let saved=text;text="different"+" value";
+ println(saved);println(text);println(suffix(saved));println(saved);
+ let mut p=Pair{left:"ori"+"ginal",right:"a\0"+"b"};let copy=id(p);
+ replace(&mut p);println(p.left);println(copy.left);println(copy.right);println(len(copy.right));
+ {let r=&mut p;*r=*r;}println(p.left);println(p.right=="a\0b");
+ let mut label:Label=Label.Text("fi"+"rst");
+ {let r=&mut label;*r=Label.Empty;*r=Label.Text("la"+"st");}
+ println(match label{Label.Empty=>"empty",Label.Text(s)=>s});
+ let mut number=int_to_str(-9223372036854775807-1);let old=std.mem.replace(&mut number,int_to_str(42));
+ println(old);println(number);println(int_to_str(0));println(int_to_str(9223372036854775807));
+ println(""+"");println(suffix(""));let empty="";let empty_copy=empty;println(empty_copy);
+ println(arg(0)+"!");println(len("\uD55C"+"\uAE00"));
+}''', "hello\ndifferent value\nhello!\nhello\nnew\noriginal\na\0b\n3\nnew\ntrue\n"
+             "last\n-9223372036854775808\n42\n0\n9223372036854775807\n\n!\n\narg!\n6\n",
+             args=("arg",))
+
+    def test_box_functions_borrows_extraction_and_recursive_types(self):
+        self.differential('''
+use std.mem;
+#global[explc]
+struct Pair<T>{left:T,right:T}
+enum Expr{Num(I64),Name(String),Add(Binary)}
+struct Binary{left:Box<Expr>,right:Box<Expr>}
+struct A<T>{value:T,next:Option<Box<B<T>>>}
+struct B<T>{back:A<T>}
+fn id<T>(x:T)->T{return x;}
+fn six(a:Box<I8>,b:String,c:Box<F32>,d:Pair<String>,e:U64,f:Box<Unit>)->String{
+ println(a.into_inner());println(c.into_inner());println(d.left);println(e);f.into_inner();return b;
+}
+fn eval(x:Expr)->I64{return match x{Expr.Num(n)=>n,Expr.Name(s)=>len(s),
+ Expr.Add(b)=>eval(b.left.into_inner())+eval(b.right.into_inner())};}
+fn edit(p:&mut Pair<String>){*p=Pair{left:"ne"+"w",right:"ri"+"ght"};}
+fn main(){
+ let call=six;println(call(box(i8(-7)),"ret"+"urn",box(f32(2.5)),
+     Pair{left:"le"+"ft",right:"unused"},u64(18446744073709551615),box(())));
+ let nested=id(box(box("in"+"ner")));println(nested.into_inner().into_inner());
+ let mut p=box(Pair{left:"ol"+"d",right:"value"});edit(p.as_mut());println(p.as_ref().left);
+ let previous=std.mem.replace(&mut p,box(Pair{left:"next",right:"item"}));
+ println(previous.into_inner().right);println(p.into_inner().left);
+ let tree=Expr.Add(Binary{left:box(Expr.Name("xe"+"n")),right:box(Expr.Num(7))});println(eval(tree));
+ let a=A<I64>{value:1,next:Option.Some(box(B<I64>{back:A<I64>{value:2,next:Option<Box<B<I64>>>.None}}))};
+ println(match a.next{Option.Some(b)=>b.into_inner().back.value,Option.None=>0});
+ let (first,_)=id((box("fi"+"rst"),box("skip"+"ped")));println(first.into_inner());
+}''', "-7\n2.5\nleft\n18446744073709551615\nreturn\ninner\nnew\nright\nnext\n10\n2\nfirst\n")
+
+    def heap_trace(self, source, expected, *, stack=None, reserve=None, status=0):
+        if not QEMU:
+            self.skipTest("guest allocation ledger requires qemu-aarch64 -strace")
+        options = [QEMU, "-strace"]
+        if stack:
+            options.extend(("-s", str(stack)))
+        if reserve:
+            options.extend(("-R", str(reserve)))
+        for opt in ("off", "basic"):
+            with self.subTest(opt=opt):
+                compiled, output = self.compile(source, opt=opt)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                actual = subprocess.run([*options, str(output)], capture_output=True,
+                                        text=True, timeout=30)
+                self.assertEqual(actual.returncode, status, actual.stderr[-4000:])
+                self.assertEqual(actual.stdout, expected)
+                yield actual.stderr
+
+    def assert_balanced_heap(self, trace):
+        # Track addresses AND requested lengths. Counts alone hide double frees,
+        # address reuse, leaked siblings, and wrong base/length for hidden headers.
+        live, allocations = {}, 0
+        for line in trace.splitlines():
+            if " mmap(" in line:
+                match = re.search(r"mmap\(NULL,(\d+),.*\) = (0x[0-9a-f]+)", line)
+                self.assertIsNotNone(match, line)
+                length, address = int(match[1]), int(match[2], 16)
+                self.assertGreater(length, 0, "empty values must not mmap zero bytes")
+                self.assertNotIn(address, live, "an active allocation was overwritten")
+                self.assertIn("PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0", line)
+                live[address] = length
+                allocations += 1
+            elif " munmap(" in line:
+                match = re.search(r"munmap\((0x[0-9a-f]+),(\d+)\) = 0$", line)
+                self.assertIsNotNone(match, line)
+                address, length = int(match[1], 16), int(match[2])
+                self.assertIn(address, live, "unmapped unknown/already freed storage")
+                self.assertEqual(live.pop(address), length, "wrong allocation extent")
+        self.assertEqual(live, {}, "allocations survive normal scope cleanup")
+        return allocations
+
+    def test_ownership_flags_cleanup_on_branch_loop_return_and_try(self):
+        source = '''
+#global[explc]
+enum Tree{Empty,Leaf(String),Branch(Box<Pair>)}
+struct Pair{left:Tree,right:Tree}
+struct Holder{item:Box<String>,text:String}
+impl Holder{fn refill(&mut self){self.item=box("after"+" call");}}
+fn tree()->Box<Tree>{return box(Tree.Branch(box(Pair{
+ left:Tree.Leaf("le"+"ft"),right:Tree.Leaf(int_to_str(7))})));}
+fn fail()->Result<I64,I64>{return Result.Err(7);}
+fn pending(x:Box<Tree>,n:I64){}
+fn early()->Result<I64,I64>{pending(tree(),fail()?);return Result.Ok(0);}
+fn main(){
+ let mut h=Holder{item:box("be"+"fore"),text:"ke"+"pt"};let old=h.item;
+ h.refill();println(old.into_inner());println(*h.item.as_ref());println(h.text);
+ let mut i=0;while i<40{
+  let mut root=tree();root=tree();let taken=root.into_inner();let empty=box(Tree.Empty);
+  assert(match early(){Result.Err(n)=>n==7,_=>false});
+  {let nested=tree();}let conditional=if i%2==0{tree()}else{box(Tree.Leaf("other"+" branch"))};
+  i=i+1;if i%2==0{let next=tree();continue;}if i==39{let last=tree();break;}
+ }println(i);
+}'''
+        # A partially moved field is reinitialized by the callee; its caller flag
+        # is activated by the elaborated Drop_flag after that call.
+        expected = "before\nafter call\nkept\n39\n"
+        self.differential(source, expected)
+        if QEMU:
+            for trace in self.heap_trace(source, expected):
+                self.assertGreater(self.assert_balanced_heap(trace), 500)
+
+    def test_deep_box_cleanup_with_bounded_stack(self):
+        source = '''enum List{Empty,Link(Node)}struct Node{text:String,next:Box<List>}
+fn main(){let mut list=List.Empty;let mut n=0;
+ while n<20000{list=List.Link(Node{text:int_to_str(n),next:box(list)});n=n+1;}
+ println(n);}'''
+        # Building uses a loop, and destruction must not consume one call frame
+        # per node. The 64KiB guest stack cannot hold 20,000 recursive destructors.
+        if QEMU:
+            for trace in self.heap_trace(source, "20000\n", stack=65536):
+                self.assertEqual(self.assert_balanced_heap(trace), 40000)
+        else:
+            self.runner()
+            for opt in ("off", "basic"):
+                compiled, output = self.compile(source, opt=opt)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                def small_stack():
+                    resource.setrlimit(resource.RLIMIT_STACK, (65536, 65536))
+                actual = subprocess.run([str(output)], capture_output=True, text=True,
+                                        preexec_fn=small_stack, timeout=30)
+                self.assertEqual((actual.returncode, actual.stdout, actual.stderr),
+                                 (0, "20000\n", ""))
+
+    def test_recursive_box_branching_and_large_owned_payloads(self):
+        source = '''enum Tree{Leaf(String),Branch(Pair)}struct Pair{left:Box<Tree>,right:Box<Tree>}
+fn tree(n:I64)->Box<Tree>{if n==0{return box(Tree.Leaf("a"+"b"));}
+ return box(Tree.Branch(Pair{left:tree(n-1),right:tree(n-1)}));}
+struct Large{payload:String,tail:(I64,I64,I64)}
+fn main(){let root=tree(6);let text="'''+"x"*70000+'''"+"tail";
+ let copy=text;let b=box(Large{payload:copy,tail:(1,2,3)});
+ let value=b.into_inner();println(len(value.payload));println(value.tail.2);}'''
+        self.differential(source, "70004\n3\n")
+        if QEMU:
+            for trace in self.heap_trace(source, "70004\n3\n"):
+                self.assertGreater(self.assert_balanced_heap(trace), 150)
+
+    def test_mutual_generic_box_destruction(self):
+        source = '''
+struct A<T>{value:T,next:Option<Box<B<T>>>}
+struct B<T>{text:String,next:Option<Box<A<T>>>}
+struct Value{tag:I8,text:String}
+fn build<T>(first:T,last:T)->Box<A<T>>{
+ return box(A<T>{value:first,next:Option<Box<B<T>>>.Some(box(B<T>{
+  text:"mid"+"dle",next:Option<Box<A<T>>>.Some(box(A<T>{
+   value:last,next:Option<Box<B<T>>>.None}))}))});
+}
+fn main(){
+ {let integer=build(i64(1),i64(2));}
+ {let strings=build("fi"+"rst","la"+"st");}
+ {let padded=build(Value{tag:i8(1),text:"first"+" value"},
+                   Value{tag:i8(2),text:"last"+" value"});}
+ println("done");
+}'''
+        self.differential(source, "done\n")
+        if QEMU:
+            for trace in self.heap_trace(source, "done\n"):
+                self.assertGreater(self.assert_balanced_heap(trace), 15)
+                # A<I64>, B<I64> and A<Value> use different payload extents.
+                for length in (40, 56, 64):
+                    self.assertIn(f"mmap(NULL,{length},", trace)
+
+    def test_guest_allocation_failure_is_a_runtime_error(self):
+        if not QEMU:
+            self.skipTest("bounded guest VA failure injection requires qemu-aarch64")
+        programs = [
+            ('''enum List{Empty,Link(Node)}struct Node{next:Box<List>}
+fn main(){let mut list=List.Empty;let mut n=0;
+ while n<20000{list=List.Link(Node{next:box(list)});n=n+1;}}''', "Box allocation failed"),
+            ('fn main(){let mut text="x";let mut n=0;while n<32{text=text+text;n=n+1;}}',
+             "string allocation failed"),
+        ]
+        for source, message in programs:
+            with self.subTest(message=message):
+                for trace in self.heap_trace(source, "", stack=65536, reserve=33554432, status=1):
+                    self.assertRegex(trace, r"mmap\(.*\) = -1 errno=12")
+                    self.assertIn("xen runtime error: "+message, trace)
+                    if message.startswith("Box"):
+                        self.assertRegex(trace, r"app\.xen:\d+:\d+: xen runtime error:")
+                    # Fatal allocation errors exit without unwinding, as on x86.
+
+    def test_heap_runtime_boundaries(self):
+        self.runner()
+        for mode in ("large_box", "signed_overflow", "unsigned_wrap", "empty"):
+            with self.subTest(mode=mode):
+                output = self.root / mode
+                built = subprocess.run(["dune", "exec", "tests/arm64_heap_fixture.exe", "--",
+                                        mode, str(output)], cwd=REPO, capture_output=True,
+                                       text=True, timeout=60)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                status, expected = ((1, "") if "overflow" in mode or mode == "unsigned_wrap" else
+                                    (0, "large\n" if mode == "large_box" else "empty\n"))
+                actual = self.execute(output)
+                self.assertEqual((actual.returncode, actual.stdout), (status, expected), actual.stderr)
+                if status:
+                    self.assertIn("string is too large", actual.stderr)
+                else:
+                    self.assertEqual(actual.stderr, "")
+                if QEMU:
+                    trace = subprocess.run([QEMU, "-strace", str(output)], capture_output=True,
+                                           text=True, timeout=20)
+                    self.assertEqual((trace.returncode, trace.stdout), (status, expected))
+                    if mode == "large_box":
+                        self.assertEqual(self.assert_balanced_heap(trace.stderr), 3)
+                        self.assertIn("mmap(NULL,65552,", trace.stderr)
+                    else:
+                        self.assertNotIn(" mmap(", trace.stderr,
+                                         "empty/overflow must be handled before allocation")
+
     def test_run_and_test_host_execution_diagnostics(self):
         self.source.write_text('test fn works(){assert(true);}fn main(){println(42);}')
         for command in ("run", "test"):
@@ -226,11 +608,10 @@ fn main(){
         for text, message, flags in [
             ("fn main(){}", "JIT is not implemented", ()),
             ("fn main(){}", "JIT is not implemented", ("--jit=on", "--jit-report")),
-            ("fn main(){println(1.5);}", "type F64 is not implemented", ("--jit=off",)),
             ("fn main(){println([1,2]);}", "type Vec", ("--jit=off",)),
+            ("fn main(){let value=box([1,2]);}", "type Vec", ("--jit=off",)),
             ('fn main(){let f=open_read("missing");}', "type File", ("--jit=off",)),
-            ('fn main(){println("a"+"b");}', "concatenation is not implemented", ("--jit=off",)),
-            ('fn main(){println(int_to_str(42));}', "builtin 'int_to_str'", ("--jit=off",)),
+            ('fn main(){println(read_text("missing"));}', "builtin 'read_text'", ("--jit=off",)),
             ('#global[bb]\nfn main(){println(syscall0(172));}', "raw syscalls", ("--jit=off",)),
             ('use std.process;fn main(){println(std.process.id());}', "raw syscalls", ("--jit=off",)),
         ]:
