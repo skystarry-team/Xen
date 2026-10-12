@@ -4,7 +4,7 @@
 make build
 compiler/dist/xen build examples/arm64_core.xen --target=aarch64-linux --jit=off -o app
 qemu-aarch64 ./app hello
-make test-arm64
+python3 scripts/test.py --suite arm64
 ```
 
 `arm64-linux` is an alias. The compiler emits AArch64 machine code and a static,
@@ -44,7 +44,7 @@ compile errors before an output executable is written.
 | Ptr, raw memory | Checked allocation/access/free for scalar and named POD elements; non-owning descriptors |
 | std.io, std.fs, std.env, std.process | Target-selected Linux AArch64 services, recoverable I/O and normalized metadata |
 | User raw syscalls | Supported in bb; numbers passed unchanged through x8 and x0..x5 |
-| `read_ints`, `read_floats` | Rejected pending checked token parsers |
+| `read_ints`, `read_floats` | Checked decimal token parsing with exact binary64 rounding |
 
 The compiler generates every function retained in checked IR, so unsupported code
 in an unused function or imported module may also reject a build. `check` only
@@ -123,8 +123,9 @@ recursive and generic helper definitions are registered before their child types
 are visited. Enum cleanup relies on checked IR's separately stored payload fields
 and inactive defaults; it does not interpret overlapping union storage.
 
-`heap_runtime.ml` emits Linux AArch64 `mmap`/`munmap` services with RW,
-private anonymous mappings. Size arithmetic and negative syscall errors are
+`heap_runtime.ml` emits shared ownership logic through required platform hooks;
+`compiler/platform/linux/arm64/linux_runtime.ml` supplies Linux AArch64
+`mmap`/`munmap` with RW private anonymous mappings. Size arithmetic and negative syscall errors are
 checked before pointers are used. Allocation failure is fatal and exits without
 unwinding, as in the existing runtime. `Ptr<T>` is a 16-byte non-owning address/count
 descriptor. Raw allocation uses zeroed mappings and aligned POD element strides;
@@ -174,8 +175,9 @@ errors, while lexical drop ignores close errors as on x86-64.
 `open_read` uses O_RDONLY; `open_write` creates/truncates with the existing
 O_WRONLY|O_CREAT|O_TRUNC flags and mode 0644, subject to umask. Paths are checked
 for embedded NUL before making a temporary terminated copy. That mapping is
-released on successful or failed open. `file_runtime.ml` uses Linux AArch64
-openat/read/write/close, retrying interrupted open/read/write and tracking partial
+released on successful or failed open. Shared `file_runtime.ml` receives explicit
+open/read/write/close hooks from the selected OS; the Linux runtime supplies
+AArch64 openat/read/write/close. The reader retries interrupted open/read/write and tracks partial
 progress. A nonempty write that makes no progress reports failure. Close is never
 retried, following Linux's [close error contract](https://raw.githubusercontent.com/mkerrisk/man-pages/master/man2/close.2).
 
@@ -200,8 +202,28 @@ This example creates or overwrites the supplied path. `std.io`/`std.fs`/`std.env
 `std.process` now use the selected `std.platform` service implementation, including
 ARM-specific openat/newfstatat, stat mode layout and directory flags. Recoverable
 I/O preserves binary bytes and releases temporary buffers/fds on returned errors.
-`read_ints` and `read_floats` need their own checked token parsers and remain
-source-located compile errors in this stage.
+`read_ints` and `read_floats` read through EOF, close their owned fd and parse
+ASCII space/tab/CR/LF-separated tokens. Empty files produce empty vectors.
+Integers accept an optional sign and decimal digits over the full I64 range.
+Floats accept an optional sign, decimal digits with an optional point (at least
+one digit overall), and an optional `e`/`E` exponent with optional sign and digits.
+NaN, infinity, hexadecimal numbers, NUL and other whitespace bytes are rejected.
+Nonzero values rounding to zero or infinity report a source-located range error.
+Signed zero is preserved; zero's adjusted decimal exponent retains the legacy
+[-10000,10000] limit. Nonzero long mantissas/exponents are normalized before range
+classification, so cancelling decimal scales do not cause intermediate overflow.
+
+`numeric_runtime.ml` converts decimal to binary64 using two bounded 4096-bit
+integer buffers and rounds once, nearest with ties to even. It retains 800
+significant digits plus sticky; every binary64 rounding midpoint has fewer than
+800 significant decimal digits. The parser needs 1200 bytes of aligned stack,
+no heap scratch, host parser or libc. Exact results are tested as raw F64 bytes
+against independently constructed rounding boundaries, rather than printed text.
+The legacy x86 reader uses x87 decimal accumulation and is not the rounding oracle
+for boundary cases. Both readers retain the same token grammar and diagnostics.
+Input String storage and partial result mappings are released before any returned
+parse/range/allocation error. Numeric Vec results use the existing 32-byte private
+header and exact element-count capacity, with normal clone/move/drop behavior.
 
 ## Running the compiler on ARM64
 
@@ -213,8 +235,8 @@ make build
 compiler/dist/xen version
 compiler/dist/xen run examples/arm64_collections.xen
 compiler/dist/xen test std.string
-make test-host
-make test-arm64
+python3 scripts/test.py --suite host
+python3 scripts/test.py --suite arm64
 make package
 ```
 
@@ -222,7 +244,9 @@ The compiler uses OCaml's build configuration to select its host default, so
 neither `uname` nor an external tool on PATH is required by compilation. Binary
 package names use the compiler ELF architecture, regardless of its output target.
 The full `make test` additionally executes x86-specific backend/JIT regressions;
-`make test-host` and `make test-arm64` are the ARM64 host validation commands.
+`python3 scripts/test.py --suite host` and `--suite arm64` provide focused host validation.
+`make package` builds both Linux compiler architectures by default. Configure the
+x86_64 cross toolchain on an ARM64 host; see [compiler packaging](../../../scripts/PACKAGING.md).
 
 An optional OCaml 5.5 cross-toolchain context is provided in
 [`scripts/dune-workspace.arm64`](../../../scripts/dune-workspace.arm64). With a
@@ -234,7 +258,7 @@ test "$(/path/to/ocaml-aarch64/bin/ocamlc -config-var architecture)" = arm64
 dune build --workspace=scripts/dune-workspace.arm64 _build/arm64/compiler/main.exe
 aarch64-linux-gnu-readelf -h _build/arm64/compiler/main.exe
 qemu-aarch64 -L /path/to/aarch64-sysroot _build/arm64/compiler/main.exe version
-make package DUNE_WORKSPACE=scripts/dune-workspace.arm64 PACKAGE_CONTEXT=arm64 \
+make package-one DUNE_WORKSPACE=scripts/dune-workspace.arm64 PACKAGE_CONTEXT=arm64 \
   PACKAGE_ARCH=aarch64 \
   PACKAGE_RUNNER='["/usr/bin/qemu-aarch64","-L","/path/to/aarch64-sysroot"]'
 XEN_BIN="$PWD/_build/arm64/compiler/main.exe" \
@@ -256,45 +280,50 @@ and [Dune contexts](https://dune.readthedocs.io/en/stable/reference/dune-workspa
 
 The package command builds only `_build/arm64/compiler/main.exe`, preserving
 the default `compiler/dist/xen`. The result is
-`dist/xen-<version>-linux-aarch64.tar.gz`; the ordinary `make package` produces
-the default context's architecture archive. `PACKAGE_ARCH` is an optional ELF
+`dist/xen-<version>-linux-aarch64.tar.gz`; the ordinary `make package` builds both
+architecture archives through the configured toolchains. `PACKAGE_ARCH` is an optional ELF
 check that catches a workspace accidentally falling back to x86_64. Linux is
 the supported compiler package platform (`PACKAGE_PLATFORM=linux`), not an OS
 inferred from ELF's `System V` ABI or the packaging machine. To package an
 already-built ARM compiler without Dune, replace the workspace/context options
 with `PACKAGE_BINARY=_build/arm64/compiler/main.exe`.
 
-Verified here: an actual ARM64 Xen ELF built with OCaml 5.5's cross compiler,
-executed through QEMU, performing version/check, default ARM64 builds at both
-optimization levels, explicit x86 cross-builds and relocated stdlib discovery.
-Both x86_64 and ARM64 archives are built with `make package`; the ARM archive
-is extracted and relocated, and its compiler checks stdlib imports and builds
-programs at both optimization levels through QEMU. The generated programs also
-execute under QEMU. A QEMU-user compiler process
+The host integration suite checks compiler version, source validation, default
+ARM64 builds, explicit x86 cross-builds and relocated stdlib discovery. Set
+`XEN_BIN`, `XEN_HOST_ARCHIVE` and `XEN_HOST_RUNNER` as shown above to exercise a
+cross-built compiler and its extracted package through QEMU. A QEMU-user compiler process
 does not itself supply binfmt for `run`/`test` children; those commands require a
-native ARM64 host or a configured kernel handler. Native ARM64 `make build`,
-`run`, and `test` have not been executed on a physical ARM64 host in this session.
+native ARM64 host or a configured kernel handler. Compiler execution under QEMU
+does not validate native host builds or kernel-mediated child execution.
 
 `machine_ir.ml` owns A64 instructions, labels and checked relocations. Conditional
 branches use an inverted short condition plus a checked 26-bit branch. Addresses
-use fixed four-instruction MOVZ/MOVK sequences. `linux_runtime.ml` owns the Linux
-write/exit ABI, integer formatting and output retries. `elf_writer.ml` emits
+use fixed four-instruction MOVZ/MOVK sequences. The Linux runtime under
+`compiler/platform/linux/arm64/` owns its write/exit/memory/file ABI. Formatting
+and output progress logic use shared CPU routines with required hooks.
+Its sibling `elf_writer.ml` emits
 EM_AARCH64, separate RX/R/RW load segments with 64KiB alignment (for 4/16/64KiB
 Linux page sizes), and a non-executable GNU stack. No RWX segment is created.
+`Native_backend.Make(Runtime)` separates CPU lowering from startup, syscall,
+file flags and executable construction. The internal Darwin prototype reuses this
+lowering with PIE ADRP+ADD address fixups. Its runtime/backend live under
+`compiler/platform/darwin/arm64/`, and the shared Mach-O writer/signing code under
+`compiler/platform/darwin/`. The prototype is unregistered and does not provide
+macOS execution support. macOS is unsupported and has no planned support;
+these CPU and Mach-O implementations are retained for implementation testing.
 
 The implementation was checked against [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst),
 [AAELF64](https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst), and
 the [Linux generic syscall table](https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/unistd.h).
 
-## Next stages
+## Validation and limitations
 
-Add checked numeric file token parsing for `read_ints` and `read_floats`.
-Linux stdlib services are implemented through target-selected modules; the
-[platform boundary](../../platform/README.md) also specifies the next macOS Intel
-and Apple Silicon steps, with explicit unimplemented targets until Darwin runtimes
-and Mach-O writers exist. User raw syscall numbers remain untranslated.
+Linux numeric file readers and stdlib services are implemented; the
+[platform boundary](../../platform/README.md) defines macOS as unsupported, with
+no planned support. CPU encoders and internal Darwin/Mach-O prototypes are
+retained for implementation testing. User raw syscall numbers remain untranslated.
 
-`make test-arm64` checks integer and FP instruction words against independent
+`python3 scripts/test.py --suite arm64` checks integer and FP instruction words against independent
 assembly, then runs both optimization levels under Linux ARM64 or QEMU.
 Execution coverage includes mixed numeric calls, recursion, references,
 aggregate returns, all NaN comparisons, checked conversion boundaries and
@@ -312,7 +341,7 @@ limit, mixed File/Box/Vec cleanup and allocation failure before read_text return
 A bounded fixture leaves one free guest page, proving EOF precedes final String
 allocation failure and that its temporary mapping and owned fd are then released.
 
-Implement ARM64 JIT encoding, relocation, executable permissions and instruction
-cache synchronization as a separate stage. Keep explicit JIT rejection until then.
+ARM64 JIT is unsupported. It requires separate instruction encoding, relocation,
+executable permissions and instruction cache synchronization.
 Future inline assembly follows the [common/CPU boundary](../../README.md): common
 typed operands and effects; backend instructions, registers and constraints.

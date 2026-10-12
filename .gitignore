@@ -43,3 +43,6 @@ tests/property/found_bugs/
 # Xen build outputs
 /compiler/dist/
 /dist/
+
+# Machine-local compiler prefixes and execution runners
+/.package-toolchains.json

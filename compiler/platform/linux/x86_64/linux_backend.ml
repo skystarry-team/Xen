@@ -1,5 +1,5 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
-(* Keep the existing emitter behind a small adapter. A future Windows backend
+(* Keep the legacy Linux emitter behind a small adapter. A future Windows backend
    must supply its own platform ABI, runtime and executable writer. *)
 include (struct
   let description : Backend_intf.description = {

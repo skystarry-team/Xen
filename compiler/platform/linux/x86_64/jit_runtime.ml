@@ -3,7 +3,7 @@
    exception in the root LICENSE; this compiler source remains Apache-2.0. *)
 (* Runtime encoding of scalar Semantic IR operation records. Recipes come from
    the native emitter, with structural operand patches, never whole-region code. *)
-module M = Machine_ir
+module M = Xen_x86_64.Machine_ir
 let page_size = 4096
 let max_operations = 32
 let max_regions = 64

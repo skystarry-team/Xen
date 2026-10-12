@@ -1,16 +1,17 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
 (* Generated runtime code carries the additional MIT OR Apache-2.0 permission
-   specified in the root LICENSE. Linux AArch64 file services use only x0..x17,
+   specified in the root LICENSE. Shared File ownership/read logic uses x0..x17,
    aligned stack frames and saved LR. They return errors before fatal diagnostics
    so temporary mappings and read_text's owned fd can be released first.
+   Required inline platform hooks preserve LR and normalize negative errno;
+   read/write preserve buffer/count arguments for retries and partial progress.
    Status: 0 success, 1 NUL path, 2 open, 3 read, 4 close, 7 size, 8 allocation. *)
 module M = Machine_ir
 let call m name = M.branch m ~link:true name
-let close m = M.int m 8 57;M.syscall m
 let allocation_failed m label =
   M.imm m 9 (-4095L);M.cmp m 0 9;M.cond m 2 label
 
-let emit m =
+let emit m ~open_ ~read ~write ~close =
   (* open(x0 String descriptor, x1 flags) -> x0 fd, x1 status. The temporary
      NUL-terminated name is never used as a String ownership descriptor. *)
   M.label m "runtime_file_open";M.offset m 31 31 (-64);M.store m 30 31 56;
@@ -26,8 +27,8 @@ let emit m =
   allocation_failed m "file_path_alloc_failed";M.store m 0 31 24;
   M.load m 1 31 0;M.load m 2 31 8;call m "runtime_copy";
   M.load m 9 31 8;M.add m 9 0 9;M.store m ~bytes:1 31 9 0;
-  M.label m "file_open_retry";M.int m 0 (-100);M.load m 1 31 24;
-  M.load m 2 31 16;M.int m 3 420;M.int m 8 56;M.syscall m;
+  M.label m "file_open_retry";M.load m 0 31 24;M.load m 1 31 16;
+  M.int m 2 420;open_ m;
   M.int m 9 (-4);M.cmp m 0 9;M.cond m 0 "file_open_retry";
   M.store m 0 31 40;M.load m 0 31 24;M.load m 1 31 8;
   M.offset m 1 1 1;call m "runtime_unmap";
@@ -41,8 +42,8 @@ let emit m =
   M.offset m 31 31 64;M.ret m;
 
   (* close(x0 File cell) -> raw syscall result, or 0 if already inactive.
-     Invalidate BEFORE close, including errors/EINTR. Linux releases the fd
-     before reporting late errors; retry could close a reused descriptor. *)
+     Invalidate BEFORE close; the shared File contract closes once and never
+     retries. Platforms supply their own close operation and error semantics. *)
   M.label m "runtime_file_close";M.load m 9 0 0;M.imm m 10 (-1L);
   M.store m 10 0 0;M.int m 0 0;M.cmp_zero m 9;M.cond m 11 "file_close_return";
   M.mov m 0 9;close m;M.label m "file_close_return";M.ret m;
@@ -51,7 +52,7 @@ let emit m =
      Preserve partial progress; a zero write with remaining bytes is EIO. *)
   M.label m "runtime_file_write";M.mov m 7 0;
   M.label m "file_write_loop";M.cmp_zero m 2;M.cond m 0 "file_write_done";
-  M.mov m 0 7;M.int m 8 64;M.syscall m;
+  M.mov m 0 7;write m;
   M.int m 9 (-4);M.cmp m 0 9;M.cond m 0 "file_write_loop";
   M.cmp_zero m 0;M.cond m 11 "file_write_return";M.cond m 0 "file_write_zero";
   M.add m 1 1 0;M.sub m 2 2 0;M.branch m "file_write_loop";
@@ -71,7 +72,7 @@ let emit m =
   M.label m "file_read_loop";M.load m 9 31 32;M.load m 10 31 24;
   M.cmp m 9 10;M.cond m 0 "file_read_grow";
   M.load m 0 31 8;M.load m 1 31 16;M.add m 1 1 9;M.sub m 2 10 9;
-  M.int m 8 63;M.syscall m;M.int m 9 (-4);M.cmp m 0 9;M.cond m 0 "file_read_loop";
+  read m;M.int m 9 (-4);M.cmp m 0 9;M.cond m 0 "file_read_loop";
   M.cmp_zero m 0;M.cond m 11 "file_read_failed";M.cond m 0 "file_read_finish";
   M.load m 9 31 32;M.add m 9 9 0;M.store m 9 31 32;M.branch m "file_read_loop";
   M.label m "file_read_grow";M.add m 0 10 10;M.cmp m 0 10;

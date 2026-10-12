@@ -11,18 +11,28 @@ compiler/
   common/          xen_common: AST, parser, checking, Semantic IR, optimization,
                    project loading, Target and Backend_intf
   cpu/
-    x86_64/        xen_x86_64: existing emitter, Linux runtime, JIT and ELF writer
-    arm64/         xen_arm64: A64 encoder, core/ownership emitter, Linux runtime and ELF writer
-  platform/        reserved OS boundary; see its README
+    x86_64/        xen_x86_64: x86 instruction/relocation encoding
+    arm64/         xen_arm64: A64 encoding, Make(Runtime) lowering and shared
+                   formatting/numeric/ownership routines with required OS hooks
+  platform/
+    linux/
+      x86_64/      xen_linux_x86_64: legacy Linux emitter/runtime/JIT, ELF, backend
+      arm64/       xen_linux_arm64: Linux runtime, ELF, backend composition
+    darwin/        xen_darwin: shared Mach-O writer, SHA-256, validation notes
+      arm64/       xen_darwin_arm64: internal Darwin runtime/backend prototype
   backend.ml       implementation registry in the xen_compiler driver library
   test_runner.ml   discovery and execution through Backend_intf.S
   main.ml          CLI, compilation pipeline and target selection
 ```
 
-Dune enforces the dependency direction: `xen_compiler -> {xen_x86_64, xen_arm64} -> xen_common`.
-The common library cannot import the driver or any concrete backend. The x86-64
-library is wrapped, so its machine modules are named `Xen_x86_64.Native_backend`,
-`Xen_x86_64.Machine_ir`, etc. Semantic IR tests and optimizer benchmarks can build
+Dune enforces `driver -> OS backend -> CPU/common`. CPU libraries do not depend
+on Linux/Darwin libraries or re-export their implementations. Darwin ARM64 depends
+on the shared Darwin writer and ARM64 CPU library; it remains unregistered.
+The common library cannot import the driver or any concrete backend. Wrapped module
+names identify the boundary: `Xen_x86_64.Machine_ir` is CPU-specific,
+`Xen_linux_x86_64.Native_backend` is the legacy Linux emitter, and
+`Xen_arm64.Native_backend.Make` accepts an explicit platform implementation.
+Semantic IR tests and optimizer benchmarks can build
 against `xen_common` alone. The compiler executable remains `compiler/main.exe`,
 and the release executable remains `compiler/dist/xen`.
 
@@ -37,10 +47,14 @@ explicitly. The x86-64 adapter translates existing emitter errors into this cont
 
 `Target.t` separates architecture from operating system. ABI, syscall conventions
 and executable formats belong to a concrete combination: Linux ELF/syscalls are
-not properties of every x86-64 target. Future macOS/Windows implementations need their
+not properties of every x86-64 target. Other OS implementations need their
 own adapter and platform implementation, even if it reuses instruction encoding.
-The existing ELF writer stays in `cpu/x86_64/` because its relocations and ELF machine
-identifier are x86-64 specific. Runtime blobs and the scalar JIT stay there too. See [platform boundaries](platform/README.md).
+CPU-specific ELF writers live under `platform/linux/<cpu>/`, using the corresponding
+CPU encoder. The legacy x86 emitter embeds Linux runtime/syscall blobs, so it and
+the syscall-dependent scalar JIT live together under `platform/linux/x86_64/`.
+The shared Mach-O writer and signing code live under `platform/darwin/`, with
+architecture-specific Darwin services in its CPU subdirectories.
+See [platform boundaries](platform/README.md).
 
 `Backend.available` is the single registration point. Add a library implementing
 `Backend_intf.S`, reference it from the driver Dune library, and register its module.
@@ -80,10 +94,11 @@ ARM64 defaults to JIT off. Host filesystem/process utilities are distinct from t
 runtime operations.
 
 Intel/Apple Silicon macOS targets are recognized as x86_64-macos/aarch64-macos;
-arm64 and darwin aliases normalize to these names. They require separate Darwin
-services and Mach-O backends and remain explicitly unimplemented. Recognition of
+arm64 and darwin aliases normalize to these names. macOS is unsupported and has
+no planned support. CPU encoders, the Mach-O writer and internal Darwin
+prototypes are retained for implementation testing. Recognition of
 an unsupported host cannot crash module initialization or prevent `version` from
-running. See the [extension contract](platform/README.md).
+running. See the [platform support policy](platform/README.md).
 
 ## Future bb-scoped inline assembly
 
@@ -101,11 +116,9 @@ backend contract does not expose x86-64 registers to the frontend.
 `make test` runs native/IR/JIT, CLI, packaging, stdlib and property tests. Backend
 contract tests check selection, CPU/OS separation and injection into `Test_runner`.
 CLI tests cover explicit/default x86-64 equivalence, unavailable targets, option
-ordering and literal program arguments after `--`. During this refactor, all 16
-top-level examples were compared byte-for-byte with the original emitter across
-both optimization levels and both JIT settings.
+ordering and literal program arguments after `--`.
 
-`make test-arm64` requires native Linux ARM64 or QEMU, checks integer and FP encodings against
+`python3 scripts/test.py --suite arm64` requires native Linux ARM64 or QEMU, checks integer and FP encodings against
 independently assembled instruction words, verifies ELF segments and diagnostics,
 and executes the supported language subset with both optimizer levels. On x86-64
 it also compares execution to the original backend. `make test` includes these

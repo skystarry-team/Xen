@@ -79,6 +79,12 @@ Negative lengths are runtime errors; length zero produces an empty vector.
 parse, and allocation failures are runtime errors. New code should use the recoverable
 [`std.fs`](file.md) APIs instead.
 
+These readers also work on Linux AArch64. Its float parser converts an exact
+decimal ratio to binary64 with nearest/ties-to-even rounding, preserving signed
+zero and rejecting nonzero underflow to zero and overflow to infinity. It accepts
+decimal point/exponent notation, not NaN, infinity or hexadecimal notation.
+See the [ARM64 parser contract](../../compiler/cpu/arm64/README.md#files).
+
 ## Out-of-range access
 
 ```xen

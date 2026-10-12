@@ -2,7 +2,7 @@
 (* Runtime boundary fixtures that cannot be expressed through safe Xen source.
    Emit directly: no assembler, linker, libc, or user raw-syscall capability. *)
 module M = Xen_arm64.Machine_ir
-module R = Xen_arm64.Linux_runtime
+module R = Xen_linux_arm64.Linux_runtime
 module H = Xen_arm64.Heap_runtime
 module C = Xen_arm64.Collection_runtime
 let () =
@@ -14,6 +14,33 @@ let () =
     M.offset m 9 31 address;M.store m 31 9 0;M.imm m 10 length;
     M.store m 10 9 8;M.store m 31 9 16 in
   (match Sys.argv.(1) with
+  |"numbers_output_allocation_failure"->
+      (* Read a real numeric proc file, then exhaust bounded guest VA before
+         transferring its owned String into the numeric parser. Only result
+         mmap can fail here; the reader already closed its own descriptor. *)
+      M.offset m 31 31 (-96);
+      let path="/proc/sys/kernel/pid_max" in
+      M.offset m 1 31 24;M.address m 9 (M.constant m path);M.store m 9 1 0;
+      M.int m 9 (String.length path);M.store m 9 1 8;M.store m 31 1 16;
+      M.offset m 0 31 0;R.call m "runtime_read_text";
+      M.cmp_zero m 0;M.cond m 1 "fixture_failed";
+      M.int m 9 8192;M.store m 9 31 80;
+      M.label m "numbers_fixture_fill";M.load m 9 31 80;M.cmp_zero m 9;
+      M.cond m 0 "fixture_failed";M.offset m 9 9 (-1);M.store m 9 31 80;
+      M.int m 0 4096;R.call m "runtime_alloc";
+      M.imm m 9 (-4095L);M.cmp m 0 9;M.cond m 2 "numbers_fixture_full";
+      M.address m 15 "fixture_root";M.load m 9 15 0;M.store m 9 0 0;
+      M.store m 0 15 0;M.branch m "numbers_fixture_fill";
+      M.label m "numbers_fixture_full";M.offset m 0 31 48;M.offset m 1 31 0;
+      M.int m 2 1;R.call m "runtime_parse_numbers";
+      M.int m 9 8;M.cmp m 0 9;M.cond m 1 "fixture_failed";
+      List.iter(fun off->M.load m 9 31 off;M.cmp_zero m 9;M.cond m 1 "fixture_failed")
+        [0;8;16;48;56;64];
+      M.label m "numbers_fixture_release";M.address m 15 "fixture_root";M.load m 0 15 0;
+      M.cmp_zero m 0;M.cond m 0 "numbers_fixture_done";
+      M.load m 9 0 0;M.store m 9 15 0;M.int m 1 4096;R.call m "runtime_unmap";
+      M.branch m "numbers_fixture_release";
+      M.label m "numbers_fixture_done";R.write_constant m 1 "numbers-output-allocation\n";R.exit m 0
   |"file_final_allocation_failure"->
       (* Only run with bounded QEMU guest VA. Fill guest pages using an
          intrusive list, then free exactly one. open's name and read's buffer
@@ -107,7 +134,7 @@ let () =
   |_->failwith "unknown ARM64 heap fixture");
   M.label m "fixture_failed";R.fail m "fixture failed\n";
   R.emit m;
-  H.emit_box_helper m "fixture_parent_helper" ~bytes:(H.box_bytes 65536)
+  H.emit_box_helper m "fixture_parent_helper" ~unmap:R.unmap ~bytes:(H.box_bytes 65536)
     [65512,None;0,Some "fixture_child_helper"];
-  H.emit_box_helper m "fixture_child_helper" ~bytes:(H.box_bytes 1) [];
-  Xen_arm64.Native_backend.write Sys.argv.(2)(Xen_arm64.Elf_writer.static_linux ~entry:0 m)
+  H.emit_box_helper m "fixture_child_helper" ~unmap:R.unmap ~bytes:(H.box_bytes 1) [];
+  Xen_linux_arm64.Native_backend.write Sys.argv.(2)(Xen_linux_arm64.Elf_writer.static_linux ~entry:0 m)

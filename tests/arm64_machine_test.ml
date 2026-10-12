@@ -40,6 +40,20 @@ let () =
   expect(word bytes 0=0x14000002 && word bytes 4=0x97ffffff)"branch relocation";
   expect(word bytes 8=0x54000041 && word bytes 12=0x17fffffd)"long conditional branch";
   expect(word bytes 16=0xd2800007 && word bytes 20=0xf2a00847)"address relocation";
+  let pie=M.encode ~position_independent:true m
+    ~code_address:0x100041000L ~rodata_address:0x100042008L ~data_address:0x100043000L in
+  let slid=M.encode ~position_independent:true m
+    ~code_address:0x124041000L ~rodata_address:0x124042008L ~data_address:0x124043000L in
+  expect(pie=slid)"PIE code changed under a common ASLR slide";
+  (* ADRP x7,+4096; ADD x7,x7,#8; two NOPs, independently assembled. *)
+  expect(word pie 16=0xb0000007 && word pie 20=0x910020e7 &&
+    word pie 24=0xd503201f && word pie 28=0xd503201f)"PIE address relocation";
+  expect(rejects(fun()->ignore(M.encode ~position_independent:true m
+    ~code_address:0x100000000L ~rodata_address:0x200000000L ~data_address:0x100000000L)))
+    "unchecked positive ADRP overflow";
+  expect(rejects(fun()->ignore(M.encode ~position_independent:true m
+    ~code_address:0x200001000L ~rodata_address:0x100000000L ~data_address:0x100000000L)))
+    "unchecked negative ADRP overflow";
   M.branch m "missing";
   expect(rejects(fun()->ignore(M.encode m ~code_address:0L ~rodata_address:0L ~data_address:0L)))"undefined label";
   (* Independent assembly is retained in fixtures/arm64_fp.s. *)

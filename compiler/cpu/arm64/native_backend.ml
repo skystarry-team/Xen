@@ -2,14 +2,26 @@
 open Ast
 open Semantic_ir
 module M = Machine_ir
+module type Runtime = sig
+  val target : Target.t
+  val open_write_flags : int
+  val call : M.t -> string -> unit
+  val exit : M.t -> int -> unit
+  val write_constant : M.t -> int -> string -> unit
+  val fail : M.t -> string -> unit
+  val start : M.t -> unit
+  val raw_syscall : M.t -> unit
+  val emit : M.t -> unit
+  val executable : M.t -> bytes
+end
+module Make(R:Runtime) = struct
 module T = Type_desc
-module R = Linux_runtime
 module H = Heap_runtime
 module C = Collection_runtime
 
 exception Unsupported of Backend_intf.error
 let unsupported ?span message =
-  raise(Unsupported {span;message="aarch64-linux: "^message})
+  raise(Unsupported {span;message=Target.to_string R.target^": "^message})
 type env = {
   m:M.t; program:program; func:func; slots:int array;
   flags:(int * int,int)Hashtbl.t;
@@ -312,15 +324,20 @@ let call e (v:value) name args =
   |("open_read"|"open_write"),[path]->
       let nul=runtime_error e v.span "file path contains an embedded NUL"
       and failed=runtime_error e v.span "file open failed" in
-      address e 0 path.id;M.int m 1 (if name="open_read" then 0 else 577);
+      address e 0 path.id;M.int m 1 (if name="open_read" then 0 else R.open_write_flags);
       R.call m "runtime_file_open";M.int m 9 1;M.cmp m 1 9;M.cond m 0 nul;
       M.cmp_zero m 1;M.cond m 1 failed;store e v 0
-  |"read_text",[path]->
+  |("read_text"|"read_ints"|"read_floats" as name),[path]->
       let errors=List.map(fun(code,message)->code,runtime_error e v.span message)
         [1,"file path contains an embedded NUL";2,"file open failed";
-         3,"file read failed";4,"file close failed";7,"string is too large";
-         8,"string allocation failed"] in
-      address e 0 v.id;address e 1 path.id;R.call m "runtime_read_text";
+         3,"file read failed";4,"file close failed";
+         5,(if name="read_ints" then "invalid integer token" else "invalid float token");
+         6,(if name="read_ints" then "integer out of range" else "float out of range");
+         7,(if name="read_text" then "string is too large" else "vector is too large");
+         8,(if name="read_text" then "string allocation failed" else "vector allocation failed")] in
+      address e 0 v.id;address e 1 path.id;
+      if name="read_text" then R.call m "runtime_read_text"
+      else (M.int m 2 (if name="read_ints" then 1 else 2);R.call m "runtime_read_numbers");
       List.iter(fun(code,label)->M.int m 9 code;M.cmp m 0 9;M.cond m 0 label)errors
   |"$inactive_pair",[]->address e 9 v.id;M.store m 31 9 0;M.store m 31 9 8
   |"$vec_into_string",[a]->address e 0 v.id;address e 1 a.id;R.call m "runtime_vec_into_string"
@@ -459,7 +476,7 @@ let rvalue e (v:value) node =
   |Ptr_len pointer->address e 15 pointer.id;M.load m 0 15 8;store e v 0
   |Syscall(number::args)->
       load e 8 number;List.iteri(fun reg arg->load e reg arg)args;
-      M.syscall m;store e v 0
+      R.raw_syscall m;store e v 0
   |Syscall []->assert false
   |_->unsupported ~span:v.span "this operation is not implemented in the initial ARM64 backend"
 let operation e (op:operation) = match op.node with
@@ -590,11 +607,7 @@ let generate ?(jit=true) ?(jit_report=false) checked =
       Array.iter(fun(l:local)->validate_type program l.span l.typ)f.locals)program.functions;
     let m=M.create() in
     List.iter(M.global m)["call_depth";"argc";"argv"];
-    M.label m "_start";
-    M.load m 0 31 0;M.offset m 0 0 (-1);M.address m 15 "argc";M.store m 0 15 0;
-    M.offset m 0 31 16;M.address m 15 "argv";M.store m 0 15 0;
-    (* Entry returns Unit; reserve a valid result area for the internal ABI. *)
-    M.offset m 31 31 (-16);M.offset m 8 31 0;
+    R.start m;
     R.call m ("fn_"^program.entry);R.exit m 0;
     let box_helpers=Hashtbl.create 16 and box_queue=Queue.create() in
     R.emit m;List.iter(emit_function m program box_helpers box_queue)program.functions;
@@ -603,10 +616,11 @@ let generate ?(jit=true) ?(jit_report=false) checked =
       if kind="equal" then emit_equal_helper m program box_helpers box_queue typ
       else emit_owned_helper m program box_helpers box_queue kind typ
     done;
-    Ok(Elf_writer.static_linux ~entry:0 m)
+    Ok(R.executable m)
   with Unsupported error->Error error
-    |M.Error message->Error({span=None;message="aarch64-linux: "^message}:Backend_intf.error)
+    |M.Error message->Error({span=None;message=Target.to_string R.target^": "^message}:Backend_intf.error)
 let write path executable =
   let channel=open_out_bin path in
   Fun.protect ~finally:(fun()->close_out channel)(fun()->output_bytes channel executable);
   Unix.chmod path 0o755
+end

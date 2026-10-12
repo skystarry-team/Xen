@@ -75,9 +75,10 @@ take precedence. `aarch64-linux` (alias `arm64-linux`) supports the core languag
 scalar F32/F64, heap Strings, recursive Box/Vec ownership and borrowed Slice.
 JIT defaults to off for ARM64 and on for x86-64 after target selection, regardless
 of option order. ARM64 supports raw POD memory/syscalls and platform-dependent stdlib;
-numeric file readers and explicit JIT requests remain rejected.
-`x86_64-macos` and `aarch64-macos` (OS alias `darwin`) are recognized but unimplemented,
-as are Windows targets. They never select a Linux backend implicitly.
+checked numeric file readers are supported, while explicit JIT requests are rejected.
+`x86_64-macos` and `aarch64-macos` (OS alias `darwin`) are recognized but unsupported;
+the CLI reports that macOS development is discontinued. There is no planned support.
+Windows targets remain unimplemented. These targets never select a Linux backend implicitly.
 Invalid or unavailable targets fail before source loading or output creation.
 All source loading uses the generation target, even when the compiler host differs.
 

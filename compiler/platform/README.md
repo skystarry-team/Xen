@@ -3,10 +3,18 @@
 Reserve this directory for operating-system services, executable formats and
 platform ABI support. CPU instruction encoders live in `../cpu/`.
 
-For now each CPU's `Linux_backend` composes its instruction encoder with its Linux
-runtime and ELF writer. These implementations are explicitly Linux-specific.
-They can move here when a shared platform contract is useful; the x86 writer's
-relocations must not become a dependency of another CPU backend.
+OS implementations live under `linux/` and `darwin/`; CPU-specific implementations
+sit below each OS. `linux/x86_64/` owns the legacy emitter, syscall/JIT runtime,
+ELF writer and backend. `linux/arm64/` owns the Linux runtime, ELF writer and a thin
+composition of `Xen_arm64.Native_backend.Make(Linux_runtime)`. CPU libraries have
+no OS-library dependencies or Linux default instances. Shared heap/file routines
+require explicit inline allocation/unmap/open/read/write/close hooks.
+
+ARM64 code generation uses `Native_backend.Make(Runtime)`:
+platform entry, termination, output, file flags, raw syscall emission and executable
+construction are explicit hooks. Formatting, numeric parsing and ownership logic
+can reuse normalized services. Inline syscall hooks preserve leaf helpers' LR;
+the x86 writer's relocations never become another CPU backend's dependency.
 
 ## Target services
 
@@ -40,24 +48,38 @@ User `syscall0` through `syscall6` retain raw numbers and arguments without tran
 ARM64 implements `Ptr<T>` and checked raw POD memory operations to support these
 services; the pointer descriptor is non-owning and must be freed explicitly.
 
-## macOS extension
+## macOS: unsupported
+
+macOS on Intel and Apple Silicon is unsupported and has no planned support.
+No macOS compiler build, binary package or standard library profile is provided.
+CPU architecture support, Mach-O/signing code and internal Darwin prototypes are
+retained for implementation testing; structural tests do not enable OS support.
 
 `Target` recognizes x86_64-macos and aarch64-macos, including arm64/darwin aliases.
 OCaml amd64/macosx and arm64/macosx host configurations resolve to those targets.
-Neither has a registered backend yet: the CLI diagnoses them as unimplemented
+Neither has a registered backend: the CLI diagnoses them as unsupported
 before loading source or writing output, while `version` works independently.
 The CLI never automatically chooses a Linux backend on macOS. Legacy library
 callers of `Backend.default` retain the explicit `Target.default` fallback on
-unimplemented/unknown hosts, independently of backend registration order; callers
+unsupported/unknown hosts, independently of backend registration order; callers
 needing host validation use `Backend.default_target` and `Backend.select`.
 
-For each CPU, register a macOS backend that reuses only suitable instruction
-encoders and supplies Darwin startup/calling conventions, memory/file services,
-Mach-O construction/relocations and executable permissions. Add its matching
-stdlib profile implementing the same service interface. Do not reuse Linux syscall
-numbers, stat/getdents layouts, ELF loading or JIT permission policy. The current
-internal Xen value layout remains 64-bit; it is distinct from any C/platform ABI.
-macOS binary packages require explicit Mach-O architecture validation and a macOS
-platform branch in the packager; the current ELF/Linux-only packager rejects them.
-Validate both Intel and Apple Silicon hosts and relocated cross-target packages
-before declaring macOS execution supported.
+The internal `darwin/arm64/Darwin_backend` prototype composes the existing instruction
+encoder with `Darwin_runtime` and `darwin/`'s CPU-independent `Mach_o` writer.
+It emits LC_MAIN/PIE/dyld/libSystem images with a direct ad-hoc SHA-256 signature.
+The writer accepts AArch64 or x86_64 code; an Intel Darwin code generator is absent.
+ARM64 address fixups use ADRP+ADD with checked architectural 4KiB page
+deltas and preserve their instruction bytes under a common aligned ASLR slide.
+BSD services use x16 and svc #0x80; carry/positive errno becomes negative errno,
+and x1..x5 are preserved around the trap. Memory/file services have Darwin-specific
+numbers, flags and open arguments; raw BSD numbers are not translated from Linux.
+No Darwin stdlib profile, public FFI, JIT or macOS compiler package is supplied.
+
+`python3 scripts/test.py --suite macos-prototype` checks both CPU headers, segments/permissions, entry
+and load commands, SHA-256 known answers, independent CodeDirectory page hashes,
+PIE relocation and generation from checked Xen IR. `tests/darwin_fixture.exe`
+can emit an internal ARM64 prototype image. These are structural
+and encoding checks, not proof of dyld acceptance or successful Darwin execution.
+The CLI stays unregistered under the unsupported policy. The ELF/Linux-only
+packager rejects macOS packages. See the
+[prototype validation scope](darwin/MACOS_VALIDATION.md).

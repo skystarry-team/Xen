@@ -1,5 +1,5 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
-module M = Machine_ir
+module M = Xen_arm64.Machine_ir
 
 (* 64KiB segment boundaries work with Linux's 4/16/64KiB AArch64 pages. *)
 let static_linux ~entry image =

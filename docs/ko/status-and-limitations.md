@@ -139,20 +139,23 @@ move-only `File`의 열기·읽기·쓰기·닫기·이동과 aggregate/Box/Vec 
 바이트를 보존하는 `read_text`도 지원합니다.
 ARM64에서 비소유 `Ptr<T>`, 검사된 raw POD 메모리 연산과 raw syscall도 지원합니다.
 `std.io`·`std.fs`·`std.env`·`std.process`는 출력 타깃별 `std.platform` 구현을 사용합니다.
-현재 ARM64에서는 JIT와 `read_ints`·`read_floats`를 명시적 오류로 거부합니다.
+ARM64의 `read_ints`·`read_floats`는 검사된 decimal token 읽기를 지원합니다.
+실수는 정수 비율에서 nearest/ties-to-even으로 한 번 반올림하며 음의 0을 보존합니다.
+현재 ARM64에서 JIT는 명시적 오류로 거부합니다.
 JIT 기본값은 ARM64 타깃에서 off, x86-64 타깃에서 on입니다.
 명시적인 ARM64 `--jit=on`과 `--jit-report`는 계속 거부합니다.
 `x86_64-windows`와 `aarch64-windows`는 아직 미구현입니다.
-`x86_64-macos`와 `aarch64-macos`도 인식하지만 미구현입니다. `arm64`·`darwin` 별칭을
+`x86_64-macos`와 `aarch64-macos`는 **미지원**이며 지원 계획이 없습니다.
+macOS용 컴파일러·패키지·표준 라이브러리 프로필은 제공하지 않습니다.
+CPU 아키텍처와 기존 Darwin/Mach-O 프로토타입 구현은 보존합니다. `arm64`·`darwin` 별칭을
 정규화하며, macOS 호스트에서 Linux backend로 자동 대체하지 않습니다.
-Darwin 서비스·Mach-O·Intel/Apple Silicon 실행 검증은 다음 OS 확장 단계입니다.
 
 `run`과 `test`는 호스트 커널을 통해 실행하며 에뮬레이터를 자동 실행하지 않습니다.
 x86-64에서 만든 ARM64 실행 파일은 `qemu-aarch64 ./app`으로 검증할 수 있습니다.
 공통 계층은 Xen의 고정 64비트 값 배치와 기존 여섯 인자 제한을 유지합니다.
 컴파일러 자체도 native OCaml/Dune으로 Linux ARM64에서 빌드하는 경로를 제공합니다.
-`make test-host`는 기본 타깃·run/test·stdlib 탐색·패키징을 확인하며,
-`make test-arm64`는 ARM64 생성 코드를 검증합니다. 현재 세션에서는 실제 ARM64
-컴파일러 ELF를 크로스 빌드해 QEMU에서 실행했습니다. 물리 ARM64 호스트의
-native 빌드·자식 실행 검증 범위는 [ARM64 문서](../../compiler/cpu/arm64/README.md)에 명시합니다.
+`python3 scripts/test.py --suite host`는 기본 타깃·run/test·stdlib 탐색·패키징을 확인하며,
+`--suite arm64`는 ARM64 생성 코드를 검증합니다. 크로스 빌드한 ARM64 컴파일러는
+QEMU에서 검증할 수 있습니다. native 빌드·자식 실행에 필요한 환경은
+[ARM64 문서](../../compiler/cpu/arm64/README.md)를 참고하세요.
 [컴파일러 구조](../../compiler/README.md)와 [ARM64 지원 범위](../../compiler/cpu/arm64/README.md)를 참고하세요.

@@ -4,7 +4,7 @@
    and the compiler executable remain Apache-2.0 only. *)
 open Ast
 open Semantic_ir
-module M = Machine_ir
+module M = Xen_x86_64.Machine_ir
 module T = Type_desc
 
 type error = { span : span option; message : string }

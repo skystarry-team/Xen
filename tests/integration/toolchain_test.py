@@ -83,14 +83,16 @@ class ToolchainTests(unittest.TestCase):
         output = self.cwd / "preserved"
         output.write_bytes(b"preserve existing output")
         for command in ("check", "build", "run", "test"):
-            for target in ("aarch64-windows", "x86_64-windows", "x86_64-macos", "arm64-darwin"):
+            for target in ("aarch64-windows", "x86_64-windows", "x86_64-macos", "aarch64-macos", "arm64-darwin"):
                 with self.subTest(command=command, target=target):
                     args = [command, self.cwd / "missing.xen", f"--target={target}"]
                     if command == "build":
                         args += ["-o", output]
                     result = self.invoke(*args)
                     self.assertEqual(result.returncode, 1, result.stderr)
-                    self.assertIn("is not implemented", result.stderr)
+                    message = ("is unsupported; macOS development is discontinued"
+                               if target.endswith(("-macos", "-darwin")) else "is not implemented")
+                    self.assertIn(message, result.stderr)
                     self.assertIn("supported targets: x86_64-linux", result.stderr)
                     self.assertEqual(result.stdout, "")
                     self.assertEqual(output.read_bytes(), b"preserve existing output")
@@ -305,7 +307,7 @@ class ToolchainTests(unittest.TestCase):
             self.assertEqual(restored.returncode, 0, restored.stderr)
         self.addCleanup(restore_version)
         packages = self.root / "packages"
-        result = subprocess.run(["make", "package", "VERSION=loader-test", f"DIST_DIR={packages}"],
+        result = subprocess.run(["make", "package-one", "VERSION=loader-test", f"DIST_DIR={packages}"],
                                 cwd=REPO, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         with tarfile.open(next(packages.glob("*.tar.gz"))) as archive:
@@ -316,7 +318,9 @@ class ToolchainTests(unittest.TestCase):
                              "assets/branding/README.md", "assets/branding/full_logo.png",
                              "assets/branding/full_logo.png.license", "docs/en/jit.md",
                              "docs/ko/jit.md", "examples/demo.xen", "compiler/README.md",
-                             "compiler/cpu/arm64/README.md", "compiler/platform/README.md"):
+                             "compiler/cpu/arm64/README.md", "compiler/platform/README.md",
+                             "compiler/platform/darwin/MACOS_VALIDATION.md", "scripts/PACKAGING.md",
+                             "scripts/package-toolchains.example.json"):
                 self.assertIn(f"{prefix}/{relative}", names)
             self.assertFalse(any(Path(name).suffix in (".ml", ".mli") for name in names))
             for image in set(re.findall(r'assets/branding/[^"\s]+\.png', (REPO / "README.md").read_text())):
@@ -352,15 +356,22 @@ class ToolchainTests(unittest.TestCase):
             prefix = "xen-loader-test-source"
             for relative in ("Makefile", "dune-project", ".gitignore", "compiler/common/checker.ml",
                              "compiler/common/dune", "compiler/common/backend_intf.ml",
-                             "compiler/cpu/x86_64/dune", "compiler/cpu/x86_64/native_backend.ml",
+                             "compiler/cpu/x86_64/dune", "compiler/cpu/x86_64/machine_ir.ml",
+                             "compiler/platform/linux/x86_64/dune", "compiler/platform/linux/x86_64/native_backend.ml",
+                             "compiler/platform/linux/x86_64/linux_backend.ml", "compiler/platform/linux/arm64/linux_runtime.ml",
+                             "compiler/platform/linux/arm64/linux_backend.ml", "compiler/platform/linux/arm64/elf_writer.ml",
+                             "compiler/platform/darwin/dune", "compiler/platform/darwin/mach_o.ml",
+                             "compiler/platform/darwin/MACOS_VALIDATION.md",
+                             "compiler/platform/darwin/arm64/darwin_backend.ml", "compiler/platform/darwin/arm64/darwin_runtime.ml",
                              "compiler/cpu/arm64/README.md", "compiler/cpu/arm64/dune",
                              "compiler/cpu/arm64/native_backend.ml", "compiler/platform/README.md",
                              "compiler/backend.ml",
-                             "tests/property/runner.py", "scripts/package.py", "LICENSE"):
+                             "tests/property/runner.py", "scripts/package.py", "scripts/package_build.py",
+                             "scripts/test.py", "scripts/PACKAGING.md", "scripts/package-toolchains.example.json", "LICENSE"):
                 self.assertIn(f"{prefix}/{relative}", names)
             banned = {".git", ".idea", "reference", "test", "__pycache__", "found_bugs", "dist"}
             self.assertFalse(any(banned.intersection(Path(name).parts) or
-                                 Path(name).name in ("AGENTS.md", "CLAUDE.md") for name in names))
+                                 Path(name).name in ("AGENTS.md", "CLAUDE.md", ".package-toolchains.json") for name in names))
             self.assertEqual(archive.extractfile(f"{prefix}/compiler/common/checker.ml").read(),
                              (REPO / "compiler/common/checker.ml").read_bytes())
             self.assertEqual(archive.extractfile(f"{prefix}/VERSION").read(), b"loader-test\n")

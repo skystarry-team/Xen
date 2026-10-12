@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = ("README.md", "CONTRIBUTING.md", "LICENSE", "LICENSE-MIT",
          "LICENSE-APACHE", "NOTICE", "THIRD_PARTY.md", "VERSION")
 DIRECTORIES = ("docs", "examples", "stdlib", "assets", "licenses")
-COMPILER_DOCS = ("compiler/README.md", "compiler/cpu/arm64/README.md", "compiler/platform/README.md")
+COMPILER_DOCS = ("compiler/README.md", "compiler/cpu/arm64/README.md", "compiler/platform/README.md",
+                 "compiler/platform/darwin/MACOS_VALIDATION.md", "scripts/PACKAGING.md",
+                 "scripts/package-toolchains.example.json")
 SOURCE_FILES = ("Makefile", "dune-project", ".gitignore")
 SOURCE_DIRECTORIES = ("compiler", "tests", "benchmarks", "scripts")
 EXCLUDED = {"__pycache__", "found_bugs", "dist"}

@@ -83,7 +83,11 @@ class HostTests(unittest.TestCase):
                                'assert(match std.fs.metadata(arg(0)){Result.Ok(m)=>m.is_file && !m.is_directory && m.size==14,_=>false});'
                                'assert(match std.fs.read_dir("."){Result.Ok(names)=>names.len()>0,_=>false});'
                                'let text=match std.fs.read(arg(0)){Result.Ok(s)=>s,_=>"bad"};'
-                               'std.io.write_stdout(text);}')
+                               'std.io.write_stdout(text);'
+                               'assert(match std.fs.write(arg(1),"-9223372036854775808 +7"){Result.Ok(_)=>true,_=>false});'
+                               'let ints=read_ints(arg(1));assert(ints.len()==2 && ints[0]==(-9223372036854775807-1) && ints[1]==7);'
+                               'assert(match std.fs.write(arg(1),"-.5 1e2 -0.0 4.9406564584124654e-324"){Result.Ok(_)=>true,_=>false});'
+                               'let floats=read_floats(arg(1));assert(floats.len()==4 && floats[0]==-0.5 && floats[1]==100.0);}')
         binary = XEN
         if os.getenv("XEN_HOST_ARCHIVE"):
             with tarfile.open(Path(os.environ["XEN_HOST_ARCHIVE"]).resolve()) as bundle:
@@ -100,7 +104,7 @@ class HostTests(unittest.TestCase):
                 self.success(self.invoke("build", self.source, f"--target={target}-linux",
                                          f"--opt={opt}", "-o", output, binary=binary))
                 self.assertEqual(package.binary_architecture(output), target)
-                execution = [str(output), str(self.root / "host-file")]
+                execution = [str(output), str(self.root / "host-file"), str(self.root / "host-numbers")]
                 if target != HOST_ARCH:
                     emulator = shutil.which("qemu-aarch64" if target == "aarch64" else "qemu-x86_64")
                     self.assertIsNotNone(emulator)

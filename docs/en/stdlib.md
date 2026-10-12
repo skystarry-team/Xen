@@ -12,8 +12,9 @@ AArch64 through internal `std.platform` services. The loader selects
 check and test discovery; it never substitutes another target's implementation.
 Every binary archive contains both profiles for cross compilation. Native flags,
 errno values and directory records remain target-specific when using the low-level
-`std.fs.open_path`/`decode_directory` helpers. The macOS profiles and backends are
-not implemented yet; see the [platform extension contract](../../compiler/platform/README.md).
+`std.fs.open_path`/`decode_directory` helpers. macOS profiles and backends are
+unsupported and have no planned support; see the
+[platform support policy](../../compiler/platform/README.md).
 
 ## `std.convert`
 

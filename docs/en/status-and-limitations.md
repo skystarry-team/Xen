@@ -7,8 +7,12 @@ and recursive Box/Vec ownership with borrowed Slice views, `std.string`, `std.it
 and `std.hashmap`, managed `File` operations and `read_text`. The CLI defaults to the compiler's build architecture on Linux;
 explicit `--target` overrides it. ARM64 JIT defaults to off.
 ARM64 also supports Ptr/raw POD memory/syscalls and target-selected std.io/fs/env/process.
-Numeric file readers and JIT are not yet supported on ARM64; see its
+ARM64 supports checked numeric file readers; JIT remains unsupported. See its
 [support matrix](../../compiler/cpu/arm64/README.md).
+
+macOS on Intel and Apple Silicon is unsupported and has no planned support.
+CPU encoders and internal Darwin/Mach-O prototypes are retained for implementation
+testing. No macOS compiler or binary package is supplied.
 
 ## Supported
 

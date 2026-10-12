@@ -94,12 +94,14 @@ let cond m condition target =
 let address m rd target =
   m.fixups <- (position m,Address rd,target)::m.fixups;imm m rd 0L
 let ret m = word m 0xd65f03c0
-let syscall m = word m 0xd4000001
+let syscall ?(immediate=0) m =
+  if immediate<0 || immediate>65535 then raise(Error "A64 SVC immediate out of range");
+  word m (0xd4000001 lor (immediate lsl 5))
 let branch_bits displacement =
   if displacement mod 4<>0 || displacement< -134217728 || displacement>=134217728
   then raise(Error "A64 branch is unaligned or exceeds +/-128MiB");
   (displacement/4) land 0x3ffffff
-let encode m ~code_address ~rodata_address ~data_address =
+let encode ?(position_independent=false) m ~code_address ~rodata_address ~data_address =
   let code=Bytes.of_string(Buffer.contents m.code) in
   let set at n = for i=0 to 3 do Bytes.set code (at+i)
     (Char.chr ((n lsr (i*8)) land 255)) done in
@@ -112,6 +114,21 @@ let encode m ~code_address ~rodata_address ~data_address =
     |Address rd->
         let base=match section with Code->code_address|Rodata->rodata_address|Data->data_address in
         let value=Int64.add base (Int64.of_int pos) in
-        let encoded=create() in imm encoded rd value;
-        Bytes.blit_string (Buffer.contents encoded.code) 0 code at 16)m.fixups;
+        if position_independent then begin
+          (* ADRP addresses architectural 4KiB pages even on a 16KiB OS.
+             Preserve the four-word fixup footprint used by absolute
+             addresses so branches and code labels never move during encoding. *)
+          let pc=Int64.add code_address(Int64.of_int at) in
+          let page value=Int64.shift_right_logical value 12 in
+          let delta=Int64.sub(page value)(page pc) in
+          if delta< -1048576L || delta>=1048576L then raise(Error "A64 ADRP exceeds +/-4GiB");
+          let immediate=Int64.to_int(Int64.logand delta 0x1fffffL) in
+          set at (0x90000000 lor ((immediate land 3) lsl 29) lor ((immediate lsr 2) lsl 5) lor rd);
+          let low=Int64.to_int(Int64.logand value 4095L) in
+          set (at+4)(0x91000000 lor (low lsl 10) lor (rd lsl 5) lor rd);
+          set (at+8) 0xd503201f;set (at+12) 0xd503201f
+        end else begin
+          let encoded=create() in imm encoded rd value;
+          Bytes.blit_string (Buffer.contents encoded.code) 0 code at 16
+        end)m.fixups;
   code

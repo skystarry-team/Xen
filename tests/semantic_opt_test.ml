@@ -1,5 +1,5 @@
 (* SPDX-License-Identifier: MIT OR Apache-2.0 *)
-open Xen_x86_64
+open Xen_linux_x86_64
 open Ast
 open Semantic_ir
 let fail s = failwith s

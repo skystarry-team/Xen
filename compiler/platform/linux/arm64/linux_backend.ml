@@ -1,4 +1,5 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
+(* Compose the OS-independent A64 lowering with Linux services and ELF. *)
 include (struct
   let description : Backend_intf.description = {
     target={architecture=Target.Aarch64;operating_system=Target.Linux};

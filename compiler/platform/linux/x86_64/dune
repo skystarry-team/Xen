@@ -1,0 +1,4 @@
+; SPDX-License-Identifier: Apache-2.0
+(library
+ (name xen_linux_x86_64)
+ (libraries unix xen_common xen_x86_64))

@@ -7,9 +7,9 @@ library. All files in this directory are licensed under Apache-2.0.
 Run from the repository root after `make build`:
 
 ```sh
-make quickcheck QUICKCHECK_MODE=mixed QUICKCHECK_DEPTH=smoke QUICKCHECK_SEED=20261008
-make quickcheck QUICKCHECK_MODE=sweep QUICKCHECK_DEPTH=standard QUICKCHECK_SEED=20261008
-make semantic-test QUICKCHECK_SEED=20261008
+python3 scripts/test.py --suite quickcheck --mode mixed --depth smoke --seed 20261008
+python3 scripts/test.py --suite quickcheck --mode sweep --depth standard --seed 20261008
+python3 scripts/test.py --suite semantic --seed 20261008
 ```
 
 For a custom compiler, set `XEN_BIN` to an executable path and optionally set

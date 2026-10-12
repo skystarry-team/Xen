@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from fractions import Fraction
 
 REPO = Path(__file__).resolve().parents[2]
 XEN = REPO / "compiler/dist/xen"
@@ -393,7 +394,7 @@ fn main(){
  let (first,_)=id((box("fi"+"rst"),box("skip"+"ped")));println(first.into_inner());
 }''', "-7\n2.5\nleft\n18446744073709551615\nreturn\ninner\nnew\nright\nnext\n10\n2\nfirst\n")
 
-    def heap_trace(self, source, expected, *, stack=None, reserve=None, status=0):
+    def heap_trace(self, source, expected, *, args=(), stack=None, reserve=None, status=0):
         if not QEMU:
             self.skipTest("guest allocation ledger requires qemu-aarch64 -strace")
         options = [QEMU, "-strace"]
@@ -406,7 +407,7 @@ fn main(){
             with self.subTest(opt=opt):
                 compiled, output = self.compile(source, opt=opt)
                 self.assertEqual(compiled.returncode, 0, compiled.stderr)
-                actual = subprocess.run([*options, str(output)], capture_output=True,
+                actual = subprocess.run([*options, str(output), *args], capture_output=True,
                                         text=True, timeout=30)
                 self.assertEqual(actual.returncode, status, actual.stderr[-4000:])
                 self.assertEqual(actual.stdout, expected)
@@ -1015,8 +1016,6 @@ fn main(){let mut h=Holder{file:open_read("/dev/null")};let mut i=0;
         for text, message, flags in [
             ("fn main(){}", "JIT is not implemented", ("--jit=on",)),
             ("fn main(){}", "JIT is not implemented", ("--jit=on", "--jit-report")),
-            ('fn main(){println(read_ints("missing"));}', "builtin 'read_ints'", ("--jit=off",)),
-            ('fn main(){println(read_floats("missing"));}', "builtin 'read_floats'", ("--jit=off",)),
         ]:
             with self.subTest(text=text):
                 output = self.root / "aarch64-linux"
@@ -1027,6 +1026,179 @@ fn main(){let mut h=Holder{file:open_read("/dev/null")};let mut i=0;
                 if "JIT" not in message:
                     self.assertIn(": error:", compiled.stderr.replace("native backend error:", "error:"))
                 self.assertEqual(output.read_bytes(), b"preserve me")
+
+    def test_numeric_file_readers_and_ownership(self):
+        integers = self.root / "integers"
+        integers.write_bytes(b" \t\r\n-9223372036854775808 +9223372036854775807 -0 +7 0 " * 20)
+        floats = self.root / "floats"
+        floats.write_bytes(b"1 -.5 2. 1e2 -0.0 4.9406564584124654e-324 1.7976931348623157e308")
+        empty = self.root / "empty"
+        empty.write_bytes(b" \t\r\n")
+        source = '''use std.mem;
+#global[explc]
+struct Numbers<T>{values:Vec<T>}
+fn ints(path:String)->Vec<I64>{return read_ints(path);}
+fn floats(path:String)->Numbers<F64>{return Numbers{values:read_floats(path)};}
+fn main(){
+ let mut cycle=0;while cycle<12{
+  let a=ints(arg(0));assert(len(a)==100);assert(a[0]==(-9223372036854775807-1));
+  assert(a[1]==9223372036854775807);assert(a[3]==7);
+  let mut b=floats(arg(1));let old=std.mem.replace(&mut b,Numbers{values:read_floats(arg(2))});
+  assert(len(b.values)==0);let copied=old;assert(len(copied.values)==7);
+  assert(copied.values[1]==-0.5);assert(copied.values[3]==100.0);
+  assert(len(read_ints(arg(2)))==0);cycle=cycle+1;
+ }println("numbers");}
+'''
+        paths = (str(integers), str(floats), str(empty))
+        self.differential(source, "numbers\n", args=paths)
+        if QEMU:
+            for trace in self.heap_trace(source, "numbers\n", args=paths):
+                self.assertEqual(self.assert_balanced_files(trace), 48)
+                self.assertGreater(self.assert_balanced_heap(trace), 100)
+
+    def test_numeric_reader_grammar_and_error_cleanup(self):
+        path = self.root / "numbers"
+        cases = [
+            ("read_ints", b"0 7 -", "invalid integer token"),
+            ("read_ints", b"0 7 +", "invalid integer token"),
+            ("read_ints", b"0 7 1.0", "invalid integer token"),
+            ("read_ints", b"0 7 9223372036854775808", "integer out of range"),
+            ("read_ints", b"0 7 -9223372036854775809", "integer out of range"),
+            ("read_floats", b"0 7 .", "invalid float token"),
+            ("read_floats", b"0 7 1e+", "invalid float token"),
+            ("read_floats", b"0 7 1.2.3", "invalid float token"),
+            ("read_floats", b"0 7 NaN", "invalid float token"),
+            ("read_floats", b"0 7 -inf", "invalid float token"),
+            ("read_floats", b"0 7 1e309", "float out of range"),
+            ("read_floats", b"0 7 1e-400", "float out of range"),
+            ("read_floats", b"0 7 0e10001", "float out of range"),
+            ("read_floats", b"0 7 -0e-10001", "float out of range"),
+        ]
+        for reader in ("read_ints", "read_floats"):
+            for byte in (b"\0", b"\v", b"\f", b"\x01", b"\xc2\xa0"):
+                cases.append((reader, b"0 7 1"+byte+b"2", "invalid "+("integer" if reader == "read_ints" else "float")+" token"))
+        for reader, data, message in cases:
+            with self.subTest(reader=reader, data=data):
+                path.write_bytes(data)
+                source = 'fn main(){'+reader+'("'+str(path)+'");}'
+                self.differential(source, "", status=1, error=message)
+                if QEMU:
+                    for trace in self.heap_trace(source, "", status=1):
+                        self.assertEqual(self.assert_balanced_files(trace), 1)
+                        self.assert_balanced_heap(trace)
+        for reader in ("read_ints", "read_floats"):
+            for arg, message in (("a\0b", "file path contains an embedded NUL"),
+                                 (str(self.root / "missing"), "file open failed"),
+                                 (str(self.root), "file read failed")):
+                if "\0" in arg:
+                    self.differential('fn main(){'+reader+'("a\0b");}', "", status=1, error=message)
+                else:
+                    self.differential('fn main(){'+reader+'(arg(0));}', "", args=(arg,), status=1, error=message)
+
+    def test_decimal_float_rounding_bits(self):
+        # Exact decimal expansion of a Fraction whose denominator is a power
+        # of two; no decimal formatter or binary floating-point arithmetic.
+        def decimal(value):
+            sign = "-" if value < 0 else ""
+            value = abs(value)
+            power = value.denominator.bit_length()-1
+            self.assertEqual(value.denominator, 1 << power)
+            digits = str(value.numerator * 5**power)
+            if not power:
+                return sign+digits
+            digits = digits.zfill(power+1)
+            return sign+digits[:-power]+"."+digits[-power:]
+
+        rng = random.Random(936104823)
+        tokens = ["0", "-0", "+0.0", "-0.0e10000", ".5", "2.", "+1e+2",
+                  "4.9406564584124654e-324", "1.7976931348623157e308"]
+        # Adjacent pairs cover even and odd mantissas, binade transitions,
+        # subnormals, and the boundary between subnormal and normal values.
+        bits = [1, 2, 0x000ffffffffffffe, 0x000fffffffffffff,
+                0x0010000000000000, 0x3fefffffffffffff,
+                0x3ff0000000000000, 0x3ff0000000000001,
+                0x7feffffffffffffe]
+        for lower in bits:
+            a = struct.unpack("<d", struct.pack("<Q", lower))[0]
+            b = struct.unpack("<d", struct.pack("<Q", lower+1))[0]
+            midpoint = (Fraction(a)+Fraction(b))/2
+            # A dyadic perturbation strictly below the ulp, rendered exactly.
+            delta = (Fraction(b)-Fraction(a))/(1 << 30)
+            for value in (midpoint-delta, midpoint, midpoint+delta):
+                tokens.extend((decimal(value), decimal(-value)))
+        for _ in range(100):
+            value = struct.unpack("<d", struct.pack("<Q", rng.randrange(1, 0x7ff0000000000000)))[0]
+            tokens.append(repr(value))
+        # Long tails beyond the retained prefix distinguish exact ties from
+        # values just above them, and exponents cancel long digit sequences.
+        tie = decimal(Fraction(1)+Fraction(1, 1 << 53))
+        tokens.extend([tie+"0"*1200, tie+"0"*1200+"1",
+                       "0."+"0"*2000+"1e2001", "1"+"0"*2000+"e-2000",
+                       "1."+"0"*2000+"1", "1.000e"+"0"*2000,
+                       "-0e-10000"])
+        half = "0."+str(5**1075).zfill(1075)
+        overflow = (2**54-1)*2**970
+        for token in (half+"0"*1200+"1", str(overflow-1)+"."+"9"*1200):
+            tokens.extend((token, "-"+token))
+        path = self.root / "decimals"
+        path.write_text(" \t\r\n".join(tokens))
+        expected = b"".join(struct.pack("<d", float(token)) for token in tokens)
+        source = '''use std.platform;
+#![bb]
+fn main(){let values=read_floats(arg(0));let p=raw_alloc<F64>(1);
+ let mut i=0;while i<len(values){raw_store(p,0,values[i]);
+  assert(std.platform.write(1,ptr_addr(p),8)==8);i=i+1;}raw_free(p);}
+'''
+        for opt in ("off", "basic"):
+            built, arm = self.compile(source, opt=opt)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            result = subprocess.run([*self.runner(), str(arm), str(path)], capture_output=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual = list(struct.iter_unpack("<Q", result.stdout))
+            wanted = list(struct.iter_unpack("<Q", expected))
+            self.assertEqual(len(actual), len(wanted))
+            for token, got, want in zip(tokens, actual, wanted):
+                self.assertEqual(got, want, (opt, token))
+
+    def test_float_underflow_and_overflow_boundaries(self):
+        # The zero/minsubnormal tie rounds to zero and is a range error for
+        # nonzero input. The finite/infinity tie is likewise a range error.
+        half = "0."+str(5**1075).zfill(1075)
+        overflow = str((2**54-1)*2**970)
+        below_half = "0."+str(((1 << 425)-1)*5**1500).zfill(1500)
+        path = self.root / "boundary"
+        for token in (below_half, "-"+below_half, half, "-"+half,
+                      overflow, "-"+overflow, overflow+"."+"0"*1200+"1",
+                      "-"+overflow+"."+"0"*1200+"1",
+                      "1e"+"9"*2000, "1e-"+"9"*2000,
+                      "1e"+"9"*2000+"x"):
+            with self.subTest(token=token[:80]):
+                path.write_text(token)
+                error = "invalid float token" if token.endswith("x") else "float out of range"
+                for opt in ("off", "basic"):
+                    built, arm = self.compile('fn main(){read_floats(arg(0));}', opt=opt)
+                    self.assertEqual(built.returncode, 0, built.stderr)
+                    result = self.execute(arm, (str(path),))
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn(error, result.stderr)
+
+    def test_numeric_result_allocation_failure_cleanup(self):
+        if not QEMU:
+            self.skipTest("bounded guest VA requires qemu-aarch64")
+        built = subprocess.run(["dune", "build", "tests/arm64_heap_fixture.exe"], cwd=REPO,
+                               capture_output=True, text=True, timeout=30)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        output = self.root / "numeric-allocation"
+        built = subprocess.run([str(REPO / "_build/default/tests/arm64_heap_fixture.exe"),
+                                 "numbers_output_allocation_failure", str(output)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        result = subprocess.run([QEMU, "-strace", "-R", "16777216", "-s", "65536", str(output)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual((result.returncode, result.stdout), (0, "numbers-output-allocation\n"), result.stderr[-4000:])
+        self.assertRegex(result.stderr, r"mmap\(NULL,40,.*\) = -1 errno=12")
+        self.assertEqual(self.assert_balanced_files(result.stderr), 1)
+        self.assertGreater(self.assert_balanced_heap(result.stderr, allow_failed=True), 10)
 
     def test_raw_memory_pod_and_descriptor_contract(self):
         source = '''use std.iter;

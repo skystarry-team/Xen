@@ -1,7 +1,8 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
 (* Generated runtime code carries the additional MIT OR Apache-2.0 permission
-   specified in the root LICENSE. Linux services and ownership, not A64 opcodes.
-   All helpers use x0..x17 only, save LR across calls, and keep SP aligned. *)
+   specified in the root LICENSE. Platform-independent Xen ownership routines.
+   Required platform hooks emit allocation/unmap inline, preserving leaf LR,
+   and normalize errors to negative errno. All helpers use x0..x17 only. *)
 module M = Machine_ir
 let call m name = M.branch m ~link:true name
 let box_header_bytes = 16
@@ -9,13 +10,7 @@ let box_bytes payload =
   let payload=max 1 payload in
   if payload>max_int-box_header_bytes then raise(M.Error "Box allocation size overflow");
   payload+box_header_bytes
-let alloc m =
-  (* mmap(NULL, bytes=x0, RW, PRIVATE|ANONYMOUS, -1, 0). Raw result in x0;
-     each caller checks errno before using it. No executable heap pages. *)
-  M.mov m 1 0;M.int m 0 0;M.int m 2 3;M.int m 3 34;
-  M.imm m 4 (-1L);M.int m 5 0;M.int m 8 222;M.syscall m
-let unmap m = M.int m 8 215;M.syscall m (* x0 base, x1 length *)
-let emit m ~fail =
+let emit m ~alloc ~unmap ~fail =
   M.label m "runtime_alloc";alloc m;M.ret m;
   M.label m "runtime_unmap";unmap m;M.ret m;
   (* Byte copy: x0 destination, x1 source, x2 count. No overlap is required
@@ -98,7 +93,7 @@ let emit m ~fail =
 
 (* A type helper receives x0 header and x1 worklist address. Each Box leaf is
    enqueued directly; calling runtime_box_drop here would reintroduce recursion. *)
-let emit_box_helper m name ~bytes leaves =
+let emit_box_helper m name ~unmap ~bytes leaves =
   M.label m name;M.offset m 31 31 (-32);
   M.store m 0 31 0;M.store m 1 31 8;M.store m 30 31 24;
   List.iter(fun(offset,helper)->M.load m 0 31 0;M.offset m 0 0 (box_header_bytes+offset);

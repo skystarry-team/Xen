@@ -1,5 +1,6 @@
 (* SPDX-License-Identifier: MIT OR Apache-2.0 *)
 open Xen_x86_64
+module Native_backend = Xen_linux_x86_64.Native_backend
 let fail format = Printf.ksprintf (fun message -> prerr_endline message; exit 1) format
 let expect condition format = if not condition then fail format
 let contains haystack needle =
