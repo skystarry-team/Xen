@@ -1,7 +1,7 @@
 # Contributing to the demo
 
 Xen is an early demo for Linux x86-64 and ARM64, including platform stdlib services.
-ARM64 supports checked numeric file readers; JIT remains unsupported.
+ARM64 supports checked numeric file readers and shared scoped AOT optimization.
 macOS is unsupported and has no planned support. CPU encoders and internal
 Mach-O/Darwin prototypes are retained for implementation testing.
 Reproducible bug reports, documentation
@@ -32,7 +32,7 @@ test. English and Korean documentation are maintained in `docs/en/` and
 | `stdlib/` | Xen standard library |
 | `examples/` | Runnable programs and intentional diagnostic examples |
 | `tests/` | OCaml regression/verifier tests |
-| `tests/integration/` | Python CLI, distribution, stdlib, optimizer and JIT tests |
+| `tests/integration/` | Python CLI, distribution, stdlib and scoped AOT tests |
 | `tests/property/` | Generated programs, independent oracles and metamorphic checks |
 | `benchmarks/` | Opt-in timing/size observations; no timing pass thresholds |
 | `assets/branding/` | AI-generated artwork and its attribution notices |
@@ -44,7 +44,7 @@ Benchmarks run separately from `make test`:
 
 ```sh
 python3 benchmarks/optimization_benchmark.py
-python3 benchmarks/jit_benchmark.py
+dune exec benchmarks/semantic_opt_benchmark.exe
 ```
 
 Binary and source distribution commands are documented in the

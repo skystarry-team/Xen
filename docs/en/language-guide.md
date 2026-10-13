@@ -45,5 +45,6 @@ For a compact grammar overview, see the [syntax reference](syntax-reference.md).
 The [supported-features page](status-and-limitations.md) is the source for the current
 target and unsupported constructs in the current demo.
 
-Optional native integer/Bool optimization and bounded leaf fusion are described in
-[Basic native optimization](optimization.md). The default is `--opt=off`; [scalar scope JIT](jit.md) is experimental.
+Explicit `#scope[opt]` blocks use integer/Bool AOT optimization, bounded leaf
+expansion and conservative loop-invariant code motion. Unmarked code is unchanged.
+See [scoped AOT optimization](optimization.md).

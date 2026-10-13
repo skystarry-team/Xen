@@ -15,9 +15,9 @@ module type S = sig
   type executable
 
   (* Input uses Xen's current 64-bit value layout. Each implementation owns ABI
-     lowering, native code, runtime/JIT emission and executable construction.
+     lowering, native code, runtime emission and executable construction.
      An unsupported requested feature must return Error, never silently fall back. *)
-  val generate : ?jit:bool -> ?jit_report:bool -> Semantic_ir.checked_program ->
+  val generate : Semantic_ir.checked_program ->
     (executable, error) result
   val write : string -> executable -> unit
 end

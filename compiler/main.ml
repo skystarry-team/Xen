@@ -35,23 +35,23 @@ let parent_directory path =
       (create (Filename.dirname current); Unix.mkdir current 0o755)
   in create directory
 
-let optimize opt report checked =
-  try Semantic_opt.apply ~report opt checked with
+let optimize ?cache opt report checked =
+  try Semantic_opt.apply ?cache ~report opt checked with
   | Semantic_ir.Invalid(span,message)->fail(location span ^ ": optimization error: " ^ message)
   | Semantic_analysis.Diagnostic(span,message,notes)->
       print_diagnostic {span;message="optimization error: "^message;notes;help=None};exit 1
 
-let build (module B : Backend_intf.S) opt report jit jit_report source output =
-  match B.generate ~jit ~jit_report (optimize opt report (compile ~target:B.description.target source)) with
+let build ?cache (module B : Backend_intf.S) opt report source output =
+  match B.generate (optimize ?cache opt report (compile ~target:B.description.target source)) with
   | Error error ->
       let prefix = match error.span with None -> "" | Some span -> location span ^ ": " in
       fail (prefix ^ "native backend error: " ^ error.message)
   | Ok executable -> parent_directory output; B.write output executable
 
-let run backend opt report jit jit_report source arguments =
+let run ?cache backend opt report source arguments =
   let temporary = Filename.temp_file "xen-run-" ".exe" in
   Fun.protect ~finally:(fun () -> try Sys.remove temporary with Sys_error _ -> ()) (fun () ->
-    build backend opt report jit jit_report source temporary;
+    build ?cache backend opt report source temporary;
     let argv = Array.of_list (temporary :: arguments) in
     let pid = try Unix.create_process temporary argv Unix.stdin Unix.stdout Unix.stderr with
       | Unix.Unix_error (error, _, _) ->
@@ -64,7 +64,7 @@ let run backend opt report jit jit_report source arguments =
         Printf.eprintf "program terminated by signal %d\n" signal; exit (128 + signal))
 
 let usage () =
-  prerr_endline "Usage:\n  xen version | --version\n  xen check <file.xen> [--target=<architecture>-<os>]\n  xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]\n  xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]\n  xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]";
+  prerr_endline "Usage:\n  xen version | --version\n  xen check <file.xen> [--target=<architecture>-<os>]\n  xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>]\n  xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>] [-- program-args...]\n  xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>]";
   exit 2
 
 (* Compiler options may occur before or after the source/target. The run
@@ -72,26 +72,27 @@ let usage () =
 type options = {
   opt : Semantic_opt.level;
   report : bool;
-  jit : bool option;
-  jit_report : bool;
   source : string option;
   output : string;
   filter : string;
   args : string list;
   target : string option;
+  cache_directory : string option;
 }
 
 let parse_options command arguments =
   let rec loop options = function
     | [] -> options
     | flag :: _ when command="check" &&
-        (String.starts_with ~prefix:"--opt" flag || String.starts_with ~prefix:"--jit" flag) -> usage()
+        String.starts_with ~prefix:"--opt" flag -> usage()
     | "--opt=off" :: rest -> loop {options with opt=Semantic_opt.Off} rest
     | "--opt=basic" :: rest -> loop {options with opt=Semantic_opt.Basic} rest
     | "--opt-report" :: rest -> loop {options with report=true} rest
-    | "--jit=on" :: rest -> loop {options with jit=Some true} rest
-    | "--jit=off" :: rest -> loop {options with jit=Some false} rest
-    | "--jit-report" :: rest -> loop {options with jit_report=true} rest
+    | "--opt-cache" :: value :: rest when value<>"" && not(String.starts_with ~prefix:"-" value)->
+        loop {options with cache_directory=Some value} rest
+    | value :: rest when String.starts_with ~prefix:"--opt-cache=" value->
+        let directory=String.sub value 12(String.length value-12)in
+        if directory=""then usage();loop {options with cache_directory=Some directory} rest
     | "--target" :: value :: rest when value<>"" && not(String.starts_with ~prefix:"-" value) ->
         loop {options with target=Some value} rest
     | value :: rest when String.starts_with ~prefix:"--target=" value ->
@@ -104,10 +105,9 @@ let parse_options command arguments =
     | value :: rest when not(String.starts_with ~prefix:"-" value) && options.source=None ->
         loop {options with source=Some value} rest
     | _ -> usage() in
-  let options=loop {opt=Semantic_opt.Off;report=false;jit=None;jit_report=false;
-    source=None;output="a.out";filter="";args=[];target=None} arguments in
-  if (options.report && options.opt<>Semantic_opt.Basic) ||
-     (options.jit_report && options.jit=Some false) then usage();
+  let options=loop {opt=Semantic_opt.Basic;report=false;
+    source=None;output="a.out";filter="";args=[];target=None;cache_directory=None} arguments in
+  if (options.report || options.cache_directory<>None) && options.opt<>Semantic_opt.Basic then usage();
   options
 
 let select_backend target =
@@ -117,9 +117,9 @@ let select_backend target =
   | Ok backend -> backend
   | Error message -> fail ("target error: " ^ message)
 
-let jit_option backend options =
-  let module B = (val backend : Backend_intf.S) in
-  Option.value options.jit ~default:(Backend.default_jit B.description.target)
+let prefix_cache directory (module B:Backend_intf.S) = Option.map(fun directory->
+  Semantic_prefix_cache.create ~directory
+    ~identity:(Semantic_prefix_cache.compiler_identity()^":"^Target.to_string B.description.target)())directory
 
 let () =
   match Array.to_list Sys.argv with
@@ -133,20 +133,20 @@ let () =
       let o=parse_options command options in
       let source=match o.source with Some source->source|None->usage() in
       let backend=select_backend o.target in
-      let jit=jit_option backend o in
-      if command="build" then build backend o.opt o.report jit o.jit_report source o.output
-      else run backend o.opt o.report jit o.jit_report source o.args
+      let cache=prefix_cache o.cache_directory backend in
+      if command="build" then build ?cache backend o.opt o.report source o.output
+      else run ?cache backend o.opt o.report source o.args
   | _ :: "test" :: options ->
       let o=parse_options "test" options in
       let backend=select_backend o.target in
-      let jit=jit_option backend o in
+      let opt_cache=prefix_cache o.cache_directory backend in
       let target=Option.value ~default:"." o.source in
       let module B = (val backend : Backend_intf.S) in
       let cases,errors=Test_runner.discover ~code_target:B.description.target ~target ~filter:o.filter in
       List.iter print_diagnostic errors;
       let failed=ref(List.length errors)and passed=ref 0 in
       List.iter(fun(case:Test_runner.case)->
-        match Test_runner.run ~backend ~opt:o.opt ~opt_report:o.report ~jit ~jit_report:o.jit_report case with
+        match Test_runner.run ~backend ~opt:o.opt ~opt_report:o.report ?opt_cache case with
         |Test_runner.Passed->incr passed;Printf.printf "PASS %s\n%!" case.name
         |Test_runner.Compilation_error d->incr failed;Printf.printf "FAIL %s (compilation)\n%!" case.name;
             print_diagnostic d

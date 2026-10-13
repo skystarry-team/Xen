@@ -1,7 +1,7 @@
 # Linux ARM64 backend
 
 ```sh
-compiler/dist/xen build examples/arm64_core.xen --target=aarch64-linux --jit=off -o app
+compiler/dist/xen build examples/arm64_core.xen --target=aarch64-linux -o app
 qemu-aarch64 ./app hello
 python3 scripts/test.py --suite arm64
 ```
@@ -13,8 +13,7 @@ or an emulator such as QEMU. `run` and `test` use the host kernel and never laun
 QEMU automatically. Their process-launch errors identify the selected target.
 The CLI defaults to the compiler's build architecture on Linux: `x86_64-linux`
 on x86-64, `aarch64-linux` on ARM64. Explicit `--target` overrides that default.
-JIT defaults to off for the ARM64 target and on for x86-64, independently of
-option order; explicit ARM64 `--jit=on` or `--jit-report` is still rejected.
+Both targets use scoped AOT optimization through `#scope[opt]`.
 
 This is a deliberately limited first implementation, not feature parity with the
 x86-64 backend. Unsupported types, operations and builtins produce source-located
@@ -38,7 +37,7 @@ compile errors before an output executable is written.
 | Slice<T>, String.as_bytes() | Read-only views with checked bounds and existing frontend borrow/escape rules; element references and field projections |
 | Numeric collections, byte conversion | `zeros`, `repeat`, Vec<I64/F64> output and Vec<U8>.into_string() |
 | std.string, std.iter, std.hashmap | Supported, including bb-scoped Ptr iteration |
-| JIT and JIT reports | Rejected when explicitly requested |
+| Scoped AOT optimization | Shared integer/Bool regions, leaf expansion and conservative LICM |
 | File, `read_text` | Owned move-only fd; open_read/open_write, read/write/close/is_open, aggregate transfer and recursive cleanup |
 | Ptr, raw memory | Checked allocation/access/free for scalar and named POD elements; non-owning descriptors |
 | std.io, std.fs, std.env, std.process | Target-selected Linux AArch64 services, recoverable I/O and normalized metadata |
@@ -279,7 +278,5 @@ limit, mixed File/Box/Vec cleanup and allocation failure before read_text return
 A bounded fixture leaves one free guest page, proving EOF precedes final String
 allocation failure and that its temporary mapping and owned fd are then released.
 
-ARM64 JIT is unsupported. It requires separate instruction encoding, relocation,
-executable permissions and instruction cache synchronization.
 Future inline assembly follows the [common/CPU boundary](../../README.md): common
 typed operands and effects; backend instructions, registers and constraints.

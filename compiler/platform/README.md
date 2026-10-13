@@ -4,7 +4,7 @@ Reserve this directory for operating-system services, executable formats and
 platform ABI support. CPU instruction encoders live in `../cpu/`.
 
 OS implementations live under `linux/` and `darwin/`; CPU-specific implementations
-sit below each OS. `linux/x86_64/` owns the legacy emitter, syscall/JIT runtime,
+sit below each OS. `linux/x86_64/` owns the legacy emitter, syscall runtime,
 ELF writer and backend. `linux/arm64/` owns the Linux runtime, ELF writer and a thin
 composition of `Xen_arm64.Native_backend.Make(Linux_runtime)`. CPU libraries have
 no OS-library dependencies or Linux default instances. Shared heap/file routines
@@ -73,7 +73,7 @@ deltas and preserve their instruction bytes under a common aligned ASLR slide.
 BSD services use x16 and svc #0x80; carry/positive errno becomes negative errno,
 and x1..x5 are preserved around the trap. Memory/file services have Darwin-specific
 numbers, flags and open arguments; raw BSD numbers are not translated from Linux.
-No Darwin stdlib profile, public FFI, JIT or macOS compiler package is supplied.
+No Darwin stdlib profile, public FFI or macOS compiler package is supplied.
 
 `python3 scripts/test.py --suite macos-prototype` checks both CPU headers, segments/permissions, entry
 and load commands, SHA-256 known answers, independent CodeDirectory page hashes,

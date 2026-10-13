@@ -79,25 +79,24 @@ let execute ?target ~write executable =
     let status=snd(Unix.waitpid[]pid)in
     status,Project_loader.read_file stdout_path,Project_loader.read_file stderr_path)
 
-let run ?(backend=Backend.default) ?(opt=Semantic_opt.Off) ?(opt_report=false) ?jit ?(jit_report=false) case =
+let run ?(backend=Backend.default) ?(opt=Semantic_opt.Basic) ?(opt_report=false) ?opt_cache case =
   let module B = (val backend : Backend_intf.S) in
   if case.code_target<>B.description.target then Compilation_error(diagnostic case.span
     ("test discovered for "^Target.to_string case.code_target^" cannot run with backend "^
      Target.to_string B.description.target)) else
-  let jit=Option.value jit ~default:(Backend.default_jit B.description.target) in
   let checked=if case.single then Checker.check ~entry:case.function_name(List.hd case.programs)
     else Checker.check_project ~entry_module:case.owner ~entry_function:case.function_name case.programs in
   match checked with
   |Error d->Compilation_error d
   |Ok checked->
-    let optimized=try Ok(Semantic_opt.apply ~report:opt_report opt checked)with
+    let optimized=try Ok(Semantic_opt.apply ?cache:opt_cache ~report:opt_report opt checked)with
       |Semantic_ir.Invalid(span,message)->Error(diagnostic span ("optimization error: "^message))
       |Semantic_analysis.Diagnostic(span,message,notes)->Error({span;message="optimization error: "^message;notes;help=None}:Checker.diagnostic)in
     match optimized with Error d->Compilation_error d|Ok checked->
-    match B.generate ~jit ~jit_report checked with
+    match B.generate checked with
     |Error error->Compilation_error(diagnostic(Option.value ~default:case.span error.span)
         ("native backend error: "^error.message))
     |Ok executable->match protect case.span.file(fun()->execute ~target:B.description.target ~write:B.write executable)with
       |Error d->Compilation_error d
-      |Ok(Unix.WEXITED 0,_,stderr)->if jit_report then prerr_string stderr;Passed
+      |Ok(Unix.WEXITED 0,_,stderr)->ignore stderr;Passed
       |Ok(status,stdout,stderr)->Failed(status,stdout,stderr)

@@ -77,12 +77,12 @@
 
 ## Native 최적화
 
-`build/run/test --opt=basic`은 정수·Bool 계산 영역 최적화와 제한된 leaf 함수 fusion을
-지원한다. 기본값은 `off`이며 `check`는 원본 의미 검사만 수행한다.
-상세 범위·예산·보고서는 [최적화 문서](optimization.md)를 따른다.
-
-`#scope[jit]`는 정수·Bool 영역의 실제 runtime 생성·RX 실행·cache 재사용을 지원하는 실험적 기능이다.
-범위·실패 동작·비용은 [runtime JIT](jit.md)를 따른다.
+`#scope[opt]` 안에서 정수·Bool 계산 최적화, 제한된 leaf 펼치기와 보수적인
+루프 불변식 이동과 독립적인 counted scalar 루프 퓨전을 수행한다.
+`--opt-cache=<directory>`로 정확한 prefix의 전방 변환 결과를 재사용할 수 있다.
+`build/run/test`의 기본값은 `--opt=basic`이며
+`--opt=off`로 끈다. 스코프 밖 코드는 보존한다. `check`는 원본 의미 검사만
+수행한다. 상세 범위·예산·보고서는 [최적화 문서](optimization.md)를 따른다.
 
 ## 아직 지원하지 않음
 
@@ -102,7 +102,7 @@
 - range step, inclusive range와 역방향 range
 - 범용 parsing API, streaming input, locale number와 CSV
 - `Int` 이외 고정폭 숫자와 Float의 stdlib parsing/formatting
-- global·function JIT mode, runtime specialization과 범용 JIT (scalar `#scope[jit]`는 지원)
+- 전역 최적화 CLI, 배열·tile 퓨전, guard 기반 버전 생성과 runtime specialization
 - FFI, GPU, 다른 architecture/OS target
 
 ## 플랫폼과 ABI
@@ -141,9 +141,7 @@ ARM64에서 비소유 `Ptr<T>`, 검사된 raw POD 메모리 연산과 raw syscal
 `std.io`·`std.fs`·`std.env`·`std.process`는 출력 타깃별 `std.platform` 구현을 사용합니다.
 ARM64의 `read_ints`·`read_floats`는 검사된 decimal token 읽기를 지원합니다.
 실수는 정수 비율에서 nearest/ties-to-even으로 한 번 반올림하며 음의 0을 보존합니다.
-현재 ARM64에서 JIT는 명시적 오류로 거부합니다.
-JIT 기본값은 ARM64 타깃에서 off, x86-64 타깃에서 on입니다.
-명시적인 ARM64 `--jit=on`과 `--jit-report`는 계속 거부합니다.
+두 Linux 타깃은 공통 IR의 스코프 AOT 최적화를 사용합니다.
 `x86_64-windows`와 `aarch64-windows`는 아직 미구현입니다.
 `x86_64-macos`와 `aarch64-macos`는 **미지원**이며 지원 계획이 없습니다.
 macOS용 컴파일러·패키지·표준 라이브러리 프로필은 제공하지 않습니다.

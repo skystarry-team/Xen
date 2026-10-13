@@ -12,6 +12,6 @@ let () =
     |[]->assert false in
   match checked with
   |Error error->failwith error.Checker.message
-  |Ok checked->match B.generate ~jit:false checked with
+  |Ok checked->match B.generate checked with
     |Error error->failwith error.Backend_intf.message
     |Ok image->B.write Sys.argv.(2) image

@@ -5,9 +5,9 @@ Linux x86-64 static non-PIE ELF target. The Linux ARM64 backend supports
 an integer/float/Bool, control-flow, function, reference, aggregate, heap-string
 and recursive Box/Vec ownership with borrowed Slice views, `std.string`, `std.iter`
 and `std.hashmap`, managed `File` operations and `read_text`. The CLI defaults to the compiler's build architecture on Linux;
-explicit `--target` overrides it. ARM64 JIT defaults to off.
+explicit `--target` overrides it.
 ARM64 also supports Ptr/raw POD memory/syscalls and target-selected std.io/fs/env/process.
-ARM64 supports checked numeric file readers; JIT remains unsupported. See its
+ARM64 supports checked numeric file readers. See its
 [support matrix](../../compiler/cpu/arm64/README.md).
 
 macOS on Intel and Apple Silicon is unsupported and has no planned support.
@@ -47,11 +47,12 @@ testing. No macOS compiler or binary package is supplied.
 - `explc` and `bb` lexical capabilities; typed raw pointers for scalar/POD values and
   Linux x86-64/AArch64 syscall primitives with 0 through 6 arguments within `bb`.
 - `xen check`, `build`, `run`, and native `test` commands.
-- Optional AOT `--opt=basic` integer/Bool region optimization and bounded leaf fusion;
-  see [optimization](optimization.md). Default optimization is off.
+- Explicit `#scope[opt]` AOT integer/Bool optimization, bounded leaf expansion and
+  conservative loop-invariant code motion, independent counted-loop fusion and
+  optional persistent forward prefix caching; see [optimization](optimization.md).
+  Unmarked source is not optimized.
 
-- Experimental scalar runtime `#scope[jit]`, RW-to-RX generation and bounded process cache;
-  see [runtime JIT](jit.md).
+- Runtime compilation and `jit` modes/options have been removed.
 
 ## Not supported
 

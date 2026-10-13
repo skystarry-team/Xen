@@ -50,7 +50,7 @@ def main() -> None:
             run("dune", "build", "tests/mach_o_fixture.exe", "tests/darwin_fixture.exe", "tests/darwin_abi_fixture.exe")
             integration("mach_o")
             run("dune", "exec", "tests/native_core_test.exe", XEN_TEST_OPT="basic")
-            for name in ("optimization", "jit", "toolchain", "package_build", "arm64", "host", "stdlib"):
+            for name in ("optimization", "scoped_opt", "aot_fusion", "toolchain", "package_build", "arm64", "host", "stdlib"):
                 integration(name)
             integration("stdlib", "--arm64")
             integration("test_workflow")

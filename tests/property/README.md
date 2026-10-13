@@ -57,14 +57,14 @@ Unsupported language features are not generated as expected-success inputs.
 
 For every execution, restore the same initial files and use the same source path:
 
-1. Original source, `--opt=off --jit=off`.
-2. Original source, `--opt=basic --jit=off`.
-3. Main wrapped in `#scope[jit]`, `--opt=basic --jit=off`.
-4. The identical marked source, `--opt=basic --jit=on`.
+1. Original source, `--opt=off`.
+2. Original source, `--opt=basic`.
+3. Main wrapped in `#scope[opt]`, `--opt=basic`.
+4. The identical marked source, `--opt=off`.
 
 Compare stdout, stderr and exit status exactly before checking the Python oracle.
-This distinguishes the effect of adding a scope from the experimental runtime
-encoder. Reports stay disabled. Invalid/no-crash inputs use the original `check`
+This distinguishes the effect of adding a scope from AOT optimization inside it.
+Reports stay disabled. Invalid/no-crash inputs use the original `check`
 path. Three known literal-left inference limitations remain explicit regression
 pins rather than being silently filtered out.
 

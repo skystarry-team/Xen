@@ -2,8 +2,8 @@
 
 Run these commands from the repository root after `make build`. The Python
 scripts use the standard library only (Python 3.10 or later). The decoded
-machine-code check requires binutils `objdump`. JIT permission/failure
-checks use Linux x86-64 `/proc`, resource limits and seccomp.
+machine-code check requires binutils `objdump`. Scoped AOT checks compare original
+and optimized IR, native output and loop storage lifetimes.
 
 ```sh
 make test
@@ -19,8 +19,9 @@ the generated/metamorphic checks. It does not run benchmarks.
 | `native_core_test.ml` | Language execution, ownership, cleanup and diagnostics |
 | `semantic_ir_test.ml` | Verifier mutations and CFG metamorphic checks |
 | `semantic_opt_test.ml` | Scalar optimization and bounded fusion |
-| `jit_ir_test.ml` | Shared regions and structural operand patches |
-| `integration/` | CLI, relocation/archive, stdlib, native test, optimization and JIT regressions |
+| `scoped_opt_test.ml` | Scoped AOT, LICM, effects and storage lifetimes |
+| `aot_fusion_test.ml` | Counted scalar loop fusion, prefix invalidation and fresh backward liveness |
+| `integration/` | CLI, relocation/archive, stdlib, native test, scoped optimization regressions |
 | `property/` | Whole-program generation, independent oracles and source metamorphisms |
 
 Focused commands:
@@ -29,7 +30,8 @@ Focused commands:
 dune exec tests/native_core_test.exe
 dune exec tests/semantic_ir_test.exe
 python3 tests/integration/toolchain_test.py
-python3 tests/integration/jit_test.py
+python3 tests/integration/scoped_opt_test.py
+python3 tests/integration/aot_fusion_test.py
 python3 scripts/test.py --suite quickcheck --mode mixed --depth smoke --seed 20261008
 python3 scripts/test.py --suite semantic --seed 20261008
 python3 scripts/test.py --suite packaging
@@ -39,7 +41,7 @@ Integration scripts use `compiler/dist/xen`. Property tests accept an
 explicit `XEN_BIN`, otherwise use the repository build or `xen` on `PATH`.
 An invalid explicit override is an error; old `/tmp` binaries are never
 selected. See [property/README.md](property/README.md) for all modes and
-failure replay. Initial files are restored before every AOT/JIT comparison.
+failure replay. Initial files are restored before every scoped AOT comparison.
 
 Timing/size observations live in [benchmarks/](../benchmarks/README.md).
 The generator's structural shrinker remains part of `property/semantic.py`;

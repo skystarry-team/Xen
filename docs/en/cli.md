@@ -6,9 +6,9 @@ The Xen command-line interface has five subcommands:
 xen version
 xen --version
 xen check <file.xen> [--target=<architecture>-<os>]
-xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]
-xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report] [-- program-args...]
-xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--jit=on|off] [--jit-report]
+xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>]
+xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>] [-- program-args...]
+xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>]
 ```
 
 ## `version`
@@ -23,7 +23,7 @@ the compiler is documented in the [compiler build guide](../compiler-build/en/bu
 types, ownership, references, and capabilities. It emits no output and exits 0 when the
 project is valid. Compiler diagnostics go to stderr and a failed check exits 1.
 It uses the selected target's platform stdlib profile; `--target` follows the same
-default and validation as build. It does not generate code or accept opt/JIT flags.
+default and validation as build. It does not generate code or accept optimization flags.
 
 ## `build`
 
@@ -71,9 +71,8 @@ and discovery rules.
 the compiler's build architecture on Linux: x86-64 or AArch64. Explicit targets
 take precedence. `aarch64-linux` (alias `arm64-linux`) supports the core language,
 scalar F32/F64, heap Strings, recursive Box/Vec ownership and borrowed Slice.
-JIT defaults to off for ARM64 and on for x86-64 after target selection, regardless
-of option order. ARM64 supports raw POD memory/syscalls and platform-dependent stdlib;
-checked numeric file readers are supported, while explicit JIT requests are rejected.
+Both targets use AOT. ARM64 supports raw POD memory/syscalls, platform-dependent
+stdlib and checked numeric file readers.
 `x86_64-macos` and `aarch64-macos` (OS alias `darwin`) are recognized but unsupported;
 the CLI reports that macOS development is discontinued. There is no planned support.
 Windows targets remain unimplemented. These targets never select a Linux backend implicitly.
@@ -82,23 +81,29 @@ All source loading uses the generation target, even when the compiler host diffe
 
 `run`/`test` execute through the host kernel and require a compatible CPU/OS or
 a configured binary handler; selecting a target does not provide emulation.
-For cross execution: `xen build app.xen --target=aarch64-linux --jit=off -o app`,
+For cross execution: `xen build app.xen --target=aarch64-linux -o app`,
 then `qemu-aarch64 ./app`. Tokens after `run --` remain literal program arguments,
 including `--target=...`. See the [compiler architecture](../../compiler/README.md)
 for the ARM64 support matrix and the current 64-bit layout/stdlib constraints.
 
 ## Optimization
 
-`build`, `run`, and `test` accept `--opt=off|basic` (default `off`).
+`build`, `run`, and `test` accept `--opt=off|basic` (default `basic`, affecting only `#scope[opt]` blocks).
 `--opt-report` requires `basic` and writes region information and transformation
 counts to stderr. `check` always examines the original source. See the
 [basic optimization contract](optimization.md) for eligible operations and fusion limits.
 
-## Experimental runtime JIT
+`#scope[opt]` enables scoped AOT optimization. Unmarked code is not optimized.
+`--opt=off` disables it, and `--opt-report` reports transformations in marked regions.
+Global optimization is not exposed by the CLI. The experimental runtime JIT,
+its `--jit` options and `jit` mode spelling have been removed.
 
-`--jit=on|off` (default `on` for x86-64, `off` for ARM64) selects execution of explicitly annotated
-`#scope[jit]` regions. `off` uses AOT for the same IR. `--jit-report` requires `on`
-and embeds runtime compile/cache/timing output. See [runtime JIT](jit.md).
+`--opt-cache=<directory>` (or `--opt-cache directory`) persists exact-prefix scalar
+forward rewrites between invocations. It requires `basic` and is accepted by
+`build`, `run` and `test`; `check` rejects it. Default builds create no disk cache.
+Source checking, backward liveness/DCE, loop planning, final IR validation and
+native code generation still run. `--opt-report` includes aliases, prefix parents,
+hit/miss status and invalidation reasons. See [optimization](optimization.md).
 
 ## Exit statuses and usage
 

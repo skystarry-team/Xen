@@ -3,8 +3,8 @@
 `bb` is a lexical capability for typed raw memory and Linux syscalls. It is not an
 optimization mode or an IR basic block. A function's capability combines file-level
 `#global[...]`, function-level `#![...]`, and enclosing `#scope[...]` declarations.
-Capabilities do not cross imports or value-only calls. `#scope[jit]` is a separate experimental [scalar runtime compiler](jit.md);
-global/function `jit` modes remain reserved.
+Capabilities do not cross imports or value-only calls. `#scope[opt]` is a separate [AOT optimization hint](optimization.md);
+it grants no memory or reference capabilities.
 
 `#scope[bb] { ... }` adds the capability to an ordinary lexical block. Locals and the
 capability do not escape that block; move and cleanup rules remain the same.

@@ -24,8 +24,8 @@ the standard library is written in Xen.
 has full current feature coverage. The CLI defaults to the compiler's Linux
 build architecture. An initial
 [Linux ARM64 backend](compiler/cpu/arm64/README.md) supports the core language
-with `--target=aarch64-linux --jit=off`. [Scalar scope JIT](docs/en/jit.md) is
-experimental, and its current measurements do not establish a speedup over AOT.
+with `--target=aarch64-linux`. [Scoped AOT optimization](docs/en/optimization.md)
+applies only inside explicit `#scope[opt]` blocks.
 
 ## A small example
 
@@ -58,11 +58,11 @@ compiler/dist/xen test std.string
 ```
 
 The CLI defaults to
-the compiler's build architecture; ARM64 defaults to JIT off and x86-64 to on.
+the compiler's build architecture; both Linux targets compile ahead of time.
 Use explicit `--target` for cross compilation. ARM64 supports the core language
 and collections, managed `File` operations, `read_text`, raw POD memory/syscalls
 and platform-selected `std.io`/`std.fs`/`std.env`/`std.process`, including checked
-numeric file readers. ARM64 JIT is unsupported. macOS on Intel and Apple Silicon
+numeric file readers. macOS on Intel and Apple Silicon
 is unsupported and has no planned support. CPU encoders and the internal Mach-O
 prototype are retained; see the
 [platform contract](compiler/platform/README.md). See the
@@ -95,9 +95,9 @@ After extracting it, change into the package directory and run:
 - A Xen standard library for arguments, byte strings, conversion and recoverable
   file/byte I/O, with `Option<T>`, `Result<T,E>` and postfix `?`.
 - Explicit lexical `bb` capability for typed raw memory and Linux syscalls.
-- Optional `--opt=basic` scalar optimization and bounded leaf fusion
-  (default `off`). Experimental `#scope[jit]` uses the same checked IR;
-  `--jit=off` runs its marked source through AOT.
+- Explicit `#scope[opt]` AOT scalar optimization, bounded leaf expansion and
+  conservative loop-invariant code motion. `--opt=off` disables scoped optimization;
+  unmarked code retains the original checked IR.
 
 Numbers never convert implicitly. Strings preserve bytes without automatic
 UTF-8 validation. Project modules use `import`; toolchain modules use `use std.*`

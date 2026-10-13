@@ -41,5 +41,6 @@ The standard library is Xen source distributed with the compiler. Project module
 examples are collected under [`examples/`](../../examples/README.md), while every
 example in this guide is shown directly on its page.
 
-Optional native integer/Bool optimization and bounded leaf fusion are described in
-[Basic native optimization](optimization.md). The default is `--opt=off`; [scalar scope JIT](jit.md) is experimental.
+Explicit `#scope[opt]` blocks use integer/Bool AOT optimization, bounded leaf
+expansion and conservative loop-invariant code motion. Unmarked code is unchanged.
+See [scoped AOT optimization](optimization.md).

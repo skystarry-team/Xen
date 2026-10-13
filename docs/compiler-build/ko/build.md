@@ -84,7 +84,7 @@ compiler/dist/xen run examples/demo.xen
 `_build/default/compiler/main.exe`이며 release 실행 파일은 `compiler/dist/xen`에 생성됩니다.
 Linux AArch64의 네이티브 빌드도 크로스 workspace 없이 같은 명령을 사용합니다.
 CLI 기본 타깃은 컴파일러의 OCaml 빌드 아키텍처를 따릅니다.
-AArch64는 JIT off, x86_64는 JIT on이 기본값입니다.
+두 Linux 타깃은 스코프 AOT 최적화를 사용합니다.
 
 ## 컴파일러 버전
 
@@ -102,6 +102,6 @@ compiler/dist/xen version
 
 `make test`와 개별 실행 방법은 [테스트 안내](../../../tests/README.md)에 있습니다.
 AArch64 호스트 검증은 `python3 scripts/test.py --suite host`와 `--suite arm64`를 사용합니다.
-전체 테스트에는 x86_64 실행·JIT 검사도 포함됩니다.
+전체 테스트에는 x86_64 실행·스코프 AOT 검사도 포함됩니다.
 `make package`는 기본으로 Linux의 두 컴파일러 아키텍처를 빌드하므로,
 AArch64 호스트에서도 x86_64 크로스 툴체인이 필요합니다.

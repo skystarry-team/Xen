@@ -34,7 +34,7 @@ let dotted_name state =
   in loop [first]
 
 let normalize_modes modes =
-  List.filter (fun mode -> List.mem mode modes) [Explc; Jit; Bb]
+  List.filter (fun mode -> List.mem mode modes) [Explc; Opt; Bb]
 
 let parse_mode_list state ~context =
   expect state Lbracket "[";
@@ -42,7 +42,7 @@ let parse_mode_list state ~context =
   let rec modes seen =
     let name, name_span = identifier state in
     let mode = match name with
-      | "explc" -> Explc | "jit" -> Jit | "bb" -> Bb
+      | "explc" -> Explc | "opt" -> Opt | "bb" -> Bb
       | _ -> raise (Error (name_span, "unknown " ^ context ^ " mode '" ^ name ^ "'"))
     in
     if List.mem mode seen then raise (Error (name_span, "duplicate " ^ context ^ " mode '" ^ name ^ "'"));
@@ -453,7 +453,7 @@ let parse_attribute state =
   let rec modes seen =
     let name, name_span = identifier state in
     let mode = match name with
-      | "explc" -> Explc | "jit" -> Jit | "bb" -> Bb
+      | "explc" -> Explc | "opt" -> Opt | "bb" -> Bb
       | _ -> raise (Error (name_span, "unknown function mode '" ^ name ^ "'"))
     in
     if List.mem mode seen then raise (Error (name_span, "duplicate function mode '" ^ name ^ "'"));

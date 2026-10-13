@@ -16,9 +16,14 @@
  (libraries unix xen_compiler xen_linux_x86_64))
 
 (test
- (name jit_ir_test)
- (modules jit_ir_test)
- (libraries unix xen_common xen_x86_64 xen_linux_x86_64))
+ (name scoped_opt_test)
+ (modules scoped_opt_test)
+ (libraries unix xen_compiler xen_linux_x86_64))
+
+(test
+ (name aot_fusion_test)
+ (modules aot_fusion_test)
+ (libraries unix xen_compiler xen_linux_x86_64))
 
 (test
  (name backend_contract_test)

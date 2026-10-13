@@ -14,9 +14,7 @@ let unsupported ?span message = raise (Unsupported { span; message })
 (* Active source function frames, including the entry function. *)
 let max_call_depth = 4096
 
-type jit_state = { mutable regions:int; mutable recipes:Jit_runtime.recipe list;
-  recipe_ids:(operation_node,int)Hashtbl.t; report:bool }
-type env = { jit:jit_state option;
+type env = {
   slots : (int, int) Hashtbl.t; output : M.t; locals : local array;
   flags : ((int * int), int) Hashtbl.t; return_type : typ;
   epilogue : string; mutable stack_depth : int; mutable scratch : int;
@@ -101,7 +99,7 @@ let load_scalar env typ name span = match Hashtbl.find_opt env.slots name with
        | I8->M.bytes out[0x48;0x0f;0xbe;0x85]|U8|Bool->M.bytes out[0x0f;0xb6;0x85]
        | I16->M.bytes out[0x48;0x0f;0xbf;0x85]|U16->M.bytes out[0x0f;0xb7;0x85]
        | I32->M.bytes out[0x48;0x63;0x85]|U32->M.bytes out[0x8b;0x85]
-       | _->M.bytes out[0x48;0x8b;0x85]);M.frame32 out name(Int64.of_int(-offset))
+       | _->M.bytes out[0x48;0x8b;0x85]);M.u32 out(Int64.of_int(-offset))
 let store_scalar env typ name span = match Hashtbl.find_opt env.slots name with
   | None->unsupported ~span ("cannot resolve local '"^string_of_int name^"'")
   | Some offset->let out=env.output in
@@ -219,7 +217,7 @@ let emit_exchange_at_address env (result:value) (value:value) =
 let rec emit_rvalue env (expression:value) node =
   let output = env.output in
   match node with
-  | Int_lit value -> M.bytes output [0x48;0xb8];M.literal64 output value
+  | Int_lit value -> M.bytes output [0x48;0xb8];M.u64 output value
   | Float_lit value ->
       let label = fresh "float" in
       if expression.typ=F32 then begin
@@ -235,7 +233,7 @@ let rec emit_rvalue env (expression:value) node =
         M.bytes output [0x48;0xc7;0xc2]; M.u32 output (Int64.of_int (String.length bytes));
         M.bytes output [0x48;0x31;0xc9]
       end
-  | Bool_lit value -> M.bytes output [0x48;0xb8];M.literal64 output (if value then 1L else 0L)
+  | Bool_lit value -> M.bytes output [0x48;0xb8];M.u64 output (if value then 1L else 0L)
   | Struct_lit (layout,fields) ->
       List.iter(fun((field:struct_field),(v:value))->
         emit_value env v;
@@ -813,7 +811,7 @@ let base_offset env id = let l=env.locals.(id)in Hashtbl.find env.slots id+aggre
 let emit_place_address env p =
   let output=env.output in
   let current_type=ref env.locals.(p.root).typ in
-  M.bytes output[0x48;0x8d;0x85];M.frame32 output p.root(Int64.of_int(-base_offset env p.root));
+  M.bytes output[0x48;0x8d;0x85];M.u32 output(Int64.of_int(-base_offset env p.root));
   List.iter(function
     |Field f->current_type:=f.typ;if f.offset<>0 then(M.bytes output[0x48;0x05];M.u32 output(Int64.of_int f.offset))
     |Deref->current_type:=(match !current_type with Ref(_,t)|Box t->t|_->assert false);M.bytes output[0x48;0x8b;0x00]
@@ -858,7 +856,7 @@ let store_at_address env typ =
   |_->M.bytes output[0x48;0x89;0x07]
 let store_value env (v:value) =
   (* LEA leaves result registers intact. *)
-  M.bytes env.output[0x48;0x8d;0xbd];M.frame32 env.output v.id(Int64.of_int(-base_offset env v.id));store_at_address env v.typ
+  M.bytes env.output[0x48;0x8d;0xbd];M.u32 env.output(Int64.of_int(-base_offset env v.id));store_at_address env v.typ
 let emit_drop env p =
   List.iter(fun(off,typ)->
     let output=env.output and skip=fresh "drop_inactive"in
@@ -906,77 +904,7 @@ let emit_operation env op = match op.node with
       store_at_address env p.typ;set_flags env p true
   |Replace _->unsupported ~span:op.span "unelaborated replacement in checked IR"
 
-let jit_operation = function Eval _|Acquire _|Initialize _->true|_->false
-let emit_jit_region env state (operations:operation list) =
-  let span=(List.hd operations).span in
-  let template_span={file="<jit recipe>";line=1;column=1}in
-  let value id typ : value={id;typ;span=template_span}in
-  let canonical (op:operation)=match op.node with
-    |Eval(v,Int_lit n)->Eval(value 0 v.typ,Int_lit 0L),[v.id],n
-    |Eval(v,Bool_lit b)->Eval(value 0 v.typ,Bool_lit false),[v.id],(if b then 1L else 0L)
-    |Eval(v,Unary(n,a))->Eval(value 0 v.typ,Unary(n,value 1 a.typ)),[v.id;a.id],0L
-    |Eval(v,Binary(n,a,b))->Eval(value 0 v.typ,Binary(n,value 1 a.typ,value 2 b.typ)),[v.id;a.id;b.id],0L
-    |Acquire(v,_,p)->Acquire(value 0 v.typ,Copy,place_of_value(value 1 p.typ)),[v.id;p.root],0L
-    |Initialize(p,v)->Initialize(place_of_value(value 0 p.typ),value 1 v.typ),[p.root;v.id],0L
-    |_->assert false in
-  let recipe node ids = match Hashtbl.find_opt state.recipe_ids node with Some id->id,List.nth state.recipes id|None->
-    let output=M.create ~record_operands:true()in
-    let slots=Hashtbl.create 3 in List.iteri(fun id offset->Hashtbl.add slots id offset)[8;16;24];
-    let types=Array.make 3 I64 in
-    (match node with Eval(v,r)->types.(0)<-v.typ;List.iter(fun(v:value)->types.(v.id)<-v.typ)(rvalue_uses r)
-      |Acquire(v,_,p)->types.(0)<-v.typ;types.(1)<-p.typ
-      |Initialize(p,v)->types.(0)<-p.typ;types.(1)<-v.typ|_->assert false);
-    let locals=Array.mapi(fun id typ->{id;typ;name="$recipe";span=template_span;scope=0;owned=false;temporary=true;parameter=None})types in
-    let recipe_env={jit=None;slots;flags=Hashtbl.create 0;locals;return_type=Unit;output;epilogue="";stack_depth=0;scratch=8}in
-    emit_operation recipe_env {node;scope=0;span=template_span};
-    if recipe_env.stack_depth<>0 || output.fixups<>[] || output.rip_fixups<>[] ||
-       Buffer.length output.rodata<>0 || Buffer.length output.data<>0 then unsupported ~span "non-local JIT recipe";
-    let patches=List.rev output.operand_patches in
-    let expected=List.init(List.length ids)(fun id->M.Frame id) @
-      (match node with Eval(_,(Int_lit _|Bool_lit _))->[M.Literal]|_->[])in
-    if List.sort compare(List.map(fun(p:M.operand_patch)->p.operand)patches)<>List.sort compare expected
-      then unsupported ~span "incomplete JIT operand relocations";
-    let result:Jit_runtime.recipe={code=Bytes.of_string(Buffer.contents output.buffer);patches}in
-    Jit_runtime.validate result;
-    let id=List.length state.recipes in state.recipes<-state.recipes@[result];Hashtbl.add state.recipe_ids node id;id,result in
-  let records=M.create()and bytes=ref 6 in
-  List.iter(fun op->let node,ids,immediate=canonical op in let id,template=recipe node ids in
-    bytes:= !bytes+Bytes.length template.code;M.u32 records(Int64.of_int id);
-    for field=0 to 2 do let offset=match List.nth_opt ids field with Some id-> -base_offset env id|None->0 in
-      if offset< -2147483648 || offset>2147483647 then unsupported ~span "JIT frame operand exceeds signed displacement range";
-      M.u32 records(Int64.of_int offset)done;M.u64 records immediate)operations;
-  if !bytes>Jit_runtime.page_size then(List.iter(emit_operation env)operations)else begin
-    let id=state.regions in state.regions<-id+1;
-    let cache=Printf.sprintf "__xen_jit_cache_%d"id and descriptor=Printf.sprintf "__xen_jit_ir_%d"id in
-    let data=M.create()in M.u64 data(Int64.of_int(List.length operations));M.u64 data(Int64.of_int !bytes);
-    Buffer.add_buffer data.buffer records.buffer;M.add_rodata env.output descriptor(Buffer.contents data.buffer);
-    M.add_data_u64 env.output cache 0L;
-    let error=emit_error_stub env.output span "JIT compilation failed"and ready=fresh "jit_cached"and invoke=fresh "jit_invoke"in
-    Jit_runtime.rip env.output M.Data cache [0x48;0x8b;0x05];M.bytes env.output[0x48;0x85;0xc0];M.branch env.output[0x0f;0x85]ready;
-    Jit_runtime.rip env.output M.Rodata descriptor [0x48;0x8d;0x3d];aligned_call env "__xen_jit_compile";
-    M.bytes env.output[0x48;0x85;0xc0];M.branch env.output[0x0f;0x84]error;
-    Jit_runtime.rip env.output M.Data cache [0x48;0x89;0x05];M.branch env.output[0xe9]invoke;
-    M.label env.output ready;
-    if state.report then Jit_runtime.counter env.output "__xen_jit_hits"[0x48;0xff;0x05];
-    M.label env.output invoke;M.bytes env.output[0x48;0x89;0xef];
-    let padded=env.stack_depth mod 16<>0 in if padded then M.bytes env.output[0x48;0x83;0xec;8];
-    M.bytes env.output[0xff;0xd0];if padded then M.bytes env.output[0x48;0x83;0xc4;8]
-  end
-let emit_block_operations env (func:func) chunks =
-  List.iter(fun(chunk:Semantic_opt.chunk)->match env.jit with
-    |Some state when chunk.calculation && List.mem Jit func.scopes.(chunk.scope).mode_set->
-      let pending=ref [] in
-      let flush()=match List.rev !pending with []->()|operations->
-        if state.regions<Jit_runtime.max_regions then emit_jit_region env state operations
-        else List.iter(emit_operation env)operations;
-        pending:=[]in
-      List.iter(fun op->if jit_operation op.node then begin
-        pending:=op::!pending;if List.length !pending=Jit_runtime.max_operations then flush()
-      end else emit_operation env op)chunk.operations;flush()
-    |_->List.iter(emit_operation env)chunk.operations)chunks
-
-let emit_function output jit (func:func) =
-  let jit=if Array.exists(fun(s:scope)->List.mem Jit s.mode_set)func.scopes then jit else None in
+let emit_function output (func:func) =
   let epilogue=fresh "epilogue"in
   M.label output("fn_"^func.name);M.bytes output[0x55;0x48;0x89;0xe5];
   M.bytes output[0x48;0xff;0x05];M.rip_rel32 output M.Data "__xen_call_depth";
@@ -986,7 +914,7 @@ let emit_function output jit (func:func) =
   let argument_register_base= !next in next:= !next+48;
   let frame=T.align_up (!next-8)16 in M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int frame);
   Hashtbl.iter(fun _ flag->M.bytes output[0x48;0xc7;0x85];M.u32 output(Int64.of_int(-flag));M.u32 output 0L)flags;
-  let env={jit;slots;flags;locals=func.locals;return_type=func.return_type;output;epilogue;stack_depth=0;scratch=8}in
+  let env={slots;flags;locals=func.locals;return_type=func.return_type;output;epilogue;stack_depth=0;scratch=8}in
   let save_registers = [[0x48;0x89;0xbd];[0x48;0x89;0xb5];[0x48;0x89;0x95];
                         [0x48;0x89;0x8d];[0x4c;0x89;0x85];[0x4c;0x89;0x8d]] in
   List.iteri(fun index instruction->M.bytes output instruction;M.u32 output
@@ -1031,8 +959,8 @@ let emit_function output jit (func:func) =
   List.iter(fun id->set_flags env(place_of_value(value_of_local func.locals.(id)))true)func.params;
   let label id=Printf.sprintf ".L_cfg_%d_%d"func.id id in
   M.branch output[0xe9](label func.entry);
-  let chunks=match jit with Some _->Some(Semantic_opt.calculation_chunks func)|None->None in
-  Array.iter(fun(b:block)->M.label output(label b.id);(match chunks with Some chunks->emit_block_operations env func chunks.(b.id)|None->List.iter(emit_operation env)b.operations);
+  Array.iter(fun(b:block)->M.label output(label b.id);
+    List.iter(emit_operation env)b.operations;
     if env.stack_depth<>0 then unsupported ~span:func.span "unbalanced CFG operation stack";
     (match b.terminator with
      |Jump target->M.branch output[0xe9](label target)
@@ -1393,27 +1321,23 @@ let emit_file_runtime output =
   let write_loop=fresh "file_write_loop" and write_retry=fresh "file_write_retry" and write_ok=fresh "file_write_ok" and write_ret=fresh "file_write_ret" in
   M.label output write_loop;M.bytes output [0x48;0x85;0xd2];M.branch output [0x0f;0x84] write_ok;M.label output write_retry;M.bytes output [0x4c;0x89;0xe7;0x4c;0x89;0xee;0xb8;1;0;0;0;0x0f;0x05;0x48;0x83;0xf8;0xfc];M.branch output [0x0f;0x84] write_retry;M.bytes output [0x48;0x85;0xc0];M.branch output [0x0f;0x88] write_ret;M.bytes output [0x49;0x01;0xc5;0x48;0x29;0xc2];M.branch output [0xe9] write_loop;M.label output write_ok;M.bytes output [0x31;0xc0];M.label output write_ret;M.bytes output [0x41;0x5d;0x41;0x5c;0xc3]
 
-let generate ?(jit=true) ?(jit_report=false) checked =
+let generate checked =
   let program=Semantic_ir.program checked in
   try
     Semantic_ir.verify program;
     Hashtbl.clear layouts;Hashtbl.clear requested_vec_helpers;List.iter(fun (l:struct_layout)->Hashtbl.add layouts l.name l)program.layouts;
-    serial := 0; let jit=if jit then Some{regions=0;recipes=[];recipe_ids=Hashtbl.create 16;report=jit_report}else None in
+    serial := 0;
     let output = M.create () in M.add_data_u64 output "__xen_call_depth" 0L;
     M.add_data_u64 output "__xen_argc" 0L; M.add_data_u64 output "__xen_argv" 0L;
     M.label output "_start";
     M.bytes output [0x48;0x8b;0x04;0x24;0x48;0xff;0xc8;0x48;0x89;0x05]; M.rip_rel32 output M.Data "__xen_argc";
     M.bytes output [0x48;0x8d;0x44;0x24;0x10;0x48;0x89;0x05]; M.rip_rel32 output M.Data "__xen_argv";
     M.branch output [0xe8] ("fn_" ^ program.entry);
-    if jit_report then M.branch output [0xe8] "__xen_jit_report";
     M.bytes output [0x48;0x31;0xff;0xb8;0x3c;0;0;0;0x0f;0x05];
     emit_print_runtime output; emit_string_runtime output; emit_vec_runtime output; emit_file_runtime output;
     while M.position output mod 16 <> 0 do M.u8 output 0x90 done;
     M.label output "__xen_read_builtin"; emit_hex output read_builtin_runtime_hex;
-    List.iter (emit_function output jit) program.functions;emit_requested_vec_helpers output;
-    (match jit with Some state when state.regions>0->
-      Jit_runtime.add_templates output state.recipes;Jit_runtime.emit_compiler output ~report:jit_report|_->());
-    if jit_report then Jit_runtime.emit_report output;
+    List.iter (emit_function output) program.functions;emit_requested_vec_helpers output;
     let entry = Hashtbl.find output.labels "_start" in Ok (Elf_writer.static_x86_64 ~entry output)
   with Unsupported error -> Error error | M.Missing_label label ->
     Error { span = None; message = "missing machine label '" ^ label ^ "'" }

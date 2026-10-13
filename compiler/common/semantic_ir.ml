@@ -261,7 +261,7 @@ let verify program =
          | Logical_call_enter target ->
              if target<0 || target>=List.length program.functions then bad op.span "unknown logical call target";
              let callee=List.nth program.functions target in
-             if callee.mode_set<>f.scopes.(op.scope).mode_set then bad op.span "logical call capability mismatch";
+             if capability_modes callee.mode_set<>capability_modes f.scopes.(op.scope).mode_set then bad op.span "logical call capability mismatch";
              calls:=(target,op.scope)::!calls
          | Logical_call_exit target -> (match !calls with
              |(id,scope)::rest when id=target && scope=op.scope->calls:=rest

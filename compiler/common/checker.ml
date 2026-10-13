@@ -129,7 +129,7 @@ let rounded_float span typ value = match canonical typ with
       if classify_float x=FP_infinite && classify_float value<>FP_infinite then invalid span "float literal is outside F32 range";x
   | t -> invalid span("float literal cannot have type "^string_of_typ t)
 
-let normalize_modes modes = List.filter (fun mode -> List.mem mode modes) [Explc; Jit; Bb]
+let normalize_modes modes = List.filter (fun mode -> List.mem mode modes) [Explc; Opt; Bb]
 let union_modes a b = normalize_modes (a @ b)
 
 let check_internal ~entry (program : Ast.program) =
@@ -202,9 +202,9 @@ let check_internal ~entry (program : Ast.program) =
     | _->() in
   List.iter(fun(d:struct_decl)->List.iter(fun field->validate_type field.field_span
     (canonical field.field_type))d.fields)program.structs;
-  if List.mem Jit program.global_mode_set then
+  if List.mem Opt program.global_mode_set then
     invalid {file="<program>";line=1;column=1}
-      "global jit mode is not supported; use #scope[jit] for experimental scalar JIT";
+      "global opt mode is not supported; use #scope[opt]";
   let signatures = Hashtbl.create 16 in
   let conversions=["i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"] in
   let builtins = conversions @ ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";"panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6"] in
@@ -213,7 +213,7 @@ let check_internal ~entry (program : Ast.program) =
     let effective_modes = union_modes program.global_mode_set f.mode_set in
     if List.mem f.name builtins then invalid f.span ("builtin name '"^f.name^"' is reserved");
     if Hashtbl.mem signatures f.name then invalid f.span ("duplicate function '"^f.name^"'");
-    if List.mem Jit effective_modes then invalid f.span "function-level jit mode is not supported; use #scope[jit] for experimental scalar JIT";
+    if List.mem Opt effective_modes then invalid f.span "function-level opt mode is not supported; use #scope[opt]";
     (* Current language limit; each backend owns machine argument placement. *)
     if List.length f.params > 6 then invalid f.span "functions support at most six parameters";
     let explc = List.mem Explc effective_modes in

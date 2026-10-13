@@ -4,11 +4,11 @@ The frontend produces checked Semantic IR. The driver selects a backend for an
 explicit CPU/OS pair; that backend owns machine lowering, its calling convention,
 runtime emission and executable construction. `x86_64-linux` retains full existing support.
 `aarch64-linux` (alias `arm64-linux`) now has an initial static backend for the
-core language and collections, with JIT off by default. See its [support matrix](cpu/arm64/README.md).
+core language and collections. See its [support matrix](cpu/arm64/README.md).
 
 ```text
 compiler/
-  common/          xen_common: AST, parser, checking, Semantic IR, optimization,
+  common/          xen_common: AST, parser, checking, Semantic IR, scoped AOT optimization,
                    project loading, Target and Backend_intf
   cpu/
     x86_64/        xen_x86_64: x86 instruction/relocation encoding
@@ -16,7 +16,7 @@ compiler/
                    formatting/numeric/ownership routines with required OS hooks
   platform/
     linux/
-      x86_64/      xen_linux_x86_64: legacy Linux emitter/runtime/JIT, ELF, backend
+      x86_64/      xen_linux_x86_64: legacy Linux emitter/runtime, ELF, backend
       arm64/       xen_linux_arm64: Linux runtime, ELF, backend composition
     darwin/        xen_darwin: shared Mach-O writer, SHA-256, validation notes
       arm64/       xen_darwin_arm64: internal Darwin runtime/backend prototype
@@ -40,7 +40,7 @@ and the release executable remains `compiler/dist/xen`.
 
 `common/backend_intf.ml` defines `Backend_intf.S`: a target description, an opaque
 executable type, `generate` from `Semantic_ir.checked_program`, and `write`.
-Generation includes runtime/JIT emission and executable construction. Errors carry
+Generation includes runtime emission and executable construction. Errors carry
 an optional source span and a message. Drivers do not access machine bytes or
 choose the executable format. A backend must reject unsupported requested features
 explicitly. The x86-64 adapter translates existing emitter errors into this contract.
@@ -50,8 +50,8 @@ and executable formats belong to a concrete combination: Linux ELF/syscalls are
 not properties of every x86-64 target. Other OS implementations need their
 own adapter and platform implementation, even if it reuses instruction encoding.
 CPU-specific ELF writers live under `platform/linux/<cpu>/`, using the corresponding
-CPU encoder. The legacy x86 emitter embeds Linux runtime/syscall blobs, so it and
-the syscall-dependent scalar JIT live together under `platform/linux/x86_64/`.
+CPU encoder. The legacy x86 emitter embeds Linux runtime/syscall blobs and lives under
+`platform/linux/x86_64/`.
 The shared Mach-O writer and signing code live under `platform/darwin/`, with
 architecture-specific Darwin services in its CPU subdirectories.
 See [platform boundaries](platform/README.md).
@@ -90,7 +90,7 @@ user-configured binary handler. Process launch failures identify the requested
 target. Cross-build on x86-64 and invoke `qemu-aarch64 ./program` explicitly for
 ARM64 execution; the compiler does not start an emulator. The CLI default follows
 the compiler's OCaml build architecture on Linux. Explicit targets override it;
-ARM64 defaults to JIT off. Host filesystem/process utilities are distinct from target
+Host filesystem/process utilities are distinct from target
 runtime operations.
 
 Intel/Apple Silicon macOS targets are recognized as x86_64-macos/aarch64-macos;
@@ -113,7 +113,7 @@ backend contract does not expose x86-64 registers to the frontend.
 
 ## Validation
 
-`make test` runs native/IR/JIT, CLI, packaging, stdlib and property tests. Backend
+`make test` runs native/IR/scoped-AOT, CLI, packaging, stdlib and property tests. Backend
 contract tests check selection, CPU/OS separation and injection into `Test_runner`.
 CLI tests cover explicit/default x86-64 equivalence, unavailable targets, option
 ordering and literal program arguments after `--`.

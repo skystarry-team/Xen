@@ -293,16 +293,16 @@ let test_modes () =
   | Error diagnostic -> fail "mode source rejected: %s" diagnostic.message
   | Ok {functions=[func];_} -> expect (func.Semantic_ir.mode_set = [Ast.Explc; Ast.Bb]) "mode set was not normalized or preserved"
   | Ok _ -> fail "unexpected mode program shape");
-  let valid = [""; "#![explc]\n"; "#![jit]\n"; "#![bb]\n"; "#![explc, jit]\n";
-    "#![explc, bb]\n"; "#![jit, bb]\n"; "#![bb, explc, jit]\n"] in
+  let valid = [""; "#![explc]\n"; "#![opt]\n"; "#![bb]\n"; "#![explc, opt]\n";
+    "#![explc, bb]\n"; "#![opt, bb]\n"; "#![bb, explc, opt]\n"] in
   List.iter (fun prefix -> ignore (Parser.parse ~file:"modes.xen" (prefix ^ "fn main() {}"))) valid;
-  let jit = check_error "#![jit]\nfn main() {}" in
-  expect (contains jit.message "function-level jit mode is not supported" &&
-          contains jit.message "#scope[jit]" && contains jit.message "experimental")
-    "unsupported function jit diagnostic differs";
-  ignore(compile "fn main(){#scope[jit]{println(1);}}");
-  let invalid = ["#![]\n"; "#![wat]\n"; "#![jit, jit]\n"; "#![jit,]\n";
-    "#![jit] fn main() {}"; "#![jit]\n#![jit]\n"] in
+  let opt = check_error "#![opt]\nfn main() {}" in
+  expect (contains opt.message "function-level opt mode is not supported" &&
+          contains opt.message "#scope[opt]")
+    "unsupported function opt diagnostic differs";
+  ignore(compile "fn main(){#scope[opt]{println(1);}}");
+  let invalid = ["#![]\n"; "#![wat]\n"; "#![opt, opt]\n"; "#![opt,]\n";
+    "#![opt] fn main() {}"; "#![opt]\n#![opt]\n"] in
   List.iter (fun prefix ->
     try ignore (Parser.parse ~file:"modes.xen" (prefix ^ (if contains prefix "fn main" then "" else "fn main() {}")));
       fail "invalid mode attribute was accepted: %S" prefix
@@ -323,9 +323,9 @@ let test_mode_scopes () =
       "fn f(){}\n#global[bb]\nfn main(){}"; "#global[bb]\n#global[explc]\nfn main(){}";
       "fn main(){#scope[]{} }"; "fn main(){#scope[wat]{} }";
       "fn main(){#scope[bb,bb]{} }"; "fn main(){#scope[bb,]{} }" ];
-  let global_jit=check_error "#global[jit]\nfn main(){}" in
-  expect (contains global_jit.message "global jit mode is not supported" &&
-          contains global_jit.message "#scope[jit]") "unsupported global jit diagnostic differs";
+  let global_opt=check_error "#global[opt]\nfn main(){}" in
+  expect (contains global_opt.message "global opt mode is not supported" &&
+          contains global_opt.message "#scope[opt]") "unsupported global opt diagnostic differs";
   let global_refs =
     "#global[explc]\nfn read(x:&Int)->Int{return *x;}\nfn main(){let x=7;println(read(&x));}" in
   let status,stdout,stderr=execute global_refs in
