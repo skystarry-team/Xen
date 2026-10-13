@@ -1,21 +1,22 @@
 # Contributing to the demo
 
-Xen is an early demo for Linux x86-64. Reproducible bug reports, documentation
+Xen is an early demo for Linux x86-64 and ARM64, including platform stdlib services.
+ARM64 supports checked numeric file readers and shared scoped AOT optimization.
+macOS is unsupported and has no planned support. CPU encoders and internal
+Mach-O/Darwin prototypes are retained for implementation testing.
+Reproducible bug reports, documentation
 corrections and small changes with a concrete use case are welcome at
 [skystarry-team/Xen](https://github.com/skystarry-team/Xen).
 
-Build with OCaml and Dune 3.18 or later (`make build`). Compiler tests require Python
-3.10 or later and binutils (`objdump`), with no third-party Python packages.
-The demo build was verified with OCaml 5.5.0 and Dune 3.24.2.
-`VERSION` declares the default compiler version. Make's `VERSION=...` override
-is embedded in the compiler and carried into both archive formats. Direct
-Dune builds use `VERSION`, or an explicit `XEN_BUILD_VERSION` override.
+See [compiler builds](docs/compiler-build/README.md) for prerequisites, native
+OCaml installation, AArch64 cross toolchains and version configuration.
+Test dependencies and focused suites are documented in [tests/README.md](tests/README.md).
 
 ```sh
 make test
 make test QUICKCHECK_MODE=sweep QUICKCHECK_SEED=20261008
-make quickcheck QUICKCHECK_MODE=mixed QUICKCHECK_DEPTH=smoke
-make semantic-test QUICKCHECK_SEED=20261008
+python3 scripts/test.py --suite quickcheck --mode mixed --depth smoke
+python3 scripts/test.py --suite semantic --seed 20261008
 ```
 
 Use English for source comments, diagnostics and test scripts. Keep Unicode
@@ -31,7 +32,7 @@ test. English and Korean documentation are maintained in `docs/en/` and
 | `stdlib/` | Xen standard library |
 | `examples/` | Runnable programs and intentional diagnostic examples |
 | `tests/` | OCaml regression/verifier tests |
-| `tests/integration/` | Python CLI, distribution, stdlib, optimizer and JIT tests |
+| `tests/integration/` | Python CLI, distribution, stdlib and scoped AOT tests |
 | `tests/property/` | Generated programs, independent oracles and metamorphic checks |
 | `benchmarks/` | Opt-in timing/size observations; no timing pass thresholds |
 | `assets/branding/` | AI-generated artwork and its attribution notices |
@@ -43,12 +44,11 @@ Benchmarks run separately from `make test`:
 
 ```sh
 python3 benchmarks/optimization_benchmark.py
-python3 benchmarks/jit_benchmark.py
+dune exec benchmarks/semantic_opt_benchmark.exe
 ```
 
-`make package VERSION=0.1.0-demo` creates the binary bundle;
-`make source-package VERSION=0.1.0-demo` exports the public source tree
-without Git history or local artifacts. Both include the license notices.
+Binary and source distribution commands are documented in the
+[packaging guide](docs/compiler-build/en/packaging.md).
 
 ## Licensing contributions
 

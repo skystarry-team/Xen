@@ -25,7 +25,7 @@ error; if the operation succeeded but closing failed, the result reports the clo
 error.
 
 `std.fs.write` truncates an existing file. New files use mode `0644` subject to the
-process umask. These are blocking Linux x86-64 byte I/O APIs. Strings are not
+process umask. These are blocking Linux x86-64/AArch64 byte I/O APIs. Strings are not
 UTF-8-validated. `std.fs.copy` holds the source contents in memory before writing.
 
 The following program reads and prints a file, handling ordinary I/O failures as

@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Build with --target=aarch64-linux, then run on Linux ARM64 or QEMU.
+struct Sample<T> { value: T }
+
+fn average(a: F32, b: F32) -> Sample<F64> {
+    return Sample { value: (f64(a) + f64(b)) / 2.0 };
+}
+
+fn main() {
+    println(average(1.25, 2.5).value);
+    println(i32(-12.75));
+    println(0.1);
+    println(4.9406564584124654e-324);
+    println(-0.0);
+}

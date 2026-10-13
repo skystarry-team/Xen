@@ -12,7 +12,7 @@ source          = [module-declaration] { dependency-declaration }
 module-declaration = "module" qualified-name ";" ;
 dependency-declaration = ("import" | "use") qualified-name ["as" identifier] ";" ;
 global-mode     = "#global" "[" mode { "," mode } "]" ;
-mode            = "explc" | "jit" | "bb" ;
+mode            = "explc" | "opt" | "bb" ;
 declaration     = struct | enum | impl | function ;
 ```
 
@@ -21,8 +21,8 @@ it must match the entry file's module path. Project dependencies use `import`;
 toolchain dependencies use `use`. A global mode declaration is optional, appears at
 most once before all declarations, and must be followed by a declaration on a new line.
 Mode lists cannot be empty or repeat a mode. A function mode attribute must be followed
-by its declaration on a new line. `jit` is supported in lexical `#scope[jit]` for experimental [scalar runtime compilation](jit.md);
-global and function jit modes remain reserved.
+by its declaration on a new line. `opt` is supported only in lexical `#scope[opt]` for [scoped AOT optimization](optimization.md);
+global and function opt modes are rejected.
 
 ```text
 struct          = "struct" identifier [type-parameters] "{"
@@ -160,13 +160,16 @@ name is its owner; generic arguments follow the owner, as in `Option<Int>.Some(v
 ## Patterns
 
 ```text
-pattern         = "_" | binding | literal | tuple-pattern | variant-pattern ;
+pattern         = "_" | binding | reference-binding | literal | tuple-pattern | variant-pattern ;
 tuple-pattern   = "(" pattern "," pattern { "," pattern } ")" ;
 variant-pattern = qualified-name ["(" pattern ")"] ;
 binding         = identifier ;
+reference-binding = "ref" identifier ;
 literal         = integer | float | string | "true" | "false" ;
 ```
 
 Patterns are used by `match` and `for`. `match` must be exhaustive. Guards, struct
 patterns, and destructuring assignment are not supported. `for` accepts bindings,
 `_`, and nested tuple patterns.
+`ref name` is accepted only in shared `match`; it binds a borrowed payload. See
+[shared matching](generics-enums-and-match.md#shared-matching).

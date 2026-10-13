@@ -37,9 +37,8 @@ to the same concrete type instance; type arguments that grow recursively are rej
 
 `Box<T>` cannot store references, slices, or pointers in its inner value. Moving a
 field out through a borrowed box is not supported; consume it with `into_inner()` first.
-Matching on `*box` obtains an owned value, so it does not provide borrowed pattern
-matching. Recursive enum traversal therefore consumes the current value in this
-version.
+Matching on `*box` obtains an owned value. Use `match box.as_ref()` with `ref`
+payload bindings to inspect an enum without consuming it; see [shared matching](generics-enums-and-match.md#shared-matching).
 
 ## Name resolution
 

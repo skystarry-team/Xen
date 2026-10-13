@@ -70,9 +70,13 @@ fn main() {
 }
 ```
 
-literal은 모든 named field를 정확히 한 번 지정해야 하며 순서는 자유다. field는 타입 alignment에 맞춰 배치되고 struct size는 최대 field alignment의 배수다. 직접 field 갱신은 mutable local에만 허용하며 nested field 갱신은 아직 지원하지 않는다.
+literal은 모든 named field를 정확히 한 번 지정해야 하며 순서는 자유다. field는 타입 alignment에 맞춰 배치되고 struct size는 최대 field alignment의 배수다.
+Mutable local 또는 mutable reference에서 `user.address.city = "Busan"`처럼 연속된
+struct·tuple field를 갱신할 수 있다. RHS를 평가한 다음 이전 field를 drop하고 교체한다.
+RHS의 `?`가 반환하면 최종 교체는 수행하지 않지만 RHS가 이미 수행한 변경은 되돌리지 않는다.
+중첩 field 대입의 index·temporary root는 지원하지 않는다.
 
 primitive-only struct는 copy value다. String/Vec 또는 이를 포함한 struct는 owned value로
 재귀 clone/move/drop된다. managed field 읽기는 부분 move 대신 clone한다. inherent
 `impl` method와 `self`/`&self`/`&mut self`, `Vec<Struct>`, File/Ptr field를 지원한다.
-struct equality, destructuring/default field와 nested field 갱신은 아직 없다.
+struct equality와 destructuring/default field는 아직 없다.

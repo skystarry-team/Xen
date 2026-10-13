@@ -54,7 +54,10 @@ dependency declaration and remains an ordinary identifier elsewhere.
 
 Field order in a struct literal is free, but every field must appear exactly once.
 Layout respects field size and alignment. A direct field can be updated through a
-mutable local; nested field update is not supported.
+mutable local or mutable reference; consecutive struct and tuple fields can also
+be updated, for example `user.address.city = "Busan"`. The RHS is evaluated before
+the old field is dropped. A RHS that returns through `?` does not perform the final
+replacement; effects already performed by that RHS are retained.
 
 ```xen
 struct Address { city: String, zip: Int }
@@ -80,7 +83,7 @@ Lee
 Primitive-only structs are copyable values. Structs containing `String`, `Vec`, or
 other managed values follow recursive clone, move, and drop rules. Structs with
 move-only fields are move-only. Struct equality, destructuring, default fields, and
-nested field updates are not supported.
+index or temporary roots in nested field assignments are not supported.
 
 ## Methods and function values
 

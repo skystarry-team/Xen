@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// AArch64 Linux UAPI; do not reuse x86 syscall numbers or flags.
+module std.platform;
+use std.platform_linux;
+
+#![bb]
+fn read(fd: Int, address: Int, count: Int) -> Int { return syscall3(63, fd, address, count); }
+#![bb]
+fn write(fd: Int, address: Int, count: Int) -> Int { return syscall3(64, fd, address, count); }
+#![bb]
+fn open(address: Int, flags: Int, mode: Int) -> Int { return syscall4(56, -100, address, flags, mode); }
+#![bb]
+fn close(fd: Int) -> Int { return syscall1(57, fd); }
+#![bb]
+fn directory(fd: Int, address: Int, count: Int) -> Int { return syscall3(61, fd, address, count); }
+#![bb]
+fn id() -> Int { return syscall0(172); }
+#![bb]
+fn parent_id() -> Int { return syscall0(173); }
+fn interrupted(raw: Int) -> Bool { return raw == -4; }
+fn read_flags() -> Int { return 0; }
+fn write_flags() -> Int { return 577; }
+fn append_flags() -> Int { return 1089; }
+fn directory_flags() -> Int { return 16384; }
+fn file_mode() -> Int { return 420; }
+fn cwd() -> Result<String, Int> { return std.platform_linux.cwd(17); }
+fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, Int> {
+    return std.platform_linux.decode_directory(bytes);
+}
+#![bb]
+fn metadata(path: Ptr<U8>) -> Result<std.platform_linux.Stat, Int> {
+    // asm-generic stat: 128 bytes, mode at byte 16, size 48, mtime 88.
+    let data = raw_alloc<Int>(16);
+    let mut result = syscall4(79, -100, ptr_addr(path), ptr_addr(data), 0);
+    while interrupted(result) { result = syscall4(79, -100, ptr_addr(path), ptr_addr(data), 0); }
+    if result < 0 {
+        raw_free(data);
+        return Result<std.platform_linux.Stat, Int>.Err(-result);
+    }
+    let value = std.platform_linux.decode_stat(data, 2);
+    raw_free(data);
+    return Result<std.platform_linux.Stat, Int>.Ok(value);
+}

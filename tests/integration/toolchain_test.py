@@ -57,6 +57,85 @@ class ToolchainTests(unittest.TestCase):
         original.rename(moved)
         return moved / "bin/xen"
 
+    def test_explicit_target_preserves_output_and_run_arguments(self):
+        source = self.source('fn main(){println(arg_count());println(arg(0));}')
+        for opt in ("off", "basic"):
+            with self.subTest(opt=opt):
+                default = self.cwd / "default"
+                explicit = self.cwd / "explicit"
+                flags = [f"--opt={opt}"]
+                self.success(self.invoke("build", source, *flags, "-o", default))
+                self.success(self.invoke("build", "--target=x86_64-linux", source,
+                                         *flags, "-o", explicit))
+                self.assertEqual(default.read_bytes(), explicit.read_bytes())
+        self.success(self.invoke("run", source, "--target", "x86_64-linux",
+                                 "--", "--target=aarch64-linux"),
+                     "1\n--target=aarch64-linux\n")
+        self.success(self.invoke("test", "--target=x86_64-linux", "std.fs",
+                                 "--filter", "null"),
+                     "PASS std.fs.null_file\n1 passed; 0 failed\n")
+        source = self.source('test fn selected(){assert(true);}fn main(){}')
+        self.success(self.invoke("test", source, "--target", "x86_64-linux"),
+                     "PASS app.selected\n1 passed; 0 failed\n")
+
+    def test_unavailable_target_fails_before_loading_or_writing(self):
+        output = self.cwd / "preserved"
+        output.write_bytes(b"preserve existing output")
+        for command in ("check", "build", "run", "test"):
+            for target in ("aarch64-windows", "x86_64-windows", "x86_64-macos", "aarch64-macos", "arm64-darwin"):
+                with self.subTest(command=command, target=target):
+                    args = [command, self.cwd / "missing.xen", f"--target={target}"]
+                    if command == "build":
+                        args += ["-o", output]
+                    result = self.invoke(*args)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    message = ("is unsupported; macOS development is discontinued"
+                               if target.endswith(("-macos", "-darwin")) else "is not implemented")
+                    self.assertIn(message, result.stderr)
+                    self.assertIn("supported targets: x86_64-linux", result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    self.assertEqual(output.read_bytes(), b"preserve existing output")
+        for target, message in (("mystery-linux", "unknown target architecture"),
+                                ("x86_64-mystery", "unknown target operating system"),
+                                ("x86_64", "invalid target")):
+            result = self.invoke("build", "missing.xen", f"--target={target}")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(message, result.stderr)
+        for flags in (("--target",), ("--target=",), ("--target", "--opt=off")):
+            result = self.invoke("build", "missing.xen", *flags)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Usage:", result.stderr)
+
+    def test_platform_modules_follow_target_without_fallback(self):
+        override = self.root / "override"
+        shutil.copytree(REPO / "stdlib", override)
+        arm = override / "platform/aarch64-linux/std/platform.xen"
+        x86 = override / "platform/x86_64-linux/std/platform.xen"
+        x86.write_text('module std.platform;fn marker()->Int{return 64;}')
+        arm.write_text('module std.platform;fn marker()->Bool{return true;}')
+        env = dict(self.env, XEN_STDLIB_ROOT=str(override))
+        source = self.source('use std.platform;fn main(){let x:Int=std.platform.marker();println(x);}')
+        self.success(self.invoke("check", source, "--target=x86_64-linux", env=env))
+        for target in ("aarch64-linux", "arm64-linux"):
+            for command in ("check", "build"):
+                result = self.invoke(command, source, f"--target={target}", env=env)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Bool", result.stderr)
+        # Discovery also resolves the requested ABI, before any attempt to exec.
+        arm.write_text('module std.platform;test fn selected(){let x:Int=true;}')
+        result = self.invoke("test", "std.platform", "--target=arm64-linux", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(str(arm), result.stderr)
+        arm.unlink()
+        (override / "std/platform.xen").write_text('module std.platform;fn marker()->Int{return 0;}')
+        (self.cwd / "std").mkdir()
+        (self.cwd / "std/platform.xen").write_text('module std.platform;fn marker()->Int{return 0;}')
+        for command, entry in (("check", source), ("build", source), ("test", "std.platform")):
+            result = self.invoke(command, entry, "--target=arm64-linux", env=env)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("target aarch64-linux", result.stderr)
+            self.assertIn(str(arm), result.stderr)
+
     def test_module_aliases(self):
         self.source('module guide.model;struct Pair<T>{value:T}'
                     'enum Role{Admin,Guest}enum Maybe<T>{Some(T),None}fn identity<T>(x:T)->T{return x;}'
@@ -227,27 +306,34 @@ class ToolchainTests(unittest.TestCase):
             self.assertEqual(restored.returncode, 0, restored.stderr)
         self.addCleanup(restore_version)
         packages = self.root / "packages"
-        result = subprocess.run(["make", "package", "VERSION=loader-test", f"DIST_DIR={packages}"],
+        result = subprocess.run(["make", "package-one", "VERSION=loader-test", f"DIST_DIR={packages}"],
                                 cwd=REPO, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         with tarfile.open(next(packages.glob("*.tar.gz"))) as archive:
             names = archive.getnames()
             prefix = names[0].split("/")[0]
-            for relative in ("LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "VERSION",
-                             "THIRD_PARTY.md", "licenses/OCaml.txt", "licenses/CC-BY-4.0.txt",
-                             "assets/branding/README.md", "assets/branding/full_logo.png",
-                             "assets/branding/full_logo.png.license", "docs/en/jit.md",
-                             "docs/ko/jit.md", "examples/demo.xen"):
+            for relative in ("README.md", "bin/xen", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE",
+                             "NOTICE", "VERSION", "THIRD_PARTY.md", "licenses/OCaml.txt",
+                             "examples/README.md", "examples/demo.xen", "stdlib/prelude.xen",
+                             "stdlib/platform/x86_64-linux/std/platform.xen",
+                             "stdlib/platform/aarch64-linux/std/platform.xen"):
                 self.assertIn(f"{prefix}/{relative}", names)
-            for image in set(re.findall(r'assets/branding/[^"\s]+\.png', (REPO / "README.md").read_text())):
-                self.assertIn(f"{prefix}/{image}", names)
-                self.assertIn(f"{prefix}/{image}.license", names)
-            self.assertFalse(any("reference" in Path(name).parts or
-                                 Path(name).name in ("AGENTS.md", "CLAUDE.md")
-                                 for name in names))
-            for image in (REPO / "assets/branding").glob("*.png"):
-                relative = image.relative_to(REPO).as_posix()
-                self.assertEqual(archive.extractfile(f"{prefix}/{relative}").read(), image.read_bytes())
+            self.assertEqual({Path(name).parts[1] for name in names},
+                             {"README.md", "bin", "stdlib", "examples", "licenses", "VERSION",
+                              "LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "THIRD_PARTY.md"})
+            self.assertFalse(any(Path(name).suffix in (".ml", ".mli", ".py") for name in names))
+            expected_stdlib = {path.relative_to(REPO).as_posix()
+                               for path in (REPO / "stdlib").rglob("*.xen") if not path.is_symlink()}
+            actual_stdlib = {name.removeprefix(prefix+"/") for name in names if name.startswith(prefix+"/stdlib/")}
+            self.assertEqual(actual_stdlib, expected_stdlib)
+            for relative in expected_stdlib:
+                self.assertEqual(archive.extractfile(f"{prefix}/{relative}").read(), (REPO / relative).read_bytes())
+            for path in (REPO / "examples").rglob("*"):
+                if path.is_file():
+                    relative = path.relative_to(REPO).as_posix()
+                    self.assertEqual(archive.extractfile(f"{prefix}/{relative}").read(), path.read_bytes())
+            self.assertEqual(archive.extractfile(f"{prefix}/README.md").read(),
+                             (REPO / "docs/compiler-build/distribution-readme.md").read_bytes())
             self.assertEqual(archive.extractfile(f"{prefix}/licenses/OCaml.txt").read(),
                              (REPO / "licenses/OCaml.txt").read_bytes())
             self.assertEqual(archive.extractfile(f"{prefix}/VERSION").read(), b"loader-test\n")
@@ -270,14 +356,32 @@ class ToolchainTests(unittest.TestCase):
         with tarfile.open(source_archive) as archive:
             names = archive.getnames()
             prefix = "xen-loader-test-source"
-            for relative in ("Makefile", "dune-project", ".gitignore", "compiler/checker.ml",
-                             "tests/property/runner.py", "scripts/package.py", "LICENSE"):
+            for relative in ("Makefile", "dune-project", ".gitignore", "compiler/common/checker.ml",
+                             "compiler/common/dune", "compiler/common/backend_intf.ml",
+                             "compiler/cpu/x86_64/dune", "compiler/cpu/x86_64/machine_ir.ml",
+                             "compiler/platform/linux/x86_64/dune", "compiler/platform/linux/x86_64/native_backend.ml",
+                             "compiler/platform/linux/x86_64/linux_backend.ml", "compiler/platform/linux/arm64/linux_runtime.ml",
+                             "compiler/platform/linux/arm64/linux_backend.ml", "compiler/platform/linux/arm64/elf_writer.ml",
+                             "compiler/platform/darwin/dune", "compiler/platform/darwin/mach_o.ml",
+                             "compiler/platform/darwin/MACOS_VALIDATION.md",
+                             "compiler/platform/darwin/arm64/darwin_backend.ml", "compiler/platform/darwin/arm64/darwin_runtime.ml",
+                             "compiler/cpu/arm64/README.md", "compiler/cpu/arm64/dune",
+                             "compiler/cpu/arm64/native_backend.ml", "compiler/platform/README.md",
+                             "compiler/backend.ml",
+                             "tests/property/runner.py", "scripts/package.py", "scripts/package_build.py",
+                             "scripts/test.py", "scripts/package-toolchains.example.json", "LICENSE",
+                             "docs/compiler-build/README.md", "docs/compiler-build/en/build.md",
+                             "docs/compiler-build/en/aarch64.md", "docs/compiler-build/en/packaging.md",
+                             "docs/compiler-build/ko/build.md", "docs/compiler-build/ko/aarch64.md",
+                             "docs/compiler-build/ko/packaging.md", "docs/compiler-build/distribution-readme.md",
+                             "examples/demo.xen", "assets/branding/full_logo.png", "assets/branding/full_logo.png.license"):
                 self.assertIn(f"{prefix}/{relative}", names)
+            self.assertNotIn(f"{prefix}/scripts/PACKAGING.md", names)
             banned = {".git", ".idea", "reference", "test", "__pycache__", "found_bugs", "dist"}
             self.assertFalse(any(banned.intersection(Path(name).parts) or
-                                 Path(name).name in ("AGENTS.md", "CLAUDE.md") for name in names))
-            self.assertEqual(archive.extractfile(f"{prefix}/compiler/checker.ml").read(),
-                             (REPO / "compiler/checker.ml").read_bytes())
+                                 Path(name).name in ("AGENTS.md", "CLAUDE.md", ".package-toolchains.json") for name in names))
+            self.assertEqual(archive.extractfile(f"{prefix}/compiler/common/checker.ml").read(),
+                             (REPO / "compiler/common/checker.ml").read_bytes())
             self.assertEqual(archive.extractfile(f"{prefix}/VERSION").read(), b"loader-test\n")
 
     def test_cli_version(self):

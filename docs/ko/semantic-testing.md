@@ -9,7 +9,7 @@ lowering 회귀만 추가하는 것이 기준이다.
 
 ```bash
 make test QUICKCHECK_MODE=sweep QUICKCHECK_DEPTH=standard QUICKCHECK_SEED=20261006
-make semantic-test QUICKCHECK_DEPTH=standard QUICKCHECK_SEED=20261006
+python3 scripts/test.py --suite semantic --depth standard --seed 20261006
 python3 tests/property/runner.py --mode semantic --seed 20261006 --case 0
 ```
 

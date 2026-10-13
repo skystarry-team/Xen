@@ -10,7 +10,10 @@
 이 문서는 현재 `main` 브랜치에 구현된 기능을 기준으로 한다. 계획 중인 문법은
 별도로 표시하며, 아직 구현되지 않은 기능을 언어 사양처럼 설명하지 않는다.
 
-- [시작하기](getting-started.md): 빌드, 검사, ELF 생성과 실행
+- [시작하기](getting-started.md): 컴파일러 사용, 검사, ELF 생성과 실행
+- [컴파일러 빌드](../compiler-build/ko/build.md): 설치와 네이티브 소스 빌드
+- [AArch64 크로스 툴체인](../compiler-build/ko/aarch64.md): OCaml 소스 빌드와 Dune 연결
+- [컴파일러 패키징](../compiler-build/ko/packaging.md): 바이너리·소스 배포
 - [언어 가이드](language-guide.md): 기능별 문서의 시작점과 빠른 참고
 - [기본 문법과 타입](language-basics.md): 변수, 숫자, 함수, 제어 흐름과 기본 builtin
 - [String과 Vec](strings-and-vectors.md): byte string, Vec API와 파일 읽기 builtin
@@ -25,8 +28,8 @@
 - [Semantic IR 검증](semantic-testing.md): 생성·변형·축소와 재현 명령
 
 `build/run/test --opt=basic`으로 정수·Bool 계산과 제한된 leaf 함수를 최적화한다.
-기본값은 `off`이며 `--opt-report`는 `basic`의 영역·분리 이유·변환 횟수를 stderr에
+기본값은 `basic`이며 `--opt-report`는 `basic`의 영역·분리 이유·변환 횟수를 stderr에
 출력한다. 상세 범위는 [Native 기본 최적화](optimization.md)를 참고한다.
 
-`#scope[jit]`는 작은 정수·Bool 영역을 runtime에 컴파일하는 실험적 기능이다. `--jit=off`로 같은 IR의
-AOT와 비교하고 `--jit-report`로 compile·cache 통계를 본다. [Runtime JIT](jit.md)를 참고한다.
+`#scope[opt]` 안에서만 AOT 최적화를 적용한다. 스코프 밖 코드는 보존하며
+`--opt=off`로 최적화를 끌 수 있다. [스코프 AOT 최적화](optimization.md)를 참고한다.

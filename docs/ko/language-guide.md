@@ -56,8 +56,9 @@ chained range는 지원하지 않는다. `Range`와 그 구조적 `next` 구현�
 `use std.iter;` 뒤에는 clone 가능한 element의 `Vec<T>.iter()`와
 `Slice<T>.iter()`, byte 단위 `String.iter()`, bounds descriptor를 따르는
 `Ptr<T>.iter()`를 사용할 수 있다. 모든 구조적 iterator의 `.enumerate()`는 iterator를
-소비하고 `(Int, T)`를 0부터 산출한다. collection 자체를 `for`에 바로 넘기거나
-move-only element를 consuming iteration하는 `into_iter()`는 아직 지원하지 않는다.
+소비하고 `(Int, T)`를 0부터 산출한다. Vec의 `into_iter()`는 원본을 소비하고 move-only
+element도 순서대로 이전한다. Map/filter/fold는 [표준 라이브러리](stdlib.md)를 참고한다.
+Collection 자체를 for에 바로 넘기는 자동 변환은 없다.
 
 `String.as_bytes()`는 local-only `Slice<U8>` view를 만들고
 `Vec<U8>.into_string()`은 vector를 소비해 byte-preserving String으로 옮긴다.
@@ -150,8 +151,8 @@ Concrete 사용자 함수는 `fn(T1, T2) -> U` 타입의 8바이트 함수 값�
 선언 자체, builtin과 method value, closure는 아직 함수 값으로 만들 수 없다.
 
 `build/run/test --opt=basic`으로 정수·Bool 계산과 제한된 leaf 함수를 최적화한다.
-기본값은 `off`이며 `--opt-report`는 `basic`의 영역·분리 이유·변환 횟수를 stderr에
+기본값은 `basic`이며 `--opt-report`는 `basic`의 영역·분리 이유·변환 횟수를 stderr에
 출력한다. 상세 범위는 [Native 기본 최적화](optimization.md)를 참고한다.
 
-`#scope[jit]`는 작은 정수·Bool 영역을 runtime에 컴파일하는 실험적 기능이다. `--jit=off`로 같은 IR의
-AOT와 비교하고 `--jit-report`로 compile·cache 통계를 본다. [Runtime JIT](jit.md)를 참고한다.
+`#scope[opt]` 안에서만 AOT 최적화를 적용한다. 스코프 밖 코드는 보존하며
+`--opt=off`로 최적화를 끌 수 있다. [스코프 AOT 최적화](optimization.md)를 참고한다.

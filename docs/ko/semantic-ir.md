@@ -86,13 +86,18 @@ Cleanup은 Box leaf의 drop flag와 타입별 재귀 drop helper를
 최적화 결과는 이 경로의 타입·초기화·storage·borrow 검사 뒤 backend에 전달한다.
 사용 범위와 예산은 [최적화 문서](optimization.md)를 따른다.
 
-## 실험적 JIT runtime encoding
+## 스코프 AOT 루프 최적화
 
-공통 `calculation_chunks`는 최적화 후 checked IR의 operation 시작·끝을 제공한다.
-Backend는 jit scope의 안전한 scalar 연산을 최대 32개씩 묶고 기존 `emit_operation`의
-타입별 recipe를 사용한다. `Machine_ir.frame32/literal64`는 encoding 시점의 재배치
-위치·폭·종류를 기록한다. 불변 연산 기록에서 runtime이 코드를 emit/relocate하고
-RW → RX 성공 뒤 cache에 공개한다. 별도 실행 IR은 없으며 compiler는 값을 해석해
-계산하지 않는다. 계산은 생성한 native code가 현재 caller frame에서 수행한다.
-Calls·논리적 frame 표식·borrow·memory·cleanup·CFG terminator는 AOT에 유지한다.
-사용 범위와 예산은 [실험적 runtime JIT](jit.md)를 따른다.
+`opt`는 capability를 추가하지 않는 lexical 최적화 힌트다. `Semantic_opt`는
+지정한 스코프의 leaf 호출을 펼치고 scalar 계산 영역을 최적화한다.
+`Semantic_opt_graph`는 공통 CFG의 loop와 scalar 접근 관계를 분석한다.
+`Semantic_loop_fusion`은 같은 scope의 독립적 counted 루프 두 개를 하나의
+반복 경로로 연결한다. 원래 induction local과 cleanup은 유지한다.
+`Semantic_loop_opt`는 효과와 alias가 없는 직선 scalar 루프에서 단일 정의 임시
+불변 산술을 선택한다. 새 preheader에 private scalar storage를 만들고 원래 정의는
+그 값을 읽게 하며, 추가 storage는 단일 출구에서 종료한다. 기존 lifetime과 cleanup을
+유지하고 변경한 IR을 재검증한다. Backend는 이 checked IR을 정적으로 emit한다.
+`Semantic_prefix_cache`는 별칭·부모 prefix·입력을 정확히 비교하며,
+`Semantic_scalar_codec`의 제한된 텍스트 형식으로 전방 변환만 저장한다.
+역방향 liveness·DCE와 최종 재검증은 캐시 hit에서도 다시 수행한다.
+사용 범위와 예산은 [최적화 문서](optimization.md)를 따른다.

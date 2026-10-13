@@ -67,6 +67,22 @@ Slice 및 이를 포함한 aggregate의 반환·owner 밖 escape와 Vec 저장�
 
 `zeros`와 `repeat`의 음수 길이는 runtime error이며 0 길이는 빈 Vec를 반환한다. `read_ints`/`read_floats`는 ASCII space, tab, CR, LF를 separator로 사용한다. 경로, 숫자, allocation, file 오류는 source location을 포함해 stderr에 기록되고 status 1로 종료된다.
 
+Linux AArch64에서도 두 숫자 reader를 지원한다. ARM64 실수 파서는 정확한 정수 비율을
+binary64로 nearest/ties-to-even 반올림하며 음의 0을 보존한다. 비영 값이 0 또는
+무한대로 반올림되면 범위 오류다. 소수점·지수 표기를 받지만 NaN, infinity,
+hex 표기는 받지 않는다. 자세한 계약은 [ARM64 문서](../../compiler/cpu/arm64/README.md#files)를 참고한다.
+
 Vec equality는 숫자, Bool, String과 그 중첩 Vec에 재귀적으로 제공된다. File 및
 struct/enum element는 compile-time error다. Vec 출력은 기존 `Vec<Int>`와
 `Vec<Float>` 범위를 유지한다.
+
+## 공유 element 접근과 consuming iteration
+
+Explc에서 `let item = &values[index];`는 File·Box를 포함한 Vec element를 clone 없이
+대여한다. Bounds를 검사하며 마지막 사용까지 다른 index의 변경도 포함한 Vec mutation과
+move를 금지한다. Mutable element reference는 지원하지 않는다. String.as_bytes는
+stable String field·검사된 &String에서도 view를 만들며 원본 loan을 유지한다.
+
+`use std.iter;` 뒤에 values.into_iter는 Vec을 소비하고 원래 순서로 owned element를
+반환한다. Vec.swap(left,right)는 clone/drop 없이 교환한다. Vec.replace(index,value)는
+길이를 유지하고 이전 owned element를 반환하며, 반환값을 버리면 정상 cleanup이 정리한다.

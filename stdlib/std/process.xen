@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 module std.process;
+use std.platform;
 
 fn id() -> Int {
-    #scope[bb] { return syscall0(39); }
+    return std.platform.id();
 }
 
 fn parent_id() -> Int {
-    #scope[bb] { return syscall0(110); }
+    return std.platform.parent_id();
 }
 
 test fn identity() {

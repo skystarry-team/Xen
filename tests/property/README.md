@@ -7,9 +7,9 @@ library. All files in this directory are licensed under Apache-2.0.
 Run from the repository root after `make build`:
 
 ```sh
-make quickcheck QUICKCHECK_MODE=mixed QUICKCHECK_DEPTH=smoke QUICKCHECK_SEED=20261008
-make quickcheck QUICKCHECK_MODE=sweep QUICKCHECK_DEPTH=standard QUICKCHECK_SEED=20261008
-make semantic-test QUICKCHECK_SEED=20261008
+python3 scripts/test.py --suite quickcheck --mode mixed --depth smoke --seed 20261008
+python3 scripts/test.py --suite quickcheck --mode sweep --depth standard --seed 20261008
+python3 scripts/test.py --suite semantic --seed 20261008
 ```
 
 For a custom compiler, set `XEN_BIN` to an executable path and optionally set
@@ -57,14 +57,14 @@ Unsupported language features are not generated as expected-success inputs.
 
 For every execution, restore the same initial files and use the same source path:
 
-1. Original source, `--opt=off --jit=off`.
-2. Original source, `--opt=basic --jit=off`.
-3. Main wrapped in `#scope[jit]`, `--opt=basic --jit=off`.
-4. The identical marked source, `--opt=basic --jit=on`.
+1. Original source, `--opt=off`.
+2. Original source, `--opt=basic`.
+3. Main wrapped in `#scope[opt]`, `--opt=basic`.
+4. The identical marked source, `--opt=off`.
 
 Compare stdout, stderr and exit status exactly before checking the Python oracle.
-This distinguishes the effect of adding a scope from the experimental runtime
-encoder. Reports stay disabled. Invalid/no-crash inputs use the original `check`
+This distinguishes the effect of adding a scope from AOT optimization inside it.
+Reports stay disabled. Invalid/no-crash inputs use the original `check`
 path. Three known literal-left inference limitations remain explicit regression
 pins rather than being silently filtered out.
 

@@ -1,0 +1,107 @@
+# Xen 컴파일러 빌드
+
+Xen 컴파일러는 OCaml 실행 파일입니다. 컴파일러가 실행되는 CPU와 Xen 프로그램의
+출력 타깃은 별개입니다.
+
+| 빌드 환경 | 필요한 OCaml |
+| --- | --- |
+| Linux x86_64에서 x86_64 컴파일러 빌드 | x86_64 네이티브 OCaml |
+| Linux AArch64에서 AArch64 컴파일러 빌드 | AArch64 네이티브 OCaml |
+| Linux x86_64에서 AArch64 컴파일러 빌드 | x86_64 네이티브 OCaml과 AArch64 크로스 OCaml |
+
+크로스 OCaml은 빌드 호스트에서 실행되며 다른 CPU의 코드를 생성합니다.
+AArch64에서 실행되는 네이티브 OCaml을 x86_64에 설치하는 것과는 다릅니다.
+크로스 툴체인 준비는 [AArch64 안내](aarch64.md)를 참고하세요.
+
+## 요구 사항
+
+- `PATH`에서 실행할 수 있는 네이티브 `ocamlc`와 `ocamlopt`. 기준 버전은 OCaml 5.5.0입니다.
+- Dune 3.18 이상. 기준 빌드 버전은 Dune 3.24.2입니다.
+- 저장소 빌드 명령에 사용하는 GNU Make.
+
+크로스 OCaml과 네이티브 OCaml의 버전은 정확히 같아야 합니다. 컴파일러 테스트에는
+Python 3.10 이상과 binutils도 필요합니다. 상세 내용은 [테스트 안내](../../../tests/README.md)에 있습니다.
+Xen이 생성하는 프로그램에는 C 컴파일러·assembler·linker·libc가 필요하지 않습니다.
+OCaml 자체를 소스에서 빌드할 때는 네이티브 C 툴체인이 필요합니다.
+
+## 네이티브 OCaml 설치
+
+opam이 초기화된 환경에서는 네이티브 switch를 만들고 Dune을 설치할 수 있습니다.
+
+```sh
+opam switch create xen-native 5.5.0
+eval "$(opam env --switch=xen-native)"
+opam install 'dune>=3.18'
+```
+
+공식 소스에서 직접 설치하는 경우 Ubuntu/Debian의 네이티브 빌드 도구를 준비합니다.
+
+```sh
+sudo apt install build-essential pkg-config libzstd-dev curl
+```
+
+소스는 새 디렉터리에 풀고 사용자 소유의 영구 경로에 설치합니다.
+
+```sh
+XEN_OCAML_SOURCE_ROOT="$HOME/.local/src/xen-ocaml-5.5.0"
+XEN_OCAML_NATIVE_PREFIX="$HOME/.local/opt/ocaml-native-5.5.0"
+mkdir -p "$XEN_OCAML_SOURCE_ROOT/native"
+curl --fail --location https://github.com/ocaml/ocaml/archive/refs/tags/5.5.0.tar.gz \
+  --output "$XEN_OCAML_SOURCE_ROOT/ocaml-5.5.0.tar.gz"
+tar -xzf "$XEN_OCAML_SOURCE_ROOT/ocaml-5.5.0.tar.gz" \
+  -C "$XEN_OCAML_SOURCE_ROOT/native" --strip-components=1
+cd "$XEN_OCAML_SOURCE_ROOT/native"
+./configure --prefix="$XEN_OCAML_NATIVE_PREFIX"
+make -j2
+make install
+export PATH="$XEN_OCAML_NATIVE_PREFIX/bin:$PATH"
+```
+
+Dune은 [공식 설치 안내](https://github.com/ocaml/dune#installation)에 따라 별도로 설치합니다.
+Xen을 빌드하기 전에 `PATH`가 선택하는 도구를 확인합니다.
+
+```sh
+ocamlc -version
+ocamlopt -version
+dune --version
+```
+
+네이티브 OCaml 빌드 절차는 [공식 설치 문서](https://github.com/ocaml/ocaml/blob/5.5.0/INSTALL.adoc)를 따릅니다.
+다른 버전을 선택하면 해당 버전의 소스를 사용해야 합니다.
+
+## Xen 빌드
+
+Xen 저장소 루트에서 실행합니다.
+
+```sh
+make build
+compiler/dist/xen version
+compiler/dist/xen check examples/demo.xen
+compiler/dist/xen run examples/demo.xen
+```
+
+`make build`는 `dune build @release`를 실행합니다. Dune의 빌드 결과는
+`_build/default/compiler/main.exe`이며 release 실행 파일은 `compiler/dist/xen`에 생성됩니다.
+Linux AArch64의 네이티브 빌드도 크로스 workspace 없이 같은 명령을 사용합니다.
+CLI 기본 타깃은 컴파일러의 OCaml 빌드 아키텍처를 따릅니다.
+두 Linux 타깃은 스코프 AOT 최적화를 사용합니다.
+
+## 컴파일러 버전
+
+기본 버전은 `VERSION` 파일에서 읽습니다. Make에 버전을 지정하면 실행 파일에 포함됩니다.
+
+```sh
+make build VERSION=0.1.0_1-demo
+compiler/dist/xen version
+```
+
+직접 실행하는 Dune 빌드는 `VERSION` 또는 `XEN_BUILD_VERSION`을 사용합니다.
+바이너리·소스 패키지의 버전 설정은 [패키징 안내](packaging.md)를 참고하세요.
+
+## 테스트와 패키징
+
+`make test`와 개별 실행 방법은 [테스트 안내](../../../tests/README.md)에 있습니다.
+AArch64 호스트 검증은 `python3 scripts/test.py --suite host`와 `--suite arm64`를 사용합니다.
+전체 테스트에는 x86_64 실행·스코프 AOT 검사도 포함됩니다.
+`make package`는 기본으로 Linux의 두 컴파일러 아키텍처를 빌드하므로,
+AArch64 호스트에서도 x86_64 크로스 툴체인이 필요합니다.

@@ -19,6 +19,8 @@
 - tuple 값, 공개 `.N` 원소 접근·mutable local 대입과 `Option<T>`/`Result<T,E>` prelude
 - 동일 오류 타입의 `Result<T,E>` 전용 postfix `?`, generic·조건식·match arm 조기 반환
 - eager fallback용 `std.option.unwrap_or`와 concrete named callback을 받는 명시적 오류 변환 `std.result.map_err`
+- 중첩 struct/tuple field 대입, ref binding의 shared match와 generic reference parameter
+- Lazy map/filter, fold/collect, Vec consuming iteration과 std.hashmap의 String key map
 - enum·tuple·Bool의 구조적 exhaustive `match`, scalar literal/catch-all, nested binding과 unreachable arm 진단
 - generic body의 알려진 enum·tuple 구조 분해와 typed callback; local·pattern·projection·호출을 거친 symbolic 타입 제한 유지
 - compiler-private enum representation과 `__tag`·`__payload_*` source 접근·대입 차단
@@ -75,12 +77,12 @@
 
 ## Native 최적화
 
-`build/run/test --opt=basic`은 정수·Bool 계산 영역 최적화와 제한된 leaf 함수 fusion을
-지원한다. 기본값은 `off`이며 `check`는 원본 의미 검사만 수행한다.
-상세 범위·예산·보고서는 [최적화 문서](optimization.md)를 따른다.
-
-`#scope[jit]`는 정수·Bool 영역의 실제 runtime 생성·RX 실행·cache 재사용을 지원하는 실험적 기능이다.
-범위·실패 동작·비용은 [runtime JIT](jit.md)를 따른다.
+`#scope[opt]` 안에서 정수·Bool 계산 최적화, 제한된 leaf 펼치기와 보수적인
+루프 불변식 이동과 독립적인 counted scalar 루프 퓨전을 수행한다.
+`--opt-cache=<directory>`로 정확한 prefix의 전방 변환 결과를 재사용할 수 있다.
+`build/run/test`의 기본값은 `--opt=basic`이며
+`--opt=off`로 끈다. 스코프 밖 코드는 보존한다. `check`는 원본 의미 검사만
+수행한다. 상세 범위·예산·보고서는 [최적화 문서](optimization.md)를 따른다.
 
 ## 아직 지원하지 않음
 
@@ -90,9 +92,9 @@
 - package manifest, re-export/visibility와 별도 module search path
 - match guard, struct pattern과 destructuring assignment
 - Slice 반환·장기 escape·mutable Slice
-- Box 내부의 reference·Slice·Ptr 저장, borrowed Box 내부 field의 부분 이동과 borrowed pattern matching
+- Box 내부의 reference·Slice·Ptr 저장과 borrowed Box 내부 field의 부분 이동
 - String indexing·slicing 문법과 mutation (stdlib의 소유 byte 추출은 지원)
-- collection 자동 `for`, consuming `into_iter()`와 `map/filter/fold`
+- collection 자동 `for`
 - exception, `Option`의 `?` 전파와 `Result` 오류 타입의 암묵 변환 (`std.result.map_err`를 통한 명시 변환은 지원)
 - legacy File seek, permission 선택과 lazy directory iterator
 - process spawn/wait/pipe와 환경변수 조회 (envp entry 지원 미구현)
@@ -100,13 +102,55 @@
 - range step, inclusive range와 역방향 range
 - 범용 parsing API, streaming input, locale number와 CSV
 - `Int` 이외 고정폭 숫자와 Float의 stdlib parsing/formatting
-- global·function JIT mode, runtime specialization과 범용 JIT (scalar `#scope[jit]`는 지원)
+- 전역 최적화 CLI, 배열·tile 퓨전, guard 기반 버전 생성과 runtime specialization
 - FFI, GPU, 다른 architecture/OS target
 
 ## 플랫폼과 ABI
 
-현재 target은 Linux x86-64 하나다. compiler는 `_start`, stack frame, 내부 함수 ABI,
+Linux x86-64와 AArch64에서 compiler는 `_start`, stack frame, 내부 함수 ABI,
 instruction encoding과 ELF layout을 직접 만든다. 출력 ELF는 RX text, read-only data,
 RW data segment를 분리한다.
 
 이 문서는 데모의 현재 구현을 설명한다. 문법과 API는 바뀔 수 있다.
+
+## 멀티 타깃 컴파일러 구조
+
+공통 프런트엔드는 `compiler/common/`, CPU별 백엔드는 `compiler/cpu/x86_64/`와
+`compiler/cpu/arm64/`의 별도 Dune 라이브러리로 분리되어 있습니다.
+향후 OS별 서비스와 실행 파일 형식 경계는 `compiler/platform/`에서 관리합니다.
+
+기본 타깃은 Linux에서 컴파일러를 빌드한 아키텍처를 따릅니다.
+`check`, `build`, `run`, `test`에 명시한 `--target`이 기본값보다 우선합니다.
+`--target=aarch64-linux`를 지정하면 ARM64 백엔드를 사용합니다.
+`arm64-linux` 별칭도 허용합니다. 외부 assembler/linker 없이 정적 Linux AArch64
+ELF를 생성하며, 정수·F32/F64·Bool·제어 흐름·함수·참조·지원 타입의 구조체와 enum·
+문자열 리터럴/프로그램 인자와 기본 출력을 지원합니다.
+문자열 연결·`int_to_str`·독립 복제·해제와 `Box<T>` 생성·참조·이동·추출을 지원합니다.
+재귀 Box 정리는 추가 할당 없이 반복형으로 수행하며, 깊이에 비례해 호출 스택을 쓰지 않습니다.
+범용 `Vec<T>`의 생성·성장·조회·교체·교환·pop과 독립 복제·재귀 정리를 지원합니다.
+`Slice<T>`와 요소 참조는 기존 빌림 규칙을 유지하며, String의 byte view와
+`Vec<U8>.into_string()`, `zeros`·`repeat`, `std.string`·`std.iter`·`std.hashmap` 경로도 지원합니다.
+재귀 Vec 복제와 Box/Vec 혼합 정리는 반복형 작업 목록을 사용합니다.
+부동소수점은 사칙연산·비교·검사된 숫자 변환·유효 숫자 17자리 출력을 지원합니다.
+음의 0을 보존하며, NaN 부호는 CPU 연산 결과를 따릅니다.
+예를 들어 `0.0/0.0`은 ARM64에서 `nan`, x86-64에서 `-nan`으로 출력됩니다.
+
+move-only `File`의 열기·읽기·쓰기·닫기·이동과 aggregate/Box/Vec 내부 정리,
+바이트를 보존하는 `read_text`도 지원합니다.
+ARM64에서 비소유 `Ptr<T>`, 검사된 raw POD 메모리 연산과 raw syscall도 지원합니다.
+`std.io`·`std.fs`·`std.env`·`std.process`는 출력 타깃별 `std.platform` 구현을 사용합니다.
+ARM64의 `read_ints`·`read_floats`는 검사된 decimal token 읽기를 지원합니다.
+실수는 정수 비율에서 nearest/ties-to-even으로 한 번 반올림하며 음의 0을 보존합니다.
+두 Linux 타깃은 공통 IR의 스코프 AOT 최적화를 사용합니다.
+`x86_64-windows`와 `aarch64-windows`는 아직 미구현입니다.
+`x86_64-macos`와 `aarch64-macos`는 **미지원**이며 지원 계획이 없습니다.
+macOS용 컴파일러·패키지·표준 라이브러리 프로필은 제공하지 않습니다.
+CPU 아키텍처와 기존 Darwin/Mach-O 프로토타입 구현은 보존합니다. `arm64`·`darwin` 별칭을
+정규화하며, macOS 호스트에서 Linux backend로 자동 대체하지 않습니다.
+
+`run`과 `test`는 호스트 커널을 통해 실행하며 에뮬레이터를 자동 실행하지 않습니다.
+x86-64에서 만든 ARM64 실행 파일은 `qemu-aarch64 ./app`으로 검증할 수 있습니다.
+공통 계층은 Xen의 고정 64비트 값 배치와 기존 여섯 인자 제한을 유지합니다.
+컴파일러 자체의 네이티브 빌드와 크로스 툴체인 준비는
+[컴파일러 빌드 문서](../compiler-build/README.md)를 참고하세요.
+[컴파일러 구조](../../compiler/README.md)와 [ARM64 지원 범위](../../compiler/cpu/arm64/README.md)를 참고하세요.

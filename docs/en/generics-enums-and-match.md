@@ -200,3 +200,26 @@ fn main() {
 $ compiler/dist/xen run result_question.xen
 42
 ```
+
+## Shared matching
+
+Use `match &value` or match an existing shared reference to inspect a value without
+cloning or consuming it. In shared mode, named payload bindings use `ref name` and
+have type `&Payload`; plain consuming bindings are rejected. Creating the borrow
+requires `explc`. Mutable reference sources require an explicit shared reborrow.
+
+```xen
+#![explc]
+fn main() {
+    let value: Option<Box<Int>> = Option.Some(box(8));
+    println(match &value { Option.Some(ref item) => **item, Option.None => 0 });
+    let owned = value;
+    println(match owned { Option.Some(item) => item.into_inner(), Option.None => 0 });
+}
+```
+
+Both lines print `8`. Bindings cannot move their borrowed payload or escape the arm
+as a reference/Slice match result. Reference fields/returns, mutable patterns and
+temporary borrows remain unsupported. Generic reference parameters such as `&T`
+and `&mut T` are supported when the concrete referent is valid; reference-to-reference,
+Unit and function referents are rejected.

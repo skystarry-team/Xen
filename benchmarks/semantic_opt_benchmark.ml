@@ -5,7 +5,7 @@ open Semantic_ir
 let () =
   let sizes=[100;200;400;800]in
   let entries=List.map(fun n->
-    let source="fn main(){let x=arg_count();"^String.concat ""(List.init n(fun _->"println(x*x);"))^"}"in
+    let source="fn main(){#scope[opt]{let x=arg_count();"^String.concat ""(List.init n(fun _->"println(x*x);"))^"}}"in
     let checked=match Checker.check(Parser.parse ~file:"scale.xen"source)with
       |Ok p->p|Error d->failwith d.message in
     let f=List.find(fun(f:func)->f.name="main")(program checked).functions in

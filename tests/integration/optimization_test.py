@@ -39,13 +39,13 @@ def leaf_calls(path):
 with tempfile.TemporaryDirectory(prefix='xen-opt-cli-') as directory:
     root = Path(directory)
     source = root / 'main.xen'
-    source.write_text('fn leaf(x:Int)->Int{return x*x;}\nfn main(){println(leaf(arg_count()));println(arg(0));}')
+    source.write_text('fn leaf(x:Int)->Int{return x*x;}\nfn main(){#scope[opt]{println(leaf(arg_count()));println(arg(0));}}')
     off = command('run', source, '--opt=off', '--', '--opt=basic')
     basic = command('run', '--opt=basic', source, '--', '--opt=basic')
     default = command('run', source, '--', '--opt=basic')
     assert off.returncode == 0 and off.stdout == b'1\n--opt=basic\n'
     assert (off.returncode, off.stdout, off.stderr) == (basic.returncode, basic.stdout, basic.stderr)
-    assert (off.returncode, off.stdout, off.stderr) == (default.returncode, default.stdout, default.stderr)
+    assert (basic.returncode, basic.stdout, basic.stderr) == (default.returncode, default.stdout, default.stderr)
     report = command('run', source, '--opt=basic', '--opt-report', '--', '--opt=basic')
     assert report.returncode == 0 and report.stdout == off.stdout
     assert b'opt basic: fused=1' in report.stderr and b'inputs=[' in report.stderr and b'split=' in report.stderr
@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='xen-opt-cli-') as directory:
         assert result.returncode == 0 and result.stdout == result.stderr == b''
     assert leaf_calls(root / 'off') == 1
     assert leaf_calls(root / 'basic') == 0
-    for args in [('run', source, '--opt=bogus'), ('build', source, '--opt-report'),
+    for args in [('run', source, '--opt=bogus'), ('build', source, '--opt=off', '--opt-report'),
                  ('check', source, '--opt=basic')]:
         assert command(*args).returncode == 2
     source.write_text('fn main(){let x=1;println(missing(x*0));}')
@@ -63,9 +63,9 @@ with tempfile.TemporaryDirectory(prefix='xen-opt-cli-') as directory:
     for mode in ('off', 'basic'):
         result = command('run', source, f'--opt={mode}')
         assert result.returncode == checked.returncode == 1 and result.stderr == checked.stderr
-    # Global JIT stays unsupported when basic optimization is selected.
-    source.write_text('#global[jit]\nfn main(){println(1);}')
-    assert b'global jit mode is not supported' in command('build', source, '--opt=basic').stderr
+    # Global optimization is not enabled by scope-only basic optimization.
+    source.write_text('#global[opt]\nfn main(){println(1);}')
+    assert b'global opt mode is not supported' in command('build', source, '--opt=basic').stderr
     source.write_text('fn leaf(x:Int)->Int{return x+1;} test fn ok(){assert(leaf(2)==3);}')
     a = command('test', source, '--opt=off')
     b = command('test', source, '--opt=basic')

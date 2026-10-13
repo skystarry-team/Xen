@@ -79,6 +79,12 @@ Negative lengths are runtime errors; length zero produces an empty vector.
 parse, and allocation failures are runtime errors. New code should use the recoverable
 [`std.fs`](file.md) APIs instead.
 
+These readers also work on Linux AArch64. Its float parser converts an exact
+decimal ratio to binary64 with nearest/ties-to-even rounding, preserving signed
+zero and rejecting nonzero underflow to zero and overflow to infinity. It accepts
+decimal point/exponent notation, not NaN, infinity or hexadecimal notation.
+See the [ARM64 parser contract](../../compiler/cpu/arm64/README.md#files).
+
 ## Out-of-range access
 
 ```xen
@@ -97,3 +103,16 @@ $ echo $?
 
 The process exits with status 1. See [diagnostics](diagnostics.md) for the runtime
 error format.
+
+## Shared element access and owned iteration
+
+With `explc`, `let item = &values[index];` borrows a Vec element without cloning it,
+including a File or Box element. Bounds are checked. Until the reference's last use,
+the vector cannot be mutated or moved, including changes to a different index.
+Mutable element references are not supported. `String.as_bytes()` also accepts a
+stable String field or checked `&String` and retains that source's loan.
+
+With `use std.iter;`, `values.into_iter()` consumes the vector and yields owned items
+in original order. `Vec.swap(left,right)` exchanges two initialized elements without
+cloning/dropping them. `Vec.replace(index,value)` preserves length and returns the
+previous owned element; dropping the result performs normal cleanup.

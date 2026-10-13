@@ -3,8 +3,8 @@
 `bb` is a lexical capability for typed raw memory and Linux syscalls. It is not an
 optimization mode or an IR basic block. A function's capability combines file-level
 `#global[...]`, function-level `#![...]`, and enclosing `#scope[...]` declarations.
-Capabilities do not cross imports or value-only calls. `#scope[jit]` is a separate experimental [scalar runtime compiler](jit.md);
-global/function `jit` modes remain reserved.
+Capabilities do not cross imports or value-only calls. `#scope[opt]` is a separate [AOT optimization hint](optimization.md);
+it grants no memory or reference capabilities.
 
 `#scope[bb] { ... }` adds the capability to an ordinary lexical block. Locals and the
 capability do not escape that block; move and cleanup rules remain the same.
@@ -56,10 +56,14 @@ dereferencing are not available.
 ## Linux syscalls
 
 `syscall0` through `syscall6` accept a syscall number and up to six `I64` arguments,
-evaluated left to right, and return the raw Linux result as `I64`. The ABI uses
-`rax/rdi/rsi/rdx/r10/r8/r9`. Negative kernel errno values are not converted to
+evaluated left to right, and return the raw Linux result as `I64`. x86-64 uses
+`rax/rdi/rsi/rdx/r10/r8/r9`; AArch64 uses `x8/x0/x1/x2/x3/x4/x5`.
+Syscall numbers are target-native and passed unchanged, including unknown numbers.
+Negative kernel errno values are not converted to
 `Result`; wrappers that need recoverable errors belong in Xen standard-library code.
-The only target is Linux x86-64.
+Both Linux x86-64 and AArch64 support these operations. Use std.io/fs/env/process
+for target-selected services rather than putting CPU-specific syscall numbers in
+portable application code.
 
 ## Capability error
 

@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/status-demo-orange" alt="Status: demo">
-  <img src="https://img.shields.io/badge/target-Linux%20x86--64-blue" alt="Target: Linux x86-64">
+  <img src="https://img.shields.io/badge/target-Linux%20x86--64/aarch64-blue" alt="Target: Linux x86-64">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-see%20scope-lightgrey" alt="Licenses: see scope"></a>
 </p>
 
@@ -21,8 +21,22 @@ no C compiler, assembler, linker or libc. The compiler is written in OCaml;
 the standard library is written in Xen.
 
 **This is an early demo.** Syntax, APIs and diagnostics may change. Linux x86-64
-is the only supported host and target. [Scalar scope JIT](docs/en/jit.md) is
-experimental, and its current measurements do not establish a speedup over AOT.
+has full current feature coverage. The CLI defaults to the compiler's Linux
+build architecture. An initial
+[Linux ARM64 backend](compiler/cpu/arm64/README.md) supports the core language
+with `--target=aarch64-linux`. [Scoped AOT optimization](docs/en/optimization.md)
+applies only inside explicit `#scope[opt]` blocks.
+
+> [!Warning]
+> **Linux AArch64 — Experimental**
+>
+> Status: Pending Native Hardware Validation
+>
+> The Linux AArch64 backend has been implemented and tested in an emulated environment. Validation on physical ARM64 hardware has not yet been completed.
+>
+> The backend is currently considered experimental. Compatibility, runtime behavior, and performance on native AArch64 systems are not guaranteed.
+>
+> Hardware validation reports and community contributions are welcome.
 
 ## A small example
 
@@ -42,11 +56,10 @@ separate lines.
 
 ## Try the demo
 
-Build from source with OCaml and Dune 3.18 or later. The demo was verified
-with OCaml 5.5.0. From the repository root:
+Install or build Xen using the [compiler build guide](docs/compiler-build/en/build.md).
+For a source build, run from the repository root:
 
 ```sh
-make build
 compiler/dist/xen version
 compiler/dist/xen check examples/demo.xen
 compiler/dist/xen run examples/demo.xen
@@ -55,26 +68,28 @@ compiler/dist/xen build examples/demo.xen -o /tmp/xen-demo
 compiler/dist/xen test std.string
 ```
 
+The CLI defaults to
+the compiler's build architecture; both Linux targets compile ahead of time.
+Use explicit `--target` for cross compilation. ARM64 supports the core language
+and collections, managed `File` operations, `read_text`, raw POD memory/syscalls
+and platform-selected `std.io`/`std.fs`/`std.env`/`std.process`, including checked
+numeric file readers. macOS on Intel and Apple Silicon
+is unsupported and has no planned support. CPU encoders and the internal Mach-O
+prototype are retained; see the
+[platform contract](compiler/platform/README.md). See the
+[ARM64 support guide](compiler/cpu/arm64/README.md).
+
 `check` validates types, ownership and borrows; `build` writes an executable;
 `run` builds and executes it; `test` runs native `test fn` functions. See the
 [CLI reference](docs/en/cli.md) and [getting started](docs/en/getting-started.md).
 `xen version` (or `xen --version`) prints the embedded compiler version.
 
-To prepare a relocatable archive:
-
-```sh
-make package VERSION=0.1.0-demo
-make source-package VERSION=0.1.0-demo
-```
-
-The archive in `dist/` contains `bin/xen`, `stdlib/`, examples, documentation,
-branding and license notices. Keep its directory structure intact when moving
+Binary distributions contain `bin/xen`, `stdlib/`, learning examples and license
+notices. Keep the directory structure intact when moving
 it so Xen can discover the adjacent standard library.
-The verified demo compiler build requires glibc 2.38 or later and uses the
-host's libm; source builds may have different requirements. Generated Xen
-executables do not use these libraries.
-The separate `*-source.tar.gz` includes the public source and tests without
-Git history or local development artifacts.
+Choose `xen-<version>-linux-x86_64.tar.gz` or `xen-<version>-linux-aarch64.tar.gz`
+for the compiler's host CPU. Native builds, OCaml cross toolchains and binary/source
+distribution commands are documented in [compiler builds](docs/compiler-build/README.md).
 
 After extracting it, change into the package directory and run:
 
@@ -91,9 +106,9 @@ After extracting it, change into the package directory and run:
 - A Xen standard library for arguments, byte strings, conversion and recoverable
   file/byte I/O, with `Option<T>`, `Result<T,E>` and postfix `?`.
 - Explicit lexical `bb` capability for typed raw memory and Linux syscalls.
-- Optional `--opt=basic` scalar optimization and bounded leaf fusion
-  (default `off`). Experimental `#scope[jit]` uses the same checked IR;
-  `--jit=off` runs its marked source through AOT.
+- Explicit `#scope[opt]` AOT scalar optimization, bounded leaf expansion and
+  conservative loop-invariant code motion. `--opt=off` disables scoped optimization;
+  unmarked code retains the original checked IR.
 
 Numbers never convert implicitly. Strings preserve bytes without automatic
 UTF-8 validation. Project modules use `import`; toolchain modules use `use std.*`
@@ -109,12 +124,7 @@ and [word counting](examples/word_count.xen). [Korean documentation](docs/ko/REA
 is also available.
 
 Bug reports and small, reproducible improvements are welcome at
-[skystarry-team/Xen](https://github.com/skystarry-team/Xen). Compiler tests require
-Python 3.10 or later and binutils (`objdump`), with no third-party Python packages:
-
-```sh
-make test
-```
+[skystarry-team/Xen](https://github.com/skystarry-team/Xen).
 
 See [contributing](CONTRIBUTING.md) and
 [test layout and replay](https://github.com/skystarry-team/Xen/blob/main/tests/README.md).
@@ -137,3 +147,5 @@ retain their own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
 The Xen logo and icons are **AI-generated artwork**, supplied by vmintf(minsung).
 Their [provenance, attribution and CC BY 4.0 terms](assets/branding/README.md)
 are separate from the code licenses.
+
+Compiler internals and target boundaries: [compiler architecture](compiler/README.md).

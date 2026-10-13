@@ -215,10 +215,11 @@ let test_initialization () =
       expect(contains 0)"index operand initialization was not checked");
   let initialized_index=map_functions(fun f->{f with blocks=Array.map(fun b->{b with operations=List.concat_map(fun op->
     match op.node with Storage_live 1->[op;{op with node=Eval(v 1,Int_lit 0L)}]|_->[op])b.operations})f.blocks})indexed in
-  (* Element places are not emitted by the current source frontend. Preserve
-     this conservative descriptor/element limitation explicitly, beside the
-     negative operand check; source indexing uses Index/Slice_get rvalues. *)
-  expect(not(outcome initialized_index))"Element abstraction changed; review conservative limitation pin";
+  List.iter(fun transform->expect(outcome(transform initialized_index))
+    "initialized element projection was rejected") [Fun.id;split_blocks;split_edges;reverse_blocks];
+  let moved_owner=map_functions(fun f->{f with blocks=Array.map(fun b->{b with operations=List.concat_map(fun op->
+    match op.node with Acquire(_,_,p) when p.projections<>[]->[{op with node=Forget{p with projections=[];typ=Vec I64}};op]|_->[op])b.operations})f.blocks})initialized_index in
+  expect(not(outcome moved_owner))"element projection resurrected a moved Vec owner";
   Printf.printf "Semantic IR initialization properties passed\n"
 
 let test_reborrow_alternatives () =

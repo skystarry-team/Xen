@@ -84,21 +84,21 @@ def run_program(prog: Program, fd_limit: int | None = None) -> RunResult:
             restore(files)
             return _run_cmd([str(XEN), 'run', str(root / prog.entry), *flags], cwd=root, fd_limit=fd_limit)
 
-        off = execute(prog.files, '--opt=off', '--jit=off')
-        basic = execute(prog.files, '--opt=basic', '--jit=off')
+        off = execute(prog.files, '--opt=off')
+        basic = execute(prog.files, '--opt=basic')
         assert off == basic, (prog.notes, prog.files, 'off/basic mismatch', off, basic)
         # Generated main is last; compare scope insertion independently of the
-        # runtime encoder, then compare the exact annotated source/IR both ways.
+        # optimizer, then compare the exact annotated source/IR both ways.
         source = prog.files[prog.entry]
         marker = 'fn main(){'
         if marker in source and source.rstrip().endswith('}'):
-            annotated = source.replace(marker, marker + '#scope[jit]{', 1)
+            annotated = source.replace(marker, marker + '#scope[opt]{', 1)
             annotated = annotated.rstrip()[:-1] + '}}'
             files = dict(prog.files, **{prog.entry: annotated})
-            reference = execute(files, '--opt=basic', '--jit=off')
-            jit = execute(files, '--opt=basic', '--jit=on')
+            reference = execute(files, '--opt=basic')
+            unoptimized = execute(files, '--opt=off')
             assert off == reference, (prog.notes, annotated, 'scope insertion mismatch', off, reference)
-            assert reference == jit, (prog.notes, annotated, 'AOT/JIT mismatch', reference, jit)
+            assert reference == unoptimized, (prog.notes, annotated, 'scoped AOT mismatch', reference, unoptimized)
         return off
 
 

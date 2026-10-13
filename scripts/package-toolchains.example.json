@@ -1,0 +1,10 @@
+{
+  "aarch64": {
+    "prefix": "/opt/ocaml-aarch64",
+    "runner": ["qemu-aarch64", "-L", "/path/to/aarch64-sysroot"]
+  },
+  "x86_64": {
+    "prefix": "/opt/ocaml-x86_64",
+    "runner": ["qemu-x86_64", "-L", "/path/to/x86_64-sysroot"]
+  }
+}

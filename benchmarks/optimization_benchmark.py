@@ -19,9 +19,11 @@ SOURCE = '''fn compute(x:Int)->Int {
 fn main(){
     let mut i=0;
     let mut total=0;
+    #scope[opt] {
     while i<2000000 {
         total=total+compute(i);
         i=i+1;
+    }
     }
     println(total);
 }

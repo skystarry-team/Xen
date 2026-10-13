@@ -3,24 +3,16 @@
 Native 테스트는 `test fn name() { assert(true); }`로 선언하고 `xen test`로 실행한다.
 `main` 없이도 지원하며 [테스트 가이드](testing.md)에 검색·필터·stdlib 검사 규칙이 있다.
 
-## 요구 사항
+## 컴파일러 준비
 
-Xen compiler 자체를 빌드하려면 OCaml과 Dune 3.18 이상이 필요하다. Xen이 생성한 프로그램은
-Linux x86-64에서 실행된다. 생성 과정에는 C compiler, assembler, linker 또는
-libc가 필요하지 않다.
+설치와 소스 빌드 절차는 별도의 [컴파일러 빌드 안내](../compiler-build/ko/build.md)에 있다.
+소스 빌드 결과는 `compiler/dist/xen`이며 바이너리 배포본은 `bin/xen`, stdlib와 예제를 제공한다.
+배포본을 옮길 때 `bin/`과 `stdlib/`의 구조를 유지해야 한다.
+아래 명령에서 소스 빌드 경로 대신 `<package>/bin/xen`이나 `PATH`의 `xen`을 사용할 수 있다.
 
-전체 개발 테스트에는 Python 3.10 이상과 binutils의 `objdump`가 필요하다.
-별도의 Python 패키지 설치는 필요하지 않다.
-
-```sh
-dune build @release
-```
-
-release executable은 `compiler/dist/xen`에 생성된다.
-
-`compiler/dist/xen version` 또는 `compiler/dist/xen --version`으로 컴파일러 버전을
-확인한다. 기본값은 저장소의 `VERSION` 파일에 있고 `make build VERSION=...`나
-`make package VERSION=...`로 지정한 버전은 실행 파일에 포함된다.
+Xen 프로그램은 Linux x86_64 또는 AArch64에서 실행되며 기본 타깃은 컴파일러의 빌드
+아키텍처를 따른다. 프로그램 생성에는 C 컴파일러·assembler·linker·libc가 필요하지 않다.
+`xen version` 또는 `xen --version`으로 실행 중인 컴파일러의 버전을 확인할 수 있다.
 
 ## 첫 프로그램
 
@@ -59,27 +51,11 @@ compiler/dist/xen run args.xen -- first second
 
 ## 테스트
 
-```sh
-make test
-```
+Xen 프로그램의 테스트는 `test fn`과 `xen test`를 사용한다.
+[테스트 가이드](testing.md)에서 선언·검색·필터 사용법을 확인할 수 있다.
+컴파일러 개발 테스트는 [별도 안내](../../tests/README.md)에 있다.
 
-테스트는 checker 진단과 생성된 ELF의 실제 실행뿐 아니라 Python 의미 모델과 생성된
-Xen 프로그램의 결과도 비교한다. property test만 선택해 실행할 수 있다.
-
-```sh
-make quickcheck QUICKCHECK_MODE=mixed QUICKCHECK_DEPTH=smoke
-make quickcheck QUICKCHECK_MODE=all QUICKCHECK_DEPTH=deep QUICKCHECK_SEED=1234
-```
-
-mode는 `regress`, `mixed`, `pairs`, `kitchen`, `illtyped`, `nocrash`, `explore`,
-`semantic`, `sweep`, `all` 중 하나고 depth는 `smoke`, `standard`, `deep`, `massive` 중 하나다.
-`all`은 고정 회귀, 혼합 프로그램, 잘못된 프로그램과 crash 입력, 의미 변형을 검사한다.
-`sweep`은 여기에 모든 emitter pair와 kitchen-sink 조합도 더한다. 실패 시 재현 seed와
-축소할 source를 출력한다.
-
-`build/run/test --opt=basic`으로 정수·Bool 계산과 제한된 leaf 함수를 최적화한다.
-기본값은 `off`이며 `--opt-report`는 `basic`의 영역·분리 이유·변환 횟수를 stderr에
-출력한다. 상세 범위는 [Native 기본 최적화](optimization.md)를 참고한다.
-
-`#scope[jit]`는 작은 정수·Bool 영역을 runtime에 컴파일하는 실험적 기능이다. `--jit=off`로 같은 IR의
-AOT와 비교하고 `--jit-report`로 compile·cache 통계를 본다. [Runtime JIT](jit.md)를 참고한다.
+`#scope[opt]` 안에서 정수·Bool 계산과 제한된 leaf 호출, 루프 불변식을 AOT로
+최적화한다. `build/run/test`의 기본값은 `basic`이며 `--opt=off`로 끈다.
+`--opt-report`로 영역·분리 이유·변환 횟수를 확인한다. 스코프 밖 코드는 보존한다.
+상세 범위는 [스코프 AOT 최적화](optimization.md)를 참고한다.

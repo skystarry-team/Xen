@@ -7,7 +7,7 @@ example.
 
 ## Learning path
 
-1. [Get started](getting-started.md): build or locate the compiler and run a program.
+1. [Get started](getting-started.md): locate the compiler and run a program.
 2. [Guided tour](tutorial.md): build a small command-line program using the standard
    library.
 3. [Language guide](language-guide.md): follow the concepts in a useful order.
@@ -16,6 +16,11 @@ example.
    and [modules](modules-and-structs.md) as needed.
 
 ## Reference
+
+Compiler installation and source builds are covered separately in the
+[compiler build guide](../compiler-build/en/build.md), including
+[AArch64 cross toolchains](../compiler-build/en/aarch64.md) and
+[packaging](../compiler-build/en/packaging.md).
 
 - [Command-line reference](cli.md): `check`, `build`, `run`, and `test`.
 - [Syntax reference](syntax-reference.md): declarations, types, statements, expressions,
@@ -36,5 +41,6 @@ The standard library is Xen source distributed with the compiler. Project module
 examples are collected under [`examples/`](../../examples/README.md), while every
 example in this guide is shown directly on its page.
 
-Optional native integer/Bool optimization and bounded leaf fusion are described in
-[Basic native optimization](optimization.md). The default is `--opt=off`; [scalar scope JIT](jit.md) is experimental.
+Explicit `#scope[opt]` blocks use integer/Bool AOT optimization, bounded leaf
+expansion and conservative loop-invariant code motion. Unmarked code is unchanged.
+See [scoped AOT optimization](optimization.md).

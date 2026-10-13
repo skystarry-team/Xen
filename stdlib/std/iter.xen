@@ -1,6 +1,96 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 module std.iter;
 
+fn fold<I, T, A>(iterator: I, initial: A, step: fn(A, T) -> A) -> A {
+    let mut source = iterator;
+    let mut accumulator = initial;
+    let mut finished = false;
+    while !finished {
+        match source.next() {
+            Option.Some(item) => { accumulator = step(accumulator, item); },
+            Option.None => { finished = true; },
+        };
+    }
+    return accumulator;
+}
+
+struct IntoIter<T> { values: Box<Vec<T>>, prepared: Bool }
+
+impl<T> IntoIter<T> {
+    #![explc]
+    fn next(&mut self) -> Option<T> {
+        let values = self.values.as_mut();
+        if !self.prepared {
+            let length = values.len();
+            let mut index = 0;
+            while index < length / 2 {
+                values.swap(index, length - index - 1);
+                index = index + 1;
+            }
+            self.prepared = true;
+        }
+        if values.len() == 0 { return Option<T>.None; }
+        return Option<T>.Some(values.pop());
+    }
+}
+
+struct Map<I, T, U> { iterator: I, transform: fn(T) -> U, finished: Bool }
+
+impl<I, T, U> Map<I, T, U> {
+    fn next(&mut self) -> Option<U> {
+        if self.finished { return Option<U>.None; }
+        let item: Option<T> = self.iterator.next();
+        return match item {
+            Option.Some(value) => {
+                let transform = self.transform;
+                Option<U>.Some(transform(value))
+            },
+            Option.None => {
+                self.finished = true;
+                Option<U>.None
+            },
+        };
+    }
+}
+
+struct Filter<I, T> { iterator: I, predicate: fn(&T) -> Bool, finished: Bool }
+
+impl<I, T> Filter<I, T> {
+    #![explc]
+    fn next(&mut self) -> Option<T> {
+        if self.finished { return Option<T>.None; }
+        let mut result: Option<T> = Option<T>.None;
+        let mut accepted = false;
+        while !accepted && !self.finished {
+            let item: Option<T> = self.iterator.next();
+            match item {
+                Option.Some(value) => {
+                    let predicate = self.predicate;
+                    if predicate(&value) {
+                        result = Option<T>.Some(value);
+                        accepted = true;
+                    }
+                },
+                Option.None => { self.finished = true; },
+            };
+        }
+        return result;
+    }
+}
+
+fn collect<I, T>(iterator: I) -> Vec<T> {
+    let mut source = iterator;
+    let mut values: Vec<T> = [];
+    let mut finished = false;
+    while !finished {
+        match source.next() {
+            Option.Some(item) => { values.push(item); },
+            Option.None => { finished = true; },
+        };
+    }
+    return values;
+}
+
 // Iterator state and transitions live in Xen.  The compiler only needs to
 // recognize the structural next(&mut self) -> Option<T> protocol used by for.
 struct SliceIter<T> {
