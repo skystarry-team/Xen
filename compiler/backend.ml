@@ -39,5 +39,3 @@ let library_default target = match Result.bind target select with
       |Ok backend->backend
       |Error message->invalid_arg ("legacy library backend unavailable: "^message)
 let default = library_default (default_target ())
-let default_jit target = target.Target.architecture=Target.X86_64 &&
-  target.Target.operating_system=Target.Linux

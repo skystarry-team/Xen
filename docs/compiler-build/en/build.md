@@ -85,7 +85,7 @@ compiler/dist/xen run examples/demo.xen
 `_build/default/compiler/main.exe` and promotes the release executable to
 `compiler/dist/xen`. Native Linux AArch64 uses the same commands without a cross
 workspace. The CLI default target follows the compiler's OCaml build architecture;
-AArch64 defaults to JIT off and x86_64 to JIT on.
+both Linux targets use scoped AOT optimization.
 
 ## Compiler version
 
@@ -103,6 +103,6 @@ version handling is described in [packaging](packaging.md).
 
 Use the [test guide](../../../tests/README.md) for `make test` and focused host
 suites. Native AArch64 host validation uses `python3 scripts/test.py --suite host`
-and `--suite arm64`; the full suite also includes x86_64 execution/JIT checks.
+and `--suite arm64`; the full suite also includes x86_64 execution/scoped AOT checks.
 `make package` builds both Linux compiler architectures by default, requiring
 the other architecture's cross toolchain even on a native AArch64 host.

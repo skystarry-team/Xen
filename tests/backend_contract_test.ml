@@ -1,6 +1,5 @@
 (* SPDX-License-Identifier: MIT OR Apache-2.0 *)
 let expect condition message = if not condition then failwith message
-let probe_jit = ref false
 
 module Probe : Backend_intf.S = struct
   let description : Backend_intf.description = {
@@ -8,9 +7,8 @@ module Probe : Backend_intf.S = struct
     calling_convention="test only"; runtime="none"; executable_format="none";
   }
   type executable = unit
-  let generate ?(jit=true) ?(jit_report=false) checked =
+  let generate checked =
     Semantic_ir.verify (Semantic_ir.program checked);
-    expect (jit= !probe_jit && not jit_report) "runner lost backend options";
     Error ({span=None; message="probe backend reached"} : Backend_intf.error)
   let write _ () = failwith "error result must not be written"
 end
@@ -47,20 +45,16 @@ let () =
     expect(Backend.host_target ~architecture ~system:"macosx"=Ok(parsed expected)) "macOS host target mismatch")
     ["amd64","x86_64-macos";"arm64","aarch64-macos"];
   expect(parsed "arm64-darwin"=parsed "aarch64-macos") "Darwin alias mismatch";
-  expect(not(Backend.default_jit(parsed "x86_64-macos"))) "unimplemented macOS JIT enabled";
-  expect (not(Backend.default_jit (parsed "arm64-linux"))) "ARM64 JIT default enabled";
-  expect (Backend.default_jit (parsed "x86_64-linux")) "x86 JIT default disabled";
   let program=Parser.parse ~file:"probe.xen" "fn main(){}" in
   let case : Test_runner.case = {
     name="probe";function_name="main";owner="$entry";single=true;
     programs=[program];span={file="probe.xen";line=1;column=1};code_target=parsed "aarch64-linux";
   } in
-  List.iter(fun jit->probe_jit:=Option.value jit ~default:false;
-  match Test_runner.run ~backend:(module Probe) ?jit case with
+  (  match Test_runner.run ~backend:(module Probe) case with
    | Test_runner.Compilation_error error ->
        expect (error.message="native backend error: probe backend reached")
          "runner did not use the injected backend"
-   | _ -> failwith "probe backend error was lost") [None;Some false;Some true];
+   | _ -> failwith "probe backend error was lost");
   let mismatched={case with code_target=parsed "x86_64-linux"} in
   (match Test_runner.run ~backend:(module Probe) mismatched with
    |Test_runner.Compilation_error d->expect(String.starts_with ~prefix:"test discovered for" d.message)

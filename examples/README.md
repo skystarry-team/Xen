@@ -24,7 +24,7 @@ positive
 ## Programs
 
 `arm64_core.xen` demonstrates the initial ARM64 subset. Build it with
-`xen build examples/arm64_core.xen --target=aarch64-linux --jit=off -o app`,
+`xen build examples/arm64_core.xen --target=aarch64-linux -o app`,
 then execute it on Linux ARM64 or with `qemu-aarch64 ./app hello`.
 `arm64_float.xen` demonstrates scalar F32/F64 operations, checked conversions,
 aggregate returns and decimal output with the same build flags.
@@ -77,7 +77,10 @@ intended diagnostic.
 For complete, stable error examples with their output, use the [diagnostics
 guide](https://github.com/skystarry-team/Xen/blob/main/docs/en/diagnostics.md).
 
-`jit_regions.xen` demonstrates the experimental scalar runtime JIT: the first
-call compiles a region, and later calls reuse it with different arguments.
-Use `xen run examples/jit_regions.xen --opt=basic --jit-report` for statistics,
-or `--jit=off` for the AOT comparison.
+`opt_regions.xen` demonstrates scalar AOT optimization inside `#scope[opt]`.
+`opt_loops.xen` computes loop-invariant arithmetic once per invocation.
+`opt_fusion.xen` fuses two independent integer loops with identical trip counts.
+Repeat `xen run examples/opt_fusion.xen --opt-cache=.xen-opt-cache --opt-report`
+to inspect exact-prefix hits; changed or broken prefixes rebuild their suffix.
+Use `xen run examples/opt_loops.xen --opt-report` to inspect transformations,
+or `--opt=off` to compare the original checked IR.

@@ -12,7 +12,7 @@ source          = [module-declaration] { dependency-declaration }
 module-declaration = "module" qualified-name ";" ;
 dependency-declaration = ("import" | "use") qualified-name ["as" identifier] ";" ;
 global-mode     = "#global" "[" mode { "," mode } "]" ;
-mode            = "explc" | "jit" | "bb" ;
+mode            = "explc" | "opt" | "bb" ;
 declaration     = struct | enum | impl | function ;
 ```
 
@@ -21,8 +21,8 @@ it must match the entry file's module path. Project dependencies use `import`;
 toolchain dependencies use `use`. A global mode declaration is optional, appears at
 most once before all declarations, and must be followed by a declaration on a new line.
 Mode lists cannot be empty or repeat a mode. A function mode attribute must be followed
-by its declaration on a new line. `jit` is supported in lexical `#scope[jit]` for experimental [scalar runtime compilation](jit.md);
-global and function jit modes remain reserved.
+by its declaration on a new line. `opt` is supported only in lexical `#scope[opt]` for [scoped AOT optimization](optimization.md);
+global and function opt modes are rejected.
 
 ```text
 struct          = "struct" identifier [type-parameters] "{"

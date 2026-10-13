@@ -1,11 +1,8 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
-type operand = Frame of int | Literal
-type operand_patch = { at:int; width:int; operand:operand }
 type fixup = { offset : int; target : string }
 type section = Rodata | Data
 type rip_fixup = { offset : int; target : string; section : section }
 type t = {
-  record_operands:bool; mutable operand_patches:operand_patch list;
   buffer : Buffer.t; labels : (string, int) Hashtbl.t; mutable fixups : fixup list;
   rodata : Buffer.t; data : Buffer.t;
   rodata_labels : (string, int) Hashtbl.t; data_labels : (string, int) Hashtbl.t;
@@ -14,7 +11,7 @@ type t = {
 
 exception Missing_label of string
 
-let create ?(record_operands=false) () = { record_operands;operand_patches=[];buffer = Buffer.create 4096; labels = Hashtbl.create 64; fixups = [];
+let create () = {buffer = Buffer.create 4096; labels = Hashtbl.create 64; fixups = [];
   rodata = Buffer.create 1024; data = Buffer.create 64;
   rodata_labels = Hashtbl.create 32; data_labels = Hashtbl.create 8; rip_fixups = [] }
 let position output = Buffer.length output.buffer
@@ -23,11 +20,6 @@ let u32 output value =
   for shift = 0 to 3 do u8 output (Int64.to_int (Int64.shift_right_logical value (shift * 8))) done
 let u64 output value =
   for shift = 0 to 7 do u8 output (Int64.to_int (Int64.shift_right_logical value (shift * 8))) done
-let operand output width operand emit =
-  if output.record_operands then output.operand_patches <- {at=position output;width;operand}::output.operand_patches;
-  emit ()
-let frame32 output id value = operand output 4 (Frame id) (fun()->u32 output value)
-let literal64 output value = operand output 8 Literal (fun()->u64 output value)
 let bytes output values = List.iter (u8 output) values
 let label output name = Hashtbl.replace output.labels name (position output)
 let rel32 output target =

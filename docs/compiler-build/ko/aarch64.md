@@ -96,7 +96,7 @@ x86_64와 AArch64를 모두 요청합니다. `PACKAGE_ARCHS=aarch64`로 AArch64�
 qemu-aarch64 -L /usr/aarch64-linux-gnu _build/package_aarch64/compiler/main.exe \
   check examples/arm64_core.xen
 qemu-aarch64 -L /usr/aarch64-linux-gnu _build/package_aarch64/compiler/main.exe \
-  build examples/arm64_core.xen --jit=off -o app
+  build examples/arm64_core.xen -o app
 qemu-aarch64 ./app
 ```
 

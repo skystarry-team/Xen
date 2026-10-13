@@ -8,7 +8,7 @@ let compile source = match Checker.check(Parser.parse ~file:"opt.xen" source)wit
   |Ok p->p|Error d->fail(Printf.sprintf "line %d: %s"d.span.line d.message)
 let executable p = match Native_backend.generate p with Ok x->x|Error e->fail e.message
 let differential source =
-  let off=compile source in let basic,_=Semantic_opt.optimize off in
+  let off=compile source in let basic,_=Semantic_opt.optimize ~scope_only:false off in
   let a=Test_runner.execute ~write:Native_backend.write (executable off)and b=Test_runner.execute ~write:Native_backend.write (executable basic)in
   expect(a=b)("off/basic mismatch: "^source);a
 let operations p name = let f=List.find(fun(f:func)->f.name=name)(program p).functions in
@@ -19,18 +19,18 @@ let copy = function Acquire _->true|_->false
 let direct name = function Eval(_,Call(n,_))->n=name|_->false
 let test_computation () =
   let p=compile "fn calc(x:Int)->Int{let a=x*x;let b=x*x;return a+b;} fn main(){println(calc(12));}"in
-  let q,r=Semantic_opt.optimize p in
+  let q,r=Semantic_opt.optimize ~scope_only:false p in
   expect(count p "calc" binary=3)"missing original arithmetic";
   expect(count q "calc" binary=2)"CSE failed";
   expect(count q "calc" copy<count p "calc" copy)"copy elimination failed";
   expect(r.fusion.fused=1 && count q "main"(direct "calc")=0)"leaf fusion failed";
   expect(count q "main"(function Logical_call_enter _->true|_->false)=1)"logical entry lost";
   let p=compile "fn main(){let a=5;let b=(a+2)*(a+2);println(b);}"in
-  let q,_=Semantic_opt.optimize p in expect(count q "main" binary=0)"constant folding failed";
+  let q,_=Semantic_opt.optimize ~scope_only:false p in expect(count q "main" binary=0)"constant folding failed";
   (* Cleanup-free revalidation must be idempotent, including managed cleanup. *)
   let p=compile "fn main(){let s=\"hi\";let mut t=s;t=\"bye\";println(t);}"in
   let q=Semantic_analysis.revalidate(program p)in expect(program p=program q)"cleanup duplicated";
-  let q,_=Semantic_opt.optimize p in
+  let q,_=Semantic_opt.optimize ~scope_only:false p in
   expect(count p "main"(function Drop _->true|_->false)=count q "main"(function Drop _->true|_->false))"managed drops changed"
 let test_differential () =
   List.iter(fun source->ignore(differential source))[
@@ -68,15 +68,15 @@ let test_limits () =
   let source="fn large(x:Int)->Int{let mut y=x;"^oversized^"return y;} fn main(){println(large(1));}"in
   let q,r=Semantic_opt.optimize(compile source)in expect(r.fusion.fused=0 && count q "main"(direct "large")=1)"large leaf fused";
   let source="fn leaf(x:Int)->Int{return x*x;} fn main(){"^String.concat ""(List.init 20(fun i->Printf.sprintf "println(leaf(%d));"i))^"}"in
-  let p=compile source in let q,r=Semantic_opt.optimize p in
+  let p=compile source in let q,r=Semantic_opt.optimize ~scope_only:false p in
   let a=List.find(fun(f:func)->f.name="main")(program p).functions and b=List.find(fun(f:func)->f.name="main")(program q).functions in
   expect((Array.length b.locals-Array.length a.locals)*8<=256)"stack budget exceeded";
   expect(r.fusion.fused>0 && count q "main"(direct "leaf")>0)"cumulative stack budget ignored";
   let p=compile "fn leaf(x:Int)->Int{return x+1;} fn main(){#scope[bb]{println(leaf(1));}}"in
-  let q,r=Semantic_opt.optimize p in expect(r.fusion.fused=0 && count q "main"(direct "leaf")=1)"mode mismatch fused";
+  let q,r=Semantic_opt.optimize ~scope_only:false p in expect(r.fusion.fused=0 && count q "main"(direct "leaf")=1)"mode mismatch fused";
   ignore(differential source);
   let p=compile "fn leaf(x:Int)->Int{return x+1;} fn main(){let f:fn(Int)->Int=leaf;println(f(1));}"in
-  let q,r=Semantic_opt.optimize p in expect(r.fusion.fused=0 && count q "main"(function Eval(_,Indirect_call _)->true|_->false)=1)"indirect call fused"
+  let q,r=Semantic_opt.optimize ~scope_only:false p in expect(r.fusion.fused=0 && count q "main"(function Eval(_,Indirect_call _)->true|_->false)=1)"indirect call fused"
 let test_operation_budget () =
   let p=compile "fn leaf(x:Int)->Int{return x+1;}fn main(){leaf(1);leaf(2);leaf(3);leaf(4);leaf(5);leaf(6);leaf(7);leaf(8);leaf(9);leaf(10);}" |> program in
   let leaf=List.find(fun(f:func)->f.name="leaf")p.functions in
@@ -86,7 +86,7 @@ let test_operation_budget () =
   let body={id=0;scope=0;operations=op(Storage_live 1)::List.init 32(fun _->op(Eval(result,Binary("+",x,x))))@[op(Storage_dead 0)];terminator=Return(Some result)}in
   let leaf={leaf with locals=[|leaf.locals.(0);local|];scopes=[|{leaf.scopes.(0)with declarations=[0;1]}|];blocks=[|body|]}in
   let p=Semantic_analysis.revalidate{p with functions=List.map(fun(f:func)->if f.name="leaf"then leaf else f)p.functions}in
-  let q,r=Semantic_opt.optimize p in
+  let q,r=Semantic_opt.optimize ~scope_only:false p in
   expect(r.fusion.fused=6 && count q "main"(direct "leaf")=4)"additional IR operation budget ignored";
   let a=Test_runner.execute ~write:Native_backend.write (executable p)and b=Test_runner.execute ~write:Native_backend.write (executable q)in expect(a=b)"budget fixture behavior changed"
 let test_stack_padding () =
@@ -99,7 +99,7 @@ let test_stack_padding () =
   let scopes=Array.copy f.scopes in scopes.(0)<-{scopes.(0)with declarations=scopes.(0).declarations@[id]};
   let f={f with locals=Array.append f.locals [|local|];scopes}in
   let p=Semantic_analysis.revalidate{p with functions=List.map(fun old->if old.name="main"then f else old)p.functions}in
-  let q,r=Semantic_opt.optimize p in expect(r.fusion.fused=7 && count q "main"(direct "leaf")=1)"slot padding exceeds budget";
+  let q,r=Semantic_opt.optimize ~scope_only:false p in expect(r.fusion.fused=7 && count q "main"(direct "leaf")=1)"slot padding exceeds budget";
   expect(Test_runner.execute ~write:Native_backend.write (executable p)=Test_runner.execute ~write:Native_backend.write (executable q))"padding fixture changed result"
 let test_storage_versions () =
   let p=compile "fn work(x:Int)->Int{return x*x;}fn main(){println(work(3));}" |> program in
@@ -112,12 +112,12 @@ let test_storage_versions () =
   let f={f with locals=[|f.locals.(0);l 1;l 2;l 3;l 4|];scopes=[|{f.scopes.(0)with declarations=[0;1;2;3;4]}|];
     blocks=[|{id=0;scope=0;operations=List.map op nodes;terminator=Return(Some(v 4))}|]}in
   let p=Semantic_analysis.revalidate{p with functions=List.map(fun old->if old.name="work"then f else old)p.functions}in
-  let q,_=Semantic_opt.optimize p in
+  let q,_=Semantic_opt.optimize ~scope_only:false p in
   let a=Test_runner.execute ~write:Native_backend.write (executable p)and b=Test_runner.execute ~write:Native_backend.write (executable q)in
   expect(a=b && a=(Unix.WEXITED 0,"19\n",""))"storage version/restart changed preserved copy"
 let test_verification () =
   let p=compile "fn leaf(x:Int)->Int{return x+1;}fn main(){println(leaf(1));}"in
-  let q,_=Semantic_opt.optimize p in
+  let q,_=Semantic_opt.optimize ~scope_only:false p in
   let corrupt edit={ (program q) with functions=List.map(fun(f:func)->{f with blocks=Array.map(fun(b:block)->{b with operations=List.concat_map edit b.operations})f.blocks})(program q).functions}in
   let invalid p=try ignore(Semantic_analysis.revalidate p);fail "corrupt optimized IR accepted"with Invalid _|Semantic_analysis.Diagnostic _->()in
   invalid(corrupt(fun op->match op.node with Logical_call_exit _->[]|_->[op]));

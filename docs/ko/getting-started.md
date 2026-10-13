@@ -55,9 +55,7 @@ Xen 프로그램의 테스트는 `test fn`과 `xen test`를 사용한다.
 [테스트 가이드](testing.md)에서 선언·검색·필터 사용법을 확인할 수 있다.
 컴파일러 개발 테스트는 [별도 안내](../../tests/README.md)에 있다.
 
-`build/run/test --opt=basic`으로 정수·Bool 계산과 제한된 leaf 함수를 최적화한다.
-기본값은 `off`이며 `--opt-report`는 `basic`의 영역·분리 이유·변환 횟수를 stderr에
-출력한다. 상세 범위는 [Native 기본 최적화](optimization.md)를 참고한다.
-
-`#scope[jit]`는 작은 정수·Bool 영역을 runtime에 컴파일하는 실험적 기능이다. `--jit=off`로 같은 IR의
-AOT와 비교하고 `--jit-report`로 compile·cache 통계를 본다. [Runtime JIT](jit.md)를 참고한다.
+`#scope[opt]` 안에서 정수·Bool 계산과 제한된 leaf 호출, 루프 불변식을 AOT로
+최적화한다. `build/run/test`의 기본값은 `basic`이며 `--opt=off`로 끈다.
+`--opt-report`로 영역·분리 이유·변환 횟수를 확인한다. 스코프 밖 코드는 보존한다.
+상세 범위는 [스코프 AOT 최적화](optimization.md)를 참고한다.

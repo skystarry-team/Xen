@@ -34,7 +34,7 @@ class Arm64Tests(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(self.root / "no-tools"))
         self.env.pop("XEN_STDLIB_ROOT", None)
 
-    def compile(self, text, target="aarch64-linux", opt="off", flags=("--jit=off",)):
+    def compile(self, text, target="aarch64-linux", opt="off", flags=()):
         self.source.write_text(text)
         output = self.root / target
         result = subprocess.run([str(XEN), "build", str(self.source),
@@ -537,14 +537,14 @@ fn main(){
                 self.differential('fn main(){'+body+'}', '', status=1, error=message)
 
     def test_arm64_target_defaults_and_option_order(self):
-        for flags in ((), ('--opt=basic',), ('--jit=off',)):
+        for flags in ((), ('--opt=basic',), ('--opt=off',)):
             built, output = self.compile('fn main(){println([1,2]);}', flags=flags)
             self.assertEqual(built.returncode, 0, built.stderr)
             self.assertEqual(self.execute(output).stdout, '[1, 2]\n')
         for flags in (('--jit-report',), ('--jit=on',), ('--jit=on','--target=arm64-linux')):
             built, _ = self.compile('fn main(){}', flags=flags)
-            self.assertEqual(built.returncode, 1, built.stderr)
-            self.assertIn('JIT is not implemented', built.stderr)
+            self.assertEqual(built.returncode, 2, built.stderr)
+            self.assertIn('Usage:', built.stderr)
 
     def assert_balanced_heap(self, trace, *, allow_failed=False):
         # Track addresses AND requested lengths. Counts alone hide double frees,
@@ -733,7 +733,7 @@ fn main(){let mut list=List.Empty;let mut n=0;
         for command in ("run", "test"):
             with self.subTest(command=command):
                 result = subprocess.run([str(XEN), command, str(self.source),
-                                         "--target=aarch64-linux", "--jit=off"],
+                                         "--target=aarch64-linux"],
                                         capture_output=True, text=True, timeout=20)
                 if result.returncode == 0:
                     self.assertIn("42\n" if command == "run" else "1 passed; 0 failed", result.stdout)
@@ -1012,19 +1012,17 @@ fn main(){let mut h=Holder{file:open_read("/dev/null")};let mut i=0;
         self.differential('fn recurse(n:I64)->I64{return recurse(n+1);}fn main(){println(recurse(0));}',
                           "", status=1, error="maximum call depth")
 
-    def test_unsupported_features_do_not_overwrite_output(self):
+    def test_removed_flags_do_not_overwrite_output(self):
         for text, message, flags in [
-            ("fn main(){}", "JIT is not implemented", ("--jit=on",)),
-            ("fn main(){}", "JIT is not implemented", ("--jit=on", "--jit-report")),
+            ("fn main(){}", "Usage:", ("--jit=on",)),
+            ("fn main(){}", "Usage:", ("--jit=on", "--jit-report")),
         ]:
             with self.subTest(text=text):
                 output = self.root / "aarch64-linux"
                 output.write_bytes(b"preserve me")
                 compiled, output = self.compile(text, flags=flags)
-                self.assertEqual(compiled.returncode, 1, compiled.stderr)
+                self.assertEqual(compiled.returncode, 2, compiled.stderr)
                 self.assertIn(message, compiled.stderr)
-                if "JIT" not in message:
-                    self.assertIn(": error:", compiled.stderr.replace("native backend error:", "error:"))
                 self.assertEqual(output.read_bytes(), b"preserve me")
 
     def test_numeric_file_readers_and_ownership(self):

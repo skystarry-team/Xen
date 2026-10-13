@@ -10,8 +10,11 @@ type counts = { mutable constants:int; mutable copies:int; mutable common:int;
                 mutable dead:int; mutable fused:int }
 type region = { function_name:string; block:int; scope:int; span:span;
                 inputs:(local_id * typ) list; outputs:(local_id * typ) list;
-                split_reason:string; counts:counts }
-type report = { regions:region list; fusion:counts }
+                split_reason:string; counts:counts; alias:string;
+                prefix:Semantic_prefix_cache.receipt }
+type prefix_trace = { alias:string; kind:string; receipt:Semantic_prefix_cache.receipt }
+type report = { regions:region list; fusion:counts; loops:Semantic_loop_opt.report list;
+                loop_fusion:Semantic_loop_fusion.report list; prefixes:prefix_trace list }
 let counts () = {constants=0;copies=0;common=0;dead=0;fused=0}
 let scalar t = Type_desc.is_integer t || t=Bool
 let safe_rvalue = function
@@ -57,7 +60,7 @@ let candidate (f:func) =
   List.for_all(fun (op:operation)->op.scope=0 && safe_node op.node)f.blocks.(0).operations &&
   (match f.blocks.(0).terminator with Return(Some _)->true|_->false) &&
   List.length(List.filter(fun (op:operation)->match op.node with Eval _|Acquire _|Initialize _->true|_->false)f.blocks.(0).operations)<=32
-let fuse program stats =
+let fuse ?(scope_only=true) program stats =
   let targets=Hashtbl.create 16 in
   List.iter(fun(f:func)->if candidate f then Hashtbl.add targets f.name f)program.functions;
   let functions=List.map(fun(f:func)->
@@ -72,12 +75,13 @@ let fuse program stats =
     let initial_end=slot_end 8 f.locals in
     let added_ops=ref 0 and stack_end=ref initial_end in
     let blocks=Array.map(fun(b:block)->let operations=List.concat_map(fun (op:operation)->match op.node with
-      |Eval(destination,Call(name,args)) when Hashtbl.mem targets name->
+      |Eval(destination,Call(name,args)) when Hashtbl.mem targets name &&
+        (not scope_only || List.mem Opt f.scopes.(op.scope).mode_set)->
         let callee=Hashtbl.find targets name in
         let body=callee.blocks.(0) in
         let cost=List.length body.operations+2*List.length args+4-1 in
         let next_end=slot_end !stack_end callee.locals in
-        if callee.id=f.id || callee.mode_set<>f.scopes.(op.scope).mode_set ||
+        if callee.id=f.id || capability_modes callee.mode_set<>capability_modes f.scopes.(op.scope).mode_set ||
            !added_ops+cost>256 || next_end-initial_end>256 then [op] else begin
           added_ops:= !added_ops+cost;stack_end:=next_end;stats.fused<-stats.fused+1;
           let base= !local_count and scope= !scope_count in
@@ -91,7 +95,7 @@ let fuse program stats =
             |Initialize(p,v)->Initialize(place p,value v)|Drop p->Drop(place p)|_->assert false in
           let new_locals=Array.to_list(Array.map(fun(l:local)->{l with id=base+l.id;scope;parameter=None})callee.locals) in
           locals:= !locals @ new_locals;
-          scopes:= !scopes @ [{callee.scopes.(0) with id=scope;parent=Some op.scope;
+          scopes:= !scopes @ [{callee.scopes.(0) with id=scope;parent=Some op.scope;mode_set=f.scopes.(op.scope).mode_set;
                               declarations=List.map(fun(l:local)->l.id)new_locals}];
           let at node={op with node} in
           let inside node={op with scope;node} in
@@ -139,24 +143,7 @@ let calculation_chunks (f:func) =
         chunks:={start=index;stop=index+1;scope=op.scope;operations=[op];reason;calculation=false}::!chunks
       end)b.operations;
     flush(List.length b.operations) "CFG/terminator";List.rev !chunks)f.blocks
-let optimize_function (f:func) =
-  let next=ref 0 in
-  let partitions=Array.map(List.map(fun chunk->
-    let id=if chunk.calculation then(let id= !next in incr next;Some id)else None in
-    id,chunk.operations,chunk.reason))(calculation_chunks f)in
-  let outside=Array.make !next I.empty in
-  let use_regions=Array.make(Array.length f.locals)I.empty and fixed=ref I.empty in
-  Array.iteri(fun bid chunks->fixed:=add(terminator_uses f.blocks.(bid).terminator)!fixed;
-    List.iter(fun(id,ops,_)->List.iter(fun (op:operation)->List.iter(fun local->match id with
-      None->fixed:=I.add local !fixed|Some region->use_regions.(local)<-I.add region use_regions.(local))
-      (scalar_uses op))ops)chunks)partitions;
-  Array.iter(fun chunks->List.iter(fun(region,ops,_)->match region with None->()|Some region->
-    List.iter(fun op->List.iter(fun id->
-      if I.mem id !fixed || I.exists(fun other->other<>region)use_regions.(id)
-      then outside.(region)<-I.add id outside.(region))(defines op))ops)chunks)partitions;
-  let reports=ref [] in
-  let blocks=Array.mapi(fun bid chunks->let operations=List.concat_map(fun(id,ops,reason)->match id with None->ops|Some id->
-    let stats=counts() in
+let forward_operations stats ops =
     (* Sparse per-region facts: bookkeeping in unrelated regions must not
        make a function with many effect boundaries quadratic in its locals. *)
     let versions=Hashtbl.create 16 in
@@ -205,6 +192,63 @@ let optimize_function (f:func) =
         |Initialize(p,_)->record p.root alias
         |_->());
       {op with node})ops in
+    forward
+
+let optimize_function ?cache ?(trace=fun(_ : prefix_trace)->()) ?(context="") ?(scope_only=true) (f:func) =
+  let next=ref 0 in
+  let partitions=Array.map(List.map(fun chunk->
+    let id=if chunk.calculation && (not scope_only || List.mem Opt f.scopes.(chunk.scope).mode_set)
+      then(let id= !next in incr next;Some id)else None in
+    id,chunk.operations,chunk.reason))(calculation_chunks f)in
+  let outside=Array.make !next I.empty in
+  let use_regions=Array.make(Array.length f.locals)I.empty and fixed=ref I.empty in
+  Array.iteri(fun bid chunks->fixed:=add(terminator_uses f.blocks.(bid).terminator)!fixed;
+    List.iter(fun(id,ops,_)->List.iter(fun (op:operation)->List.iter(fun local->match id with
+      None->fixed:=I.add local !fixed|Some region->use_regions.(local)<-I.add region use_regions.(local))
+      (scalar_uses op))ops)chunks)partitions;
+  Array.iter(fun chunks->List.iter(fun(region,ops,_)->match region with None->()|Some region->
+    List.iter(fun op->List.iter(fun id->
+      if I.mem id !fixed || I.exists(fun other->other<>region)use_regions.(id)
+      then outside.(region)<-I.add id outside.(region))(defines op))ops)chunks)partitions;
+  let prepared=Array.make !next None in
+  if !next>0 then begin
+    let cache=match cache with Some c->c|None->Semantic_prefix_cache.create()in
+    let input=Semantic_prefix_cache.serialize(cache.identity,scope_only,context,f.id,f.name,f.params,
+      f.return_type,f.entry,f.locals,f.scopes,
+      Array.map(fun(b:block)->b.id,b.scope,b.terminator)f.blocks)in
+    let _,root=Semantic_prefix_cache.advance cache ~alias:(f.name^"/context") ~parent:"root" ~input
+      ~accept:((=)"") ~compute:(fun()->"")in
+    trace{alias=f.name^"/context";kind="context";receipt=root};
+    let parent=ref root.id and reusable=ref root.hit and ordinals=Hashtbl.create 16 in
+    List.iter(fun bid->
+      List.iter(fun(region,ops,reason)->
+        let scope=(List.hd ops:operation).scope in
+        let ordinal=Option.value ~default:0(Hashtbl.find_opt ordinals scope)in
+        Hashtbl.replace ordinals scope(ordinal+1);
+        let alias=Semantic_opt_graph.scope_alias f scope^"/r"^string_of_int ordinal in
+        let input=Semantic_prefix_cache.serialize(ops,reason,Option.is_some region)in
+        let accept output=match region with None->output=""|Some _->
+          Option.is_some(Semantic_scalar_codec.decode f ops output)in
+        let compute()=match region with None->""|Some _->let stats=counts()in
+          let forward=forward_operations stats ops in
+          Semantic_scalar_codec.encode forward(stats.constants,stats.copies,stats.common)in
+        let output,receipt=Semantic_prefix_cache.advance ~reuse:!reusable cache ~alias ~parent:!parent ~input ~accept ~compute in
+        trace{alias;kind=(if Option.is_some region then "calculation" else "boundary");receipt};
+        parent:=receipt.id;reusable:= !reusable && receipt.hit;
+        Option.iter(fun id->match Semantic_scalar_codec.decode f ops output with
+          | Some(forward,(constants,copies,common))->
+              prepared.(id)<-Some(forward,{constants;copies;common;dead=0;fused=0},receipt,alias)
+          | None->assert false)region)partitions.(bid);
+      let alias=f.name^"/edge/"^string_of_int bid in
+      let input=Semantic_prefix_cache.serialize f.blocks.(bid).terminator in
+      let _,receipt=Semantic_prefix_cache.advance ~reuse:!reusable cache ~alias ~parent:!parent ~input
+        ~accept:((=)"") ~compute:(fun()->"")in
+      trace{alias;kind="edge";receipt};parent:=receipt.id;reusable:= !reusable && receipt.hit
+    )(Semantic_opt_graph.block_order f)
+  end;
+  let reports=ref [] in
+  let blocks=Array.mapi(fun bid chunks->let operations=List.concat_map(fun(id,ops,reason)->match id with None->ops|Some id->
+    let forward,stats,prefix,alias=Option.get prepared.(id) in
     let live=ref outside.(id) in
     let result=List.fold_right(fun op kept->
       let removable=match op.node with Eval(v,_)|Acquire(v,_,_)->f.locals.(v.id).temporary && not(I.mem v.id !live)
@@ -217,24 +261,54 @@ let optimize_function (f:func) =
       |Storage_live id|Storage_dead id->defined:=I.remove id !defined
       |_->defined:=add(defines op)!defined)result;
     let typed set=I.elements set |> List.map(fun id->id,f.locals.(id).typ)in
-    let first=List.hd ops in
+    let first:operation=List.hd ops in
     reports:={function_name=f.name;block=bid;scope=first.scope;span=first.span;inputs=typed !inputs;
-      outputs=typed(I.inter !defined outside.(id));split_reason=reason;counts=stats}::!reports;
+      outputs=typed(I.inter !defined outside.(id));split_reason=reason;counts=stats;alias;prefix}::!reports;
     result)chunks in {f.blocks.(bid) with operations})partitions in
   {f with blocks},List.rev !reports
 
-let optimize checked =
+let dependencies (p:program) (f:func) =
+  let names=Hashtbl.create 16 in
+  let rec visit (f:func)=Array.iter(fun(b:block)->List.iter(fun(op:operation)->match op.node with
+    | Eval(_,Call(name,_))|Eval(_,Function_address name)->add name
+    | Eval(_,Indirect_call _)->List.iter(fun(f:func)->add f.name)p.functions
+    | _->())b.operations)f.blocks
+  and add name=if not(Hashtbl.mem names name)then begin Hashtbl.add names name();
+    Option.iter visit(List.find_opt(fun(f:func)->f.name=name)p.functions)end in
+  visit f;List.filter(fun(f:func)->Hashtbl.mem names f.name)p.functions
+let optimize ?cache ?(scope_only=true) ?(loops=true) ?(loop_fusion=true) checked =
+  let cache=Some(match cache with Some c->c|None->
+    Semantic_prefix_cache.create ~identity:"xen-opt-prefix-1:ephemeral"())in
+  try
+  let prefixes=ref [] in
   let stats=counts() in
-  let p=fuse(program checked)stats in
-  let results=List.map optimize_function p.functions in
+  let original=program checked in
+  let p=fuse ~scope_only original stats in
+  let fusion_results=List.map(fun f->if loop_fusion then Semantic_loop_fusion.optimize_function ~safe_node f else f,[])p.functions in
+  let loop_results=List.map(fun(f,_)->if loops then Semantic_loop_opt.optimize_function ~safe_node f else f,[])fusion_results in
+  let results=List.map(fun(f,_)->
+    if scope_only && not(Array.exists(fun(s:scope)->List.mem Opt s.mode_set)f.scopes)then f,[]else
+      let source=List.find(fun(old:func)->old.id=f.id)original.functions in
+      let context=Semantic_prefix_cache.serialize(loops,loop_fusion,original.layouts,original.enums,dependencies original source)in
+      optimize_function ?cache ~trace:(fun trace->prefixes:=trace::!prefixes) ~context ~scope_only f)loop_results in
   let p={p with functions=List.map fst results}in
   let checked=Semantic_analysis.revalidate p in
-  checked,{regions=List.concat_map snd results;fusion=stats}
+  Option.iter Semantic_prefix_cache.commit cache;
+  checked,{regions=List.concat_map snd results;fusion=stats;loops=List.concat_map snd loop_results;
+    loop_fusion=List.concat_map snd fusion_results;prefixes=List.rev !prefixes}
+  with exn->Option.iter Semantic_prefix_cache.abort cache;raise exn
 let print_report report =
   Printf.eprintf "opt basic: fused=%d regions=%d\n" report.fusion.fused(List.length report.regions);
+  List.iter(fun(r:Semantic_loop_fusion.report)->Printf.eprintf
+    "opt loop-fusion %s alias=%s b%d+b%d %s reason=%s\n" r.function_name r.alias r.left r.right
+    (if r.fused then "fused" else "split")r.reason)report.loop_fusion;
+  List.iter(fun(r:Semantic_loop_opt.report)->Printf.eprintf "opt loop %s b%d s%d %s:%d:%d hoisted=%d arithmetic=%d\n"
+    r.function_name r.header r.scope r.span.file r.span.line r.span.column r.hoisted r.arithmetic)report.loops;
   let values xs=String.concat ","(List.map(fun(id,t)->Printf.sprintf "l%d:%s"id(string_of_typ t))xs)in
-  List.iter(fun r->Printf.eprintf "opt region %s b%d s%d %s:%d:%d inputs=[%s] outputs=[%s] split=%s constants=%d copies=%d common=%d dead=%d\n"
-    r.function_name r.block r.scope r.span.file r.span.line r.span.column(values r.inputs)(values r.outputs)
-    r.split_reason r.counts.constants r.counts.copies r.counts.common r.counts.dead)report.regions
-let apply ?(report=false) level checked = match level with Off->checked|Basic->
-  let checked,summary=optimize checked in if report then print_report summary;checked
+  List.iter(fun r->Printf.eprintf "opt region %s b%d s%d alias=%s %s:%d:%d inputs=[%s] outputs=[%s] split=%s constants=%d copies=%d common=%d dead=%d\n"
+    r.function_name r.block r.scope r.alias r.span.file r.span.line r.span.column(values r.inputs)(values r.outputs)
+    r.split_reason r.counts.constants r.counts.copies r.counts.common r.counts.dead)report.regions;
+  List.iter(fun(r:prefix_trace)->Printf.eprintf "opt prefix alias=%s kind=%s key=%s parent=%s cache=%s reason=%s\n"
+    r.alias r.kind r.receipt.id r.receipt.parent (if r.receipt.hit then "hit" else "miss")r.receipt.reason)report.prefixes
+let apply ?cache ?(report=false) ?(loops=true) level checked = match level with Off->checked|Basic->
+  let checked,summary=optimize ?cache ~loops checked in if report then print_report summary;checked

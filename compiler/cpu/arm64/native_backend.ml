@@ -599,9 +599,8 @@ let emit_equal_helper m program helpers pending typ =
   M.load m 2 31 16;M.offset m 2 2 (-1);M.store m 2 31 16;M.branch m loop;
   M.label m equal;M.int m 0 1;M.branch m return;M.label m unequal;M.int m 0 0;
   M.label m return;M.load m 30 31 40;M.offset m 31 31 48;M.ret m
-let generate ?(jit=true) ?(jit_report=false) checked =
+let generate checked =
   try
-    if jit || jit_report then unsupported "JIT is not implemented; use --jit=off without --jit-report";
     let program=Semantic_ir.program checked in Semantic_ir.verify program;
     List.iter(fun(f:func)->validate_type program f.span f.return_type;
       Array.iter(fun(l:local)->validate_type program l.span l.typ)f.locals)program.functions;

@@ -60,15 +60,14 @@ class ToolchainTests(unittest.TestCase):
     def test_explicit_target_preserves_output_and_run_arguments(self):
         source = self.source('fn main(){println(arg_count());println(arg(0));}')
         for opt in ("off", "basic"):
-            for jit in ("off", "on"):
-                with self.subTest(opt=opt, jit=jit):
-                    default = self.cwd / "default"
-                    explicit = self.cwd / "explicit"
-                    flags = [f"--opt={opt}", f"--jit={jit}"]
-                    self.success(self.invoke("build", source, *flags, "-o", default))
-                    self.success(self.invoke("build", "--target=x86_64-linux", source,
-                                             *flags, "-o", explicit))
-                    self.assertEqual(default.read_bytes(), explicit.read_bytes())
+            with self.subTest(opt=opt):
+                default = self.cwd / "default"
+                explicit = self.cwd / "explicit"
+                flags = [f"--opt={opt}"]
+                self.success(self.invoke("build", source, *flags, "-o", default))
+                self.success(self.invoke("build", "--target=x86_64-linux", source,
+                                         *flags, "-o", explicit))
+                self.assertEqual(default.read_bytes(), explicit.read_bytes())
         self.success(self.invoke("run", source, "--target", "x86_64-linux",
                                  "--", "--target=aarch64-linux"),
                      "1\n--target=aarch64-linux\n")
@@ -102,7 +101,7 @@ class ToolchainTests(unittest.TestCase):
             result = self.invoke("build", "missing.xen", f"--target={target}")
             self.assertEqual(result.returncode, 1)
             self.assertIn(message, result.stderr)
-        for flags in (("--target",), ("--target=",), ("--target", "--jit=off")):
+        for flags in (("--target",), ("--target=",), ("--target", "--opt=off")):
             result = self.invoke("build", "missing.xen", *flags)
             self.assertEqual(result.returncode, 2)
             self.assertIn("Usage:", result.stderr)

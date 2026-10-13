@@ -7,7 +7,7 @@ type typ =
   | Bool | String | File | Box of typ | Vec of typ | Slice of typ | Ptr of typ | Ref of bool * typ
   | Named of string | Type_var of string | Apply of string * typ list | Tuple of typ list | Unit
   | Function of typ list * typ
-type mode = Explc | Jit | Bb
+type mode = Explc | Opt | Bb
 type intrinsic = Size_of | Align_of | Exchange
 
 type expr = { node : expr_node; span : span }
@@ -103,4 +103,6 @@ let rec string_of_typ = function
   | Tuple xs -> "(" ^ String.concat ", " (List.map string_of_typ xs) ^ ")"
   | Function (params,result) ->
       "fn(" ^ String.concat ", " (List.map string_of_typ params) ^ ") -> " ^ string_of_typ result
-let string_of_mode = function Explc -> "explc" | Jit -> "jit" | Bb -> "bb"
+let string_of_mode = function Explc -> "explc" | Opt -> "opt" | Bb -> "bb"
+(* Optimization hints do not grant language capabilities. *)
+let capability_modes modes = List.filter (fun mode -> mode <> Opt) modes

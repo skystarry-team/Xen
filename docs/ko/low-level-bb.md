@@ -23,9 +23,9 @@ fn main() {
 
 파일 첫 선언에 `#global[...]`을 한 번 둘 수 있고, 함수의 `#![...]` 및 block의
 `#scope[...] { ... }`로 capability를 추가한다. 함수 몸체의 유효 capability는 그
-파일의 global, 함수, enclosing scope의 합집합이며 `explc`, `jit`, `bb` 순서로
+파일의 global, 함수, enclosing scope의 합집합이며 `explc`, `opt`, `bb` 순서로
 정규화된다. import한 module의 global/function capability는 caller에 합쳐지지 않는다.
-`#scope[jit]`는 별도의 실험적 [scalar runtime compiler](jit.md)다. Global·function jit는 예약 상태다.
+`#scope[opt]`는 [AOT 최적화](optimization.md) 힌트이며 메모리·참조 capability를 추가하지 않는다.
 
 `#scope[bb]`는 일반 lexical block에 capability만 더한다. scope의 local과 capability는 밖으로 유출되지 않지만 바깥 owned value의 move/재초기화 상태는 이후 흐름에 반영된다.
 

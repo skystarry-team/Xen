@@ -1,0 +1,24 @@
+// Independent loops with equal bounds fuse inside this scope.
+fn calculate(n: Int) -> Int {
+    let mut i = 0;
+    let mut j = 0;
+    let mut squares = 0;
+    let mut doubles = 0;
+    #scope[opt] {
+        while i < n {
+            squares = squares + i * i;
+            i = i + 1;
+        }
+        while j < n {
+            doubles = doubles + j + j;
+            j = j + 1;
+        }
+    }
+    // Both induction variables retain their original final values.
+    return squares + doubles + i + j;
+}
+fn main() {
+    println(calculate(0));
+    println(calculate(3));
+    println(calculate(257));
+}
