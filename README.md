@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/status-demo-orange" alt="Status: demo">
-  <img src="https://img.shields.io/badge/target-Linux%20x86--64-blue" alt="Target: Linux x86-64">
+  <img src="https://img.shields.io/badge/target-Linux%20x86--64/aarch64-blue" alt="Target: Linux x86-64">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-see%20scope-lightgrey" alt="Licenses: see scope"></a>
 </p>
 
