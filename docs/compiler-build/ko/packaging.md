@@ -49,7 +49,7 @@ AArch64 호스트에서는 `x86_64` 항목을 설정합니다. prefix는 실행 
 
 ```sh
 make package
-make package VERSION=0.1.0
+make package VERSION=0.1.0_1-demo
 make package-build
 make package PACKAGE_ARCHS=x86_64
 make package PACKAGE_ARCHS=aarch64
@@ -79,7 +79,7 @@ make package-one PACKAGE_BINARY=/path/to/xen
 ## 소스 배포
 
 ```sh
-make source-package VERSION=0.1.0
+make source-package VERSION=0.1.0_1-demo
 ```
 
 `xen-<version>-source.tar.gz`에는 컴파일러·stdlib 소스, 빌드 파일, 스크립트, 테스트,

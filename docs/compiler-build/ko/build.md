@@ -91,7 +91,7 @@ CLI 기본 타깃은 컴파일러의 OCaml 빌드 아키텍처를 따릅니다.
 기본 버전은 `VERSION` 파일에서 읽습니다. Make에 버전을 지정하면 실행 파일에 포함됩니다.
 
 ```sh
-make build VERSION=0.1.0
+make build VERSION=0.1.0_1-demo
 compiler/dist/xen version
 ```
 

@@ -54,7 +54,7 @@ without promoting over `compiler/dist/xen`.
 
 ```sh
 make package
-make package VERSION=0.1.0
+make package VERSION=0.1.0_1-demo
 make package-build
 make package PACKAGE_ARCHS=x86_64
 make package PACKAGE_ARCHS=aarch64
@@ -84,7 +84,7 @@ or output file in single mode. `DIST_DIR` selects the archive directory in eithe
 ## Source distribution
 
 ```sh
-make source-package VERSION=0.1.0
+make source-package VERSION=0.1.0_1-demo
 ```
 
 This exports `xen-<version>-source.tar.gz` with compiler and standard library

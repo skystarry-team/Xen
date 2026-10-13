@@ -27,6 +27,17 @@ build architecture. An initial
 with `--target=aarch64-linux`. [Scoped AOT optimization](docs/en/optimization.md)
 applies only inside explicit `#scope[opt]` blocks.
 
+> [!Warning]
+> **Linux AArch64 — Experimental**
+>
+> Status: Pending Native Hardware Validation
+>
+> The Linux AArch64 backend has been implemented and tested in an emulated environment. Validation on physical ARM64 hardware has not yet been completed.
+>
+> The backend is currently considered experimental. Compatibility, runtime behavior, and performance on native AArch64 systems are not guaranteed.
+>
+> Hardware validation reports and community contributions are welcome.
+
 ## A small example
 
 ```xen

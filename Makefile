@@ -78,7 +78,7 @@ help:
 	  'make clean    Remove Dune and package build artifacts.' \
 	  '' \
 	  'Override VERSION to choose the package version, for example:' \
-	  '  make package VERSION=0.1.0' \
+	  '  make package VERSION=0.1.0_1-demo' \
 	  'Configure cross prefixes and runners in .package-toolchains.json.' \
 	  'See docs/compiler-build/README.md for compiler and toolchain setup.' \
 	  'PACKAGE_TOOLCHAINS selects another configuration file.' \

@@ -92,7 +92,7 @@ both Linux targets use scoped AOT optimization.
 `VERSION` declares the default compiler version. Make embeds a supplied override:
 
 ```sh
-make build VERSION=0.1.0
+make build VERSION=0.1.0_1-demo
 compiler/dist/xen version
 ```
 
