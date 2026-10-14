@@ -104,7 +104,7 @@ class StdlibTests(unittest.TestCase):
         self.assertEqual(self.run_source(source, memory_limit=32 * 1024 * 1024), b"")
 
     def test_key_values_cli(self):
-        example = REPO / "examples/key_values.xen"
+        example = REPO / "tests/fixtures/language/key_values.xen"
         executable = self.root / "key-values"
         self.build_source(example, executable)
         def run(data=b"", arguments=()):

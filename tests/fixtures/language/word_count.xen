@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module word_count;
+use std.convert;
+use std.env;
+use std.fs;
+use std.io;
+use std.string;
+
+fn fail_io(error: std.io.IoError) -> Int {
+    assert_msg(false, std.io.describe_error(error));
+    return 0;
+}
+
+fn main() {
+    let arguments = std.env.args();
+    if arguments.len() != 1 {
+        panic("usage: word_count <path>");
+    }
+    let loaded = std.fs.read(arguments.get(0));
+    let contents = match loaded {
+        Result.Ok(contents) => contents,
+        Result.Err(error) => {
+            fail_io(error);
+            ""
+        },
+    };
+    let count = std.string.split_ascii_whitespace(contents).len();
+    let output = std.convert.format_int(count) + "\n";
+    let written = std.io.write_stdout(output);
+    match written {
+        Result.Ok(_) => 0,
+        Result.Err(error) => fail_io(error),
+    };
+}

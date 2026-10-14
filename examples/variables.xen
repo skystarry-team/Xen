@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+fn main() {
+    let price: Int = 12;
+    let mut quantity = 2;
+    quantity = quantity + 1;
+    let total = price * quantity;
+    println(total);
+    println(float(total) / 2.0);
+}

@@ -1,119 +1,57 @@
-# Command-line reference
+# Command-line tools
 
-The Xen command-line interface has five subcommands:
+Commands assume `xen` is on `PATH`. From a distribution directory, substitute `./bin/xen`; from the repository, use `compiler/dist/xen`.
 
-```text
-xen version
-xen --version
-xen check <file.xen> [--target=<architecture>-<os>]
-xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>]
-xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>] [-- program-args...]
-xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>]
+| Command | Purpose |
+| --- | --- |
+| `xen version` or `xen --version` | Show the installed version |
+| `xen check file.xen` | Find errors before execution |
+| `xen run file.xen` | Run immediately |
+| `xen build file.xen -o app` | Make a standalone executable |
+| `xen test [file.xen or directory or std.module]` | Run tests |
+
+Successful `check` and `build` commands produce no output. Without `-o`, `build` writes `a.out` in the working directory. An existing output file is overwritten. `run` uses the current working directory and standard input/output, removing its temporary executable when the program exits.
+
+## Program arguments
+
+```sh
+xen run word_count.xen -- input.txt
+xen build word_count.xen -o word-count
+./word-count input.txt
 ```
 
-## `version`
+Before `--` are Xen options; after it are your program's arguments. Read them with `std.env.args()` or `arg_count()` and `arg(index)`. The first argument has index 0; the executable name is excluded. An invalid `arg` index is a runtime error.
 
-`xen version` and `xen --version` print `xen <version>` to stdout and exit 0.
-They do not load source or the standard library. Version selection when building
-the compiler is documented in the [compiler build guide](../compiler-build/en/build.md#compiler-version).
+## Choose the execution environment
 
-## `check`
+The default target is your installed Xen compiler's Linux architecture. `check`, `build`, `run`, and `test` accept `--target=x86_64-linux` and `--target=aarch64-linux`. `arm64-linux` is an alias for the latter.
 
-`xen check file.xen` loads the entry file and its project imports, then checks syntax,
-types, ownership, references, and capabilities. It emits no output and exits 0 when the
-project is valid. Compiler diagnostics go to stderr and a failed check exits 1.
-It uses the selected target's platform stdlib profile; `--target` follows the same
-default and validation as build. It does not generate code or accept optimization flags.
-
-## `build`
-
-`xen build file.xen` writes `a.out` in the current directory. Use `-o path` to choose
-the output path; parent directories are created when needed. A successful build emits
-no output and exits 0. The result is a static non-PIE ELF executable for the
-selected Linux target.
-
-## `run`
-
-`xen run file.xen` compiles to a temporary executable, runs it with the current
-directory and standard input/output/error, and removes the temporary executable after
-the process exits. To pass arguments, put `--` after the source path:
-
-The program's exit status is propagated. A Xen runtime error writes to stderr and
-normally exits 1. Put compiler flags before `--`; the delimiter separates them from
-program arguments.
-
-This complete program prints the number and first value of its arguments:
-
-```xen
-fn main() {
-    println(arg_count());
-    println(arg(0));
-}
+```sh
+xen build hello.xen --target=aarch64-linux -o hello-arm64
 ```
 
-```console
-$ compiler/dist/xen run args.xen -- one two
-2
-one
-```
+Run the output on a compatible Linux machine. Selecting another CPU does not automatically make it executable on the current machine. AArch64 support is experimental and validation on physical devices is ongoing. macOS and Windows are unsupported.
 
-## `test`
+## Select tests
 
-`xen test` recursively discovers tests under the current directory. Give a source file,
-directory, or standard-library module as the target. `--filter substring` selects test
-display names containing a substring. See the [testing guide](testing.md) for output
-and discovery rules.
+`xen test` searches the current directory. Narrow names with `--filter text`. See [testing](testing.md).
 
-## Target selection
+## Optional build options
 
-`check`, `build`, `run`, and `test` accept `--target=x86_64-linux` or
-`--target x86_64-linux`, before or after the source/test path. The default follows
-the compiler's build architecture on Linux: x86-64 or AArch64. Explicit targets
-take precedence. `aarch64-linux` (alias `arm64-linux`) supports the core language,
-scalar F32/F64, heap Strings, recursive Box/Vec ownership and borrowed Slice.
-Both targets use AOT. ARM64 supports raw POD memory/syscalls, platform-dependent
-stdlib and checked numeric file readers.
-`x86_64-macos` and `aarch64-macos` (OS alias `darwin`) are recognized but unsupported;
-the CLI reports that macOS development is discontinued. There is no planned support.
-Windows targets remain unimplemented. These targets never select a Linux backend implicitly.
-Invalid or unavailable targets fail before source loading or output creation.
-All source loading uses the generation target, even when the compiler host differs.
+Normal programs can use the defaults. For blocks you explicitly mark as `#scope[opt] { ... }`, `build`, `run`, and `test` use `--opt=basic` by default. Disable it with `--opt=off`. Unmarked code is unaffected.
 
-`run`/`test` execute through the host kernel and require a compatible CPU/OS or
-a configured binary handler; selecting a target does not provide emulation.
-For cross execution: `xen build app.xen --target=aarch64-linux -o app`,
-then `qemu-aarch64 ./app`. Tokens after `run --` remain literal program arguments,
-including `--target=...`. See the [compiler architecture](../../compiler/README.md)
-for the ARM64 support matrix and the current 64-bit layout/stdlib constraints.
+`--opt-report` prints application information to stderr. `--opt-cache=directory` stores a build cache in that directory. Both require `basic` and are unavailable for `check`. These options are optional when learning and using the language.
 
-## Optimization
-
-`build`, `run`, and `test` accept `--opt=off|basic` (default `basic`, affecting only `#scope[opt]` blocks).
-`--opt-report` requires `basic` and writes region information and transformation
-counts to stderr. `check` always examines the original source. See the
-[basic optimization contract](optimization.md) for eligible operations and fusion limits.
-
-`#scope[opt]` enables scoped AOT optimization. Unmarked code is not optimized.
-`--opt=off` disables it, and `--opt-report` reports transformations in marked regions.
-Global optimization is not exposed by the CLI. The experimental runtime JIT,
-its `--jit` options and `jit` mode spelling have been removed.
-
-`--opt-cache=<directory>` (or `--opt-cache directory`) persists exact-prefix scalar
-forward rewrites between invocations. It requires `basic` and is accepted by
-`build`, `run` and `test`; `check` rejects it. Default builds create no disk cache.
-Source checking, backward liveness/DCE, loop planning, final IR validation and
-native code generation still run. `--opt-report` includes aliases, prefix parents,
-hit/miss status and invalidation reasons. See [optimization](optimization.md).
-
-## Exit statuses and usage
+## Exit status and help
 
 | Status | Meaning |
 | --- | --- |
-| `0` | Command succeeded |
-| `1` | Compile/runtime/test failure, discovery error, or no matching tests |
-| `2` | Invalid command-line usage |
+| `0` | Success |
+| `1` | Code, runtime, or test error, or no matching tests |
+| `2` | Invalid command usage |
 
-There is no separate `--help` option. Running `xen` without a valid
-command prints the usage text to stderr and exits 2. Module loading can also fail if
-the bundled standard library cannot be found. See [modules and structs](modules-and-structs.md)
-for `XEN_STDLIB_ROOT` behavior.
+`run` propagates the program's exit status. Panics and ordinary runtime errors usually exit 1. There is no separate `--help` option. Running `xen` without arguments prints usage to stderr and exits 2.
+
+---
+
+[Contents](README.md) · [Previous: Standard library](stdlib.md) · [Next: Syntax and common problems](reference.md) · [한국어](../ko/cli.md)

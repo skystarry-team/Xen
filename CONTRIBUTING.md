@@ -30,7 +30,7 @@ test. English and Korean documentation are maintained in `docs/en/` and
 | --- | --- |
 | `compiler/` | OCaml compiler, Semantic IR, optimizer and native encoder |
 | `stdlib/` | Xen standard library |
-| `examples/` | Runnable programs and intentional diagnostic examples |
+| `examples/` | User learning programs (regression inputs live in tests/fixtures/language/) |
 | `tests/` | OCaml regression/verifier tests |
 | `tests/integration/` | Python CLI, distribution, stdlib and scoped AOT tests |
 | `tests/property/` | Generated programs, independent oracles and metamorphic checks |

@@ -1,14 +1,12 @@
-# Xen documentation
+# Xen language documentation / Xen 사용자 문서
 
-Language references and compiler build instructions are organized separately.
+Learn Xen by writing programs. Choose a language:
 
-- [English documentation](en/README.md): the recommended learning path and complete
-  reference for the current compiler.
-- [한국어 문서](ko/README.md): 언어 사용법과 참조 문서.
-- [Compiler builds / 컴파일러 빌드](compiler-build/README.md): native builds,
-  OCaml cross toolchains and binary/source packaging.
-- [Contributor notes](ko/semantic-ir.md): Semantic IR implementation contract.
-- [Semantic IR validation notes](ko/semantic-testing.md): generator and metamorphic
-  validation design.
+- [한국어: 첫 프로그램부터 작은 도구 만들기까지](ko/README.md)
+- [English: from a first program to a small command-line tool](en/README.md)
+- [Runnable examples / 실행 가능한 예제](../examples/README.md)
 
-The English reference describes the demo's implemented behavior and support boundaries.
+Installation and compiler builds are documented separately in
+[compiler-build](compiler-build/README.md).
+
+*The documentation format is based on the [Python Tutorial](https://docs.python.org/3/tutorial/index.html), [The Rust Programming Language](https://doc.rust-lang.org/book/), and [Zig Language Reference](https://ziglang.org/documentation/0.16.0/).*

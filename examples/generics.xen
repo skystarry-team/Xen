@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+struct Pair<T> { first: T, second: T }
+
+fn identity<T>(value: T) -> T {
+    return value;
+}
+
+fn main() {
+    let pair = Pair<Int> { first: identity(7), second: 9 };
+    println(pair.first);
+    println(identity<String>("hello"));
+}

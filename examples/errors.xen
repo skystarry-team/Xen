@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+use std.convert as convert;
+
+fn double_number(text: String) -> Result<Int, convert.ParseIntError> {
+    let number = convert.parse_int(text)?;
+    return Result.Ok(number * 2);
+}
+
+fn main() {
+    println(match double_number("21") {
+        Result.Ok(number) => convert.format_int(number),
+        Result.Err(_) => "Please enter a decimal integer.",
+    });
+    println(match double_number("hello") {
+        Result.Ok(number) => convert.format_int(number),
+        Result.Err(_) => "Please enter a decimal integer.",
+    });
+}

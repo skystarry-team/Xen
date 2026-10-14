@@ -12,18 +12,17 @@ sizes and independent output equality. Times are observations, never regression
 pass criteria. The shared-region benchmark measures scaling around effect
 boundaries inside a marked scope.
 
-For loop-invariant work, build `examples/opt_loops.xen` in both modes and inspect
+For loop-invariant work, build `tests/fixtures/language/opt_loops.xen` in both modes and inspect
 `--opt-report` before comparing runtime. Measure short and long loops, zero-trip
 calls and changing inputs separately; scalar safety does not guarantee a speedup.
 The compiler uses AOT on both Linux targets and does not generate executable
 code at runtime.
 
-`examples/opt_fusion.xen` exercises independent counted-loop fusion. Inspect
+`tests/fixtures/language/opt_fusion.xen` exercises independent counted-loop fusion. Inspect
 `--opt-report` to confirm the pair was fused before measuring. Compare cold and
 warm `--opt-cache=<directory>` invocations separately: only scalar forward
 rewrites are cached, while source checking, loop planning, backward DCE and
 backend generation still run. A cache hit is not a compile-time speedup guarantee.
 
-[Historical JIT measurements](history/jit-investigation.md) are retained as the
-evidence behind the transition to scoped AOT. Those commands and defaults refer
-to the removed implementation.
+The historical JIT implementation is no longer available. Use the scoped AOT
+commands above for current measurements.

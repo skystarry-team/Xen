@@ -1484,11 +1484,11 @@ let test_structural_match_patterns () =
   let d=check_error("fn main(){let x=Option.Some(open_read(\"/dev/null\"));let f=match x{Option.Some(f)=>f,Option.None=>open_read(\"/dev/null\")};println(match x{Option.Some(_)=>1,Option.None=>0});}")in
   expect(contains d.message "moved") "move-only match did not consume its scrutinee"
 
-let examples_root () =
-  let candidates = ["examples"; Filename.concat ".." "examples"] in
+let language_fixtures_root () =
+  let candidates = ["fixtures/language"; "tests/fixtures/language"; "../tests/fixtures/language"] in
   match List.find_opt (fun root -> Sys.file_exists (Filename.concat root "native_core.xen")) candidates with
   | Some root -> root
-  | None -> fail "examples directory is not available to the test"
+  | None -> fail "language fixtures directory is not available to the test"
 
 let check_example path =
   let programs = Project_loader.load path in
@@ -1540,7 +1540,7 @@ let execute_example_to_stdout path arguments stdout_target =
     status, read_file stderr_path)
 
 let test_example_suite () =
-  let root = examples_root () in
+  let root = language_fixtures_root () in
   let runnable = [
     "native_core.xen", "10\n11\n13\n14\n-7\n";
     "basics.xen", "120\n2.5\n7\npositive\n";
@@ -1568,7 +1568,7 @@ let test_example_suite () =
       "File lifecycle example did not write the argument path")
 
 let test_error_examples () =
-  let root = Filename.concat (examples_root ()) "errors" in
+  let root = Filename.concat (language_fixtures_root ()) "errors" in
   let cases = [
     "non_exhaustive_match.xen", "non-exhaustive match";
     "unreachable_match.xen", "unreachable pattern";
@@ -1790,7 +1790,7 @@ let test_std_convert_and_sum_file () =
   let input=Filename.temp_file "xen-sum-file-" ".txt" in
   Fun.protect ~finally:(fun()->if Sys.file_exists input then Sys.remove input)(fun()->
     let write contents=let channel=open_out_bin input in output_string channel contents;close_out channel in
-    let sum_path=Filename.concat (examples_root ()) "sum_file.xen" in
+    let sum_path=Filename.concat (language_fixtures_root ()) "sum_file.xen" in
     write "  10\t-3\r\n+5  ";
     let status,out,err=execute_example sum_path [input] in
     if status<>0 || out<>"12\n" || err<>"" then
@@ -1828,7 +1828,7 @@ let test_std_fs_io_and_copy_file () =
   let bytes=Bytes.init 9001(fun i->Char.chr((i*37)land 255))|>Bytes.to_string in
   let write path contents=let channel=open_out_bin path in output_string channel contents;close_out channel in
   write source bytes;write destination "old trailing bytes";
-  let copy_path=Filename.concat(examples_root())"copy_file.xen" in
+  let copy_path=Filename.concat(language_fixtures_root())"copy_file.xen" in
   Fun.protect ~finally:(fun()->List.iter(fun p->if Sys.file_exists p then Sys.remove p)[source;destination]) (fun()->
     let status,out,err=execute_example copy_path [source;destination] in
     if status<>0||out<>"copied 9001 bytes\n"||err<>"" then
@@ -1874,7 +1874,7 @@ let test_std_fs_io_and_copy_file () =
 
 let test_word_count () =
   let input=Filename.temp_file "xen-word-count-" ".bin" in
-  let path=Filename.concat(examples_root())"word_count.xen" in
+  let path=Filename.concat(language_fixtures_root())"word_count.xen" in
   let write contents=let channel=open_out_bin input in output_string channel contents;close_out channel in
   Fun.protect ~finally:(fun()->if Sys.file_exists input then Sys.remove input)(fun()->
     write (" one\t"^String.make 1 '\000'^"two\nthree "^String.make 1 '\255');

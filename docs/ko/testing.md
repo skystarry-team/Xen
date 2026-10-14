@@ -1,67 +1,51 @@
-# xen test
+# 내 코드 테스트하기
 
-테스트는 기존 function 선언에 `test`를 붙인다. nongeneric, parameterless Unit 함수만
-허용하며 일반 함수 mode attribute도 앞에 둘 수 있다. `assert`, `assert_msg`, `panic`은
-기존 builtin을 그대로 사용한다.
+`test fn`으로 작은 동작을 확인하는 함수를 작성합니다. 테스트 함수는 인자가 없고 결과를 반환하지 않습니다. `main` 없이 테스트만 있는 파일은 `xen test`로 검사하고 실행합니다. 일반 `check`·`run`·`build` 명령을 사용하려면 `main`이 필요합니다. 다음을 `testing.xen`으로 저장하세요.
 
 ```xen
-test fn vec_push() {
-    let mut xs = [1, 2];
-    xs.push(3);
-    assert(xs.len() == 3);
+fn doubled(value: Int) -> Int {
+    return value * 2;
 }
 
-#![bb]
-test fn raw_storage() {
-    let p = raw_alloc<Int>(1);
-    raw_store(p, 0, 7);
-    assert(raw_load(p, 0) == 7);
-    raw_free(p);
+test fn doubles_a_number() {
+    assert(doubled(3) == 6);
+}
+
+test fn empty_vector() {
+    let values: Vec<Int> = [];
+    assert_msg(values.len() == 0, "an empty vector has no items");
 }
 ```
+
+```console
+$ xen test testing.xen
+PASS testing.doubles_a_number
+PASS testing.empty_vector
+2 passed; 0 failed
+```
+
+`assert`는 조건이 참인지 검사합니다. `assert_msg`는 실패했을 때 보여 줄 설명을 추가합니다. 첫 테스트의 기대값을 7로 바꾸고 실패가 표시되는지 확인해 보세요.
+
+## 테스트 선택하기
 
 ```sh
-xen test                       # 현재 directory를 project root로 검색
-xen test tests.xen              # 이 파일과 project dependency graph의 테스트
-xen test src                    # src를 하나의 project root로 재귀 검색
-xen test --filter vec           # 전체 표시 이름의 substring 필터
-xen test std.fs                 # toolchain loader를 통한 std.fs 자체 테스트
-xen test std.fs --filter null
+xen test testing.xen --filter doubles
+xen test .
+xen test std.string
 ```
 
-Discovery는 sorted `.xen` 파일과 loaded project module을 기준으로 하며 같은 source
-함수를 중복 실행하지 않는다. Directory 검색에서는 전체 directory를 source root로
-유지하므로 `lib/math.xen`의 `import common.model;`도 root의 `common/model.xen`을 읽는다.
-명시적 file 입력은 기존 build/run과 동일하게 그 파일의 directory를 root로 쓴다.
-Hidden directory, `_build`, `dist`, `stdlib`과 symlink directory/file은 재귀 검색하지
-않는다. Toolchain source는 project entry의 namespace 제한을 우회하지 않고 `std.fs`
-같은 module selector로 검사한다. App에 stdlib을 `use`했다고 stdlib 테스트를 함께
-실행하지 않는다. 현재 project model에는 manifest나 dependency package search가 없다.
-이미 존재하는 file/directory는 module selector보다 우선하므로 `std.xen`, `core.xen`,
-`std.tools/` 같은 project 경로도 사용할 수 있다. 선언의 예약 namespace 제한은 유지한다.
+파일, 디렉터리, 표준 라이브러리 모듈을 지정할 수 있습니다. 대상 없이 `xen test`를 실행하면 현재 디렉터리에서 찾습니다. `--filter`는 테스트 이름에 포함된 문자열로 선택합니다. 테스트가 없거나 필터와 맞는 이름이 없으면 실패합니다.
 
-각 테스트를 기존 checker·monomorphization·Semantic IR·의미 분석·cleanup·verifier·native
-backend로 compile하고 해당 Unit 함수를 entry로 갖는 독립 static ELF process에서 실행한다.
-`main` 선언은 필요 없고, 있더라도 test entry 대신 실행하지 않는다. Native encoder나
-ELF writer에는 별도 test backend를 추가하지 않았다.
+디렉터리를 지정하면 그 디렉터리를 기준으로 프로젝트 모듈을 찾습니다. 숨김 디렉터리와 `_build`, `dist`, `stdlib`, 심볼릭 링크는 자동 탐색에서 건너뜁니다. 디렉터리에 `stdlib`이 있어도 `xen test std.string`처럼 명시적으로 선택할 수 있습니다.
 
-```text
-PASS app.vec_push
-FAIL app.bad_case (exit 1)
-1 passed; 1 failed
-```
+## 실행 결과
 
-성공한 테스트의 stdout/stderr는 숨기며 실패한 테스트의 출력은 보존한다. stdin은
-`/dev/null`, 인자는 비어 있고 cwd와 환경은 runner에서 상속한다. Assertion/panic의
-기존 runtime 문자열과 함께 test 함수의 source 위치를 표시한다. Runtime이 제공하는
-연산 위치도 그대로 보존하고 compile 오류의 error/note/help를 기존 형식으로 출력한다.
-실패 뒤에도 나머지 테스트를 실행한다. Exit status는 전체 성공 0, 실패·compile/discovery
-오류·일치하는 테스트 없음 1, CLI 사용법 오류 2다.
+테스트는 이름 순으로 각각 실행되고, 하나가 실패해도 나머지를 계속합니다. 성공한 테스트의 출력은 숨기고 실패한 테스트의 출력은 보여 줍니다. 테스트 함수에서는 인자가 없고 표준 입력은 비어 있습니다. 작업 디렉터리와 환경은 명령을 실행한 곳을 따릅니다.
 
-선택된 테스트를 포함한 source graph 전체를 check하므로 filter가 다른 함수의 type
-오류를 감추지는 않는다. 첫 버전에는 fixture, mock, snapshot, async, plugin, timeout
-framework가 없다. 끝나지 않는 테스트는 현재 `xen run`처럼 직접 중단해야 한다.
+파일 입력이 필요한 테스트는 직접 임시 데이터를 준비해야 합니다. 현재 별도 fixture·mock·비동기 테스트 기능이나 자동 시간 제한은 없습니다. 끝나지 않는 테스트는 직접 중단해야 합니다.
 
-`make test`는 기존 compiler/native/property 검사 외에 loader·archive relocation,
-stdlib API와 test CLI 회귀를 포함한다. `tests/integration/test_workflow_test.py`는 no-main/필터/순서,
-실패 후 계속 실행, 진단, test signature/mode, recursive root와 stdlib selector를 검사한다.
+필터를 사용해도 같은 프로젝트 안의 다른 함수에 있는 타입 오류는 검사합니다. 모든 선택된 테스트가 통과하면 종료 상태는 0, 오류나 실패가 있으면 1입니다.
+
+---
+
+[목차](README.md) · [이전: 파일의 단어 수 세기](tutorial.md) · [다음: 표준 라이브러리 찾기](stdlib.md) · [English](../en/testing.md)

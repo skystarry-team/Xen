@@ -74,8 +74,8 @@ with tempfile.TemporaryDirectory(prefix='xen-opt-cli-') as directory:
     data = root / 'entries.txt'
     data.write_bytes(payload)
     for args in ([], ['--', data]):
-        a = command('run', ROOT / 'examples/key_values.xen', '--opt=off', *args, input=payload, cwd=root)
-        b = command('run', ROOT / 'examples/key_values.xen', '--opt=basic', *args, input=payload, cwd=root)
+        a = command('run', ROOT / 'tests/fixtures/language/key_values.xen', '--opt=off', *args, input=payload, cwd=root)
+        b = command('run', ROOT / 'tests/fixtures/language/key_values.xen', '--opt=basic', *args, input=payload, cwd=root)
         assert (a.returncode, a.stdout, a.stderr) == (b.returncode, b.stdout, b.stderr)
         assert a.returncode == 0 and a.stdout == b'alpha: one\nbeta: two\nempty: \n' and a.stderr == b''
 # A read-before-write program detects missing initial-state restoration.

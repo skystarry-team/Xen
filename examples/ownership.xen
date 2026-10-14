@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+fn append_copy(values: Vec<Int>) {
+    let mut copy = values;
+    copy.push(3);
+    println(copy);
+}
+
+#![explc]
+fn append_shared(values: &mut Vec<Int>) {
+    values.push(3);
+}
+
+#![explc]
+fn main() {
+    let mut values = [1, 2];
+    append_copy(values);
+    println(values);
+    append_shared(&mut values);
+    println(values);
+    let original = box(42);
+    let transferred = original;
+    println(transferred.into_inner());
+}

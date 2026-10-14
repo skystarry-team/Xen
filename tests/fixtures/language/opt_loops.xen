@@ -1,0 +1,21 @@
+// Run with: xen run tests/fixtures/language/opt_loops.xen --opt-report
+// Pure loop-invariant arithmetic is computed once per loop invocation.
+fn calculate(n: Int, scale: Int) -> Int {
+    let mut i = 0;
+    let mut total = 0;
+    #scope[opt] {
+        while i < n {
+            let weight = scale * scale + 3;
+            total = total + weight + i;
+            i = i + 1;
+        }
+    }
+    return total;
+}
+
+fn main() {
+    println(calculate(7, 3));
+    println(calculate(20000, 3));
+    println(calculate(20001, 5));
+    println(calculate(1, 9));
+}
