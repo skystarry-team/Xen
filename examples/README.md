@@ -1,86 +1,70 @@
-# Runnable example corpus
+# Learn Xen by running programs / 실행하며 배우는 Xen
 
-`arm64_collections.xen` exercises deep Vec clones, Slice views, consuming
-iteration and HashMap<Box<String>>. Run with `--target=aarch64-linux` on a
-compatible host, or build and execute explicitly under QEMU.
+Each program demonstrates one task from the [English guide](https://github.com/skystarry-team/Xen/blob/main/docs/en/README.md)
+or [한국어 문서](https://github.com/skystarry-team/Xen/blob/main/docs/ko/README.md).
+Start with `hello.xen` and continue through the table.
 
-The canonical learning examples and their expected output are embedded in the
-[English documentation](https://github.com/skystarry-team/Xen/blob/main/docs/en/README.md). The `.xen` files in this directory are
-additional runnable smoke and regression examples; documentation does not rely on
-these files for its source code.
+`hello.xen`부터 순서대로 실행하며 익힐 수 있습니다. 아래 명령은 저장소 또는
+배포본의 루트 디렉터리에서 실행합니다. `xen`을 PATH에 추가하거나, 배포본에서는
+`./bin/xen`, 저장소에서는 `compiler/dist/xen`으로 바꾸세요.
 
-Use `bin/xen` from a binary distribution or `compiler/dist/xen` from a source build.
-Place the executable's directory on `PATH` to use `xen` in these commands:
+Run these commands from the repository or distribution root. Put `xen` on PATH,
+or substitute `./bin/xen` for a distribution and `compiler/dist/xen` for a source checkout.
 
-```console
-$ xen check examples/basics.xen
-$ xen run examples/basics.xen
-120
-2.5
-7
-positive
+| File | Learn / 배울 내용 | Expected stdout / 예상 출력 (`\n` is a newline) |
+| --- | --- | --- |
+| `hello.xen` | First program / 첫 프로그램 | `Hello, Xen!\n` |
+| `variables.xen` | Names, changes, numbers / 변수와 숫자 | `36\n18.0\n` |
+| `control_flow.xen` | Functions and loops / 함수와 반복 | `20\nenough\n2\n1\n` |
+| `collections.xen` | Strings, vectors, views / 문자열과 컬렉션 | `green\n3\n[11, 20]\n20\n` |
+| `iterators.xen` | Transforming items / 항목 변환 | `4\n6\n` |
+| `types.xen` | Structs, enums, tuples / 구조체와 enum | `todo: read the guide\ndue in 2\nanswer: 42\n` |
+| `generics.xen` | Reuse with different types / 타입 재사용 | `7\nhello\n` |
+| `ownership.xen` | Copies, references, moves / 복사·참조·이동 | `[1, 2, 3]\n[1, 2]\n[1, 2, 3]\n42\n` |
+| `recursive_data.xen` | Connected values / 연결된 값 | `30\n` |
+| `errors.xen` | Handling failed input / 잘못된 입력 처리 | `42\nPlease enter a decimal integer.\n` |
+| `modules/app.xen` | Split a program across files / 파일 나누기 | `tea: 3\n` |
+| `hashmap.xen` | Lookup by key / 키로 값 찾기 | `3\n2\n` |
+| `word_count.xen` | Read a file / 파일 읽기 | `4\n` with the input below |
+| `stdin_words.xen` | Read a pipeline / 파이프 입력 읽기 | `one\ntwo\nthree\n` with the input below |
+| `testing.xen` | Test a function / 함수 테스트 | `2 passed; 0 failed` after two PASS lines |
+| `demo.xen` | Split and print words / 단어 나누기 | `Hello\nfrom\nXen\n` |
+| `arm64_core.xen` | A greeting / 인사말 | `Hello, Xen!\n` |
+
+For the ordinary programs, replace `hello` with a filename from the table:
+
+```sh
+xen check examples/hello.xen
+xen run examples/hello.xen
+xen build examples/hello.xen -o hello
+./hello
+xen run examples/modules/app.xen
 ```
 
-## Programs
+파일과 표준 입력 예제 / File and stdin examples:
 
-`arm64_core.xen` demonstrates the initial ARM64 subset. Build it with
-`xen build examples/arm64_core.xen --target=aarch64-linux -o app`,
-then execute it on Linux ARM64 or with `qemu-aarch64 ./app hello`.
-`arm64_float.xen` demonstrates scalar F32/F64 operations, checked conversions,
-aggregate returns and decimal output with the same build flags.
-`arm64_heap.xen` demonstrates heap String production and a recursive Box list,
-including ownership transfer and cleanup, with the same build flags.
-`file_lifecycle.xen` also runs on ARM64: it transfers owned File descriptors,
-writes and reads bytes, and closes them on scope exit. Pass a disposable path;
-the program creates or overwrites it. This uses the managed File runtime rather
-than the recoverable std.fs module. Both managed File and std.fs are supported
-on Linux x86-64 and ARM64.
+```sh
+printf 'one two\nthree four\n' > input.txt
+xen run examples/word_count.xen -- input.txt
+printf 'one two\nthree\n' | xen run examples/stdin_words.xen
+```
 
-| File | Topic |
-| --- | --- |
-| `demo.xen` | README example: split a byte string and print each word |
-| `native_core.xen` | Control-flow smoke test |
-| `basics.xen` | Fixed-width types, conversions, loops, and conditionals |
-| `strings_and_vectors.xen` | Strings, vectors, empty-vector annotations, and slices |
-| `generic_vectors.xen` | Generic vectors, managed structs, and cloning |
-| `structs_and_generics.xen` | Nested and generic structs |
-| `enums_and_match.xen` | Enums, tuples, `Option`, `Result`, and exhaustive matching |
-| `recursive_ast.xen` | Recursive tree ownership with `Box` |
-| `ownership_and_references.xen` | Clone, move, lexical scopes, and references |
-| `raw_memory_bb.xen` | Typed raw memory, POD layout, and Linux syscalls |
-| `modules/app.xen` | Project imports and qualified names |
-| `sum_file.xen` | Parse and sum decimal integers in a file |
-| `copy_file.xen` | Recoverable binary file copy |
-| `file_lifecycle.xen` | Owned File transfer and lexical cleanup, including ARM64 |
-| `word_count.xen` | ASCII byte tokenization |
-| `key_values.xen` | Byte search, extraction and LF-separated `key=value` input |
+The first command creates or overwrites `input.txt` in the current directory.
+첫 명령은 현재 디렉터리의 `input.txt`를 만들거나 덮어씁니다.
+`word_count` expects exactly one path; a missing file terminates with an error.
+`stdin_words` waits for the end of input if run without a pipeline.
+단어 수 예제에는 경로 하나가 필요하며, 없는 파일은 오류가 납니다.
+표준 입력 예제를 파이프 없이 실행하면 입력 끝을 기다립니다.
 
-File examples may create or overwrite their destination. Pass a disposable path to
-`file_lifecycle.xen`, `copy_file.xen`, and other writing examples. Programs that read a
-file accept its path after `--`, as described in the [CLI reference](https://github.com/skystarry-team/Xen/blob/main/docs/en/cli.md).
+Run the test-only example with `test`:
 
-`key_values.xen` reads stdin without arguments or a file with one path argument. It
-ignores blank LF-separated lines, accepts empty values, and preserves whitespace,
-NUL, non-UTF-8 bytes, and any `=` after the first one. It prints `key: value` records.
-Missing `=` or an empty key reports the one-based line number and exits unsuccessfully.
-CR is an ordinary byte; this example does not normalize CRLF or parse a configuration format.
-It uses `std.option.unwrap_or` for an absent separator and `std.result.map_err` to combine
-I/O and byte-range failures with parse errors in one `AppError`. File-local module aliases
-shorten API calls, and a tuple `let` unpacks the key/value pair after `?`.
+```console
+$ xen test examples/testing.xen
+PASS testing.doubles_a_number
+PASS testing.empty_vector
+2 passed; 0 failed
+```
 
-## Expected compile failures
-
-Files under `errors/` are negative compiler examples. A nonzero `check` status is
-expected, and they are not `run` targets. Each file includes a comment naming the
-intended diagnostic.
-
-For complete, stable error examples with their output, use the [diagnostics
-guide](https://github.com/skystarry-team/Xen/blob/main/docs/en/diagnostics.md).
-
-`opt_regions.xen` demonstrates scalar AOT optimization inside `#scope[opt]`.
-`opt_loops.xen` computes loop-invariant arithmetic once per invocation.
-`opt_fusion.xen` fuses two independent integer loops with identical trip counts.
-Repeat `xen run examples/opt_fusion.xen --opt-cache=.xen-opt-cache --opt-report`
-to inspect exact-prefix hits; changed or broken prefixes rebuild their suffix.
-Use `xen run examples/opt_loops.xen --opt-report` to inspect transformations,
-or `--opt=off` to compare the original checked IR.
+`demo.xen` and `arm64_core.xen` also keep the commands in the installation guide
+usable. Every ordinary example can be built for either supported Linux target;
+run the resulting executable on a compatible machine.

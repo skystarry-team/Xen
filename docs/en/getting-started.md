@@ -1,68 +1,52 @@
-# Getting started
+# Your first program
 
-Xen generates static Linux ELF programs for x86_64 or AArch64. The default target
-follows the compiler's Linux build architecture. A generated program does not
-need a C compiler, assembler, linker or libc.
+This chapter prints one line and then turns the program into an executable you can run directly.
 
-Compiler installation, source builds and cross toolchains are documented in the
-[compiler build guide](../compiler-build/en/build.md). The source-built executable
-is `compiler/dist/xen`; a binary distribution provides `bin/xen`, the standard
-library and learning examples. Extract the archive and keep its directory structure intact so the compiler can find the
-adjacent standard library. Use `<package>/bin/xen`, or put that `bin` directory on
-`PATH`. If Xen is already on `PATH`, use `xen` in the commands below.
+## Prepare Xen
 
-## Your first program
+You need Xen on Linux. Follow the [installation guide](../compiler-build/en/build.md). Add the distribution's `bin` directory to `PATH` to use `xen` from any directory. Commands in this guide assume `xen` is available on your path.
 
-Save this as `hello.xen`:
+From an extracted distribution, you can replace `xen` with `./bin/xen`. From the repository root, use `compiler/dist/xen`. Keep `bin` and `stdlib` together when moving a distribution.
+
+```sh
+xen version
+```
+
+## Write a file
+
+Create `hello.xen` in a working directory and save this code:
 
 ```xen
 fn main() {
-    println("hello, Xen");
+    println("Hello, Xen!");
 }
 ```
 
-Every executable program defines a parameterless `main` function that returns `Unit`.
-Check the source, generate an executable, and run it:
+`fn main()` is where execution begins. Statements go inside braces. `println` prints a value followed by a newline. Put strings in double quotes and end statements with `;`.
+
+Run this command from the directory containing your file:
 
 ```console
-$ compiler/dist/xen check hello.xen
-$ compiler/dist/xen build hello.xen -o hello
-$ ./hello
-hello, Xen
+$ xen run hello.xen
+Hello, Xen!
 ```
 
-`check` parses the project and checks types, ownership, and borrows. `build` writes a
-static non-PIE ELF executable. `run` compiles to a temporary executable, runs it, and
-removes that temporary file:
+## Check and build
 
-```console
-$ compiler/dist/xen run hello.xen
-hello, Xen
+```sh
+xen check hello.xen
+xen build hello.xen -o hello
+./hello
 ```
 
-## Program arguments
+`check` finds errors without running the program. Success produces no output. `build` creates an executable. `./hello` also prints `Hello, Xen!`; running that file does not require Xen.
 
-Put `--` between Xen's source path and the arguments for the Xen program:
+If Xen cannot find your file, check the working directory and filename. Executables need a compatible Linux system. macOS and Windows are unsupported.
 
-```xen
-fn main() {
-    println(arg_count());
-    println(arg(0));
-}
-```
+## Try a change
 
-```console
-$ compiler/dist/xen run args.xen -- report.txt
-1
-report.txt
-```
+Replace the greeting with your own name and run it again. The next chapter gives names to values and uses them in calculations.
 
-Use `std.env.args()` when a program needs the full argument vector. See the [CLI
-reference](cli.md) for every command and its exit status.
+---
 
-## Keep learning
-
-The [guided tour](tutorial.md) builds a small file-processing CLI. The [language
-guide](language-guide.md) links each topic to its reference page. Xen's compiler test
-suite is for contributors; language-level tests use `test fn` and `xen test` as
-described in the [testing guide](testing.md).
+[Contents](README.md) · [Next: Variables and values](language-basics.md) · [한국어](../ko/getting-started.md)

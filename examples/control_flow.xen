@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+fn doubled(value: Int) -> Int {
+    return value * 2;
+}
+
+fn main() {
+    let mut total = 0;
+    for number in 1..5 {
+        total = total + doubled(number);
+    }
+    let label = if total >= 20 { "enough" } else { "more" };
+    println(total);
+    println(label);
+    let mut remaining = 2;
+    while remaining > 0 {
+        println(remaining);
+        remaining = remaining - 1;
+    }
+}

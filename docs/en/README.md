@@ -1,46 +1,26 @@
-# Xen documentation
+# Using Xen
 
-This documentation describes the language and tools implemented by the compiler in
-this repository. Xen currently generates Linux x86-64 static non-PIE ELF programs.
-Examples labeled as errors are expected to fail; their command output is part of the
-example.
+Learn to write and run programs in Xen. This guide assumes you have used variables, functions, and loops in another language; it assumes no knowledge of Xen.
 
-## Learning path
+Start at chapter 1 for a guided introduction. While writing a program, jump to a topic or consult the [standard library](stdlib.md) and [syntax guide](reference.md).
 
-1. [Get started](getting-started.md): locate the compiler and run a program.
-2. [Guided tour](tutorial.md): build a small command-line program using the standard
-   library.
-3. [Language guide](language-guide.md): follow the concepts in a useful order.
-4. Read the [language basics](language-basics.md), [values and ownership](ownership-and-references.md),
-   [collections](strings-and-vectors.md), [types and matching](generics-enums-and-match.md),
-   and [modules](modules-and-structs.md) as needed.
+1. [Your first program](getting-started.md)
+2. [Variables and values](language-basics.md)
+3. [Functions and control flow](control-flow.md)
+4. [Strings and collections](collections.md)
+5. [Structs and enums](types.md)
+6. [Reusing types](generics.md)
+7. [Copies, moves, and references](ownership.md)
+8. [Missing values and errors](error-handling.md)
+9. [Working with multiple files](modules.md)
+10. [Build a word counter](tutorial.md)
+11. [Testing your code](testing.md)
+12. [Standard library](stdlib.md)
+13. [Command-line tools](cli.md)
+14. [Syntax and common problems](reference.md)
 
-## Reference
+Each page includes complete example code and its output. The [example collection](../../examples/README.md) provides files you can run.
 
-Compiler installation and source builds are covered separately in the
-[compiler build guide](../compiler-build/en/build.md), including
-[AArch64 cross toolchains](../compiler-build/en/aarch64.md) and
-[packaging](../compiler-build/en/packaging.md).
+This guide describes the syntax and APIs available in Xen today. Xen is an early release, so syntax and APIs may change. Programs run on Linux x86-64 or AArch64. See the separate [installation and build guide](../compiler-build/en/build.md) to obtain Xen.
 
-- [Command-line reference](cli.md): `check`, `build`, `run`, and `test`.
-- [Syntax reference](syntax-reference.md): declarations, types, statements, expressions,
-  and patterns.
-- [String, Vec, and Slice](strings-and-vectors.md)
-- [Ownership and references](ownership-and-references.md)
-- [Box and recursive data](box-and-recursive-aggregates.md)
-- [Generics, enums, tuples, and match](generics-enums-and-match.md)
-- [Modules and structs](modules-and-structs.md)
-- [File APIs](file.md) and the [standard library](stdlib.md)
-- [Low-level `bb` capability](low-level-bb.md)
-- [Diagnostics](diagnostics.md)
-- [Native tests](testing.md)
-- [Supported features and limitations](status-and-limitations.md)
-
-The standard library is Xen source distributed with the compiler. Project modules use
-`import`; toolchain modules use `use std.*` or `use core.*`. Existing standalone
-examples are collected under [`examples/`](../../examples/README.md), while every
-example in this guide is shown directly on its page.
-
-Explicit `#scope[opt]` blocks use integer/Bool AOT optimization, bounded leaf
-expansion and conservative loop-invariant code motion. Unmarked code is unchanged.
-See [scoped AOT optimization](optimization.md).
+[한국어](../ko/README.md)

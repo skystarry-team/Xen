@@ -192,7 +192,7 @@ the result before reporting the source-located diagnostic. Fatal diagnostics do
 not unwind unrelated user resources, matching the other runtime operations.
 
 ```sh
-compiler/dist/xen build examples/file_lifecycle.xen --target=aarch64-linux -o /tmp/xen-file
+compiler/dist/xen build tests/fixtures/language/file_lifecycle.xen --target=aarch64-linux -o /tmp/xen-file
 qemu-aarch64 /tmp/xen-file /tmp/xen-disposable-file
 ```
 

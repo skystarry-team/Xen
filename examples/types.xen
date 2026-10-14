@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+struct Task { title: String, done: Bool }
+enum Priority { Normal, Urgent(Int) }
+
+impl Task {
+    fn label(&self) -> String {
+        return if self.done { "done: " + self.title } else { "todo: " + self.title };
+    }
+}
+
+fn main() {
+    let task = Task { title: "read the guide", done: false };
+    println(task.label());
+    let priority = Priority.Urgent(2);
+    println(match priority {
+        Priority.Normal => "normal",
+        Priority.Urgent(days) => "due in " + int_to_str(days),
+    });
+    let (number, label) = (42, "answer");
+    println(label + ": " + int_to_str(number));
+}

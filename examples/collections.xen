@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+use std.string as text;
+
+fn main() {
+    let words = text.split_ascii_whitespace("red green blue");
+    println(words.get(1));
+    println("한".len());
+    let mut scores: Vec<Int> = [];
+    scores.push(10);
+    scores.push(20);
+    scores[0] = 11;
+    println(scores);
+    let view = scores.slice(0, 2);
+    println(view.get(1));
+}

@@ -81,6 +81,6 @@ pins rather than being silently filtered out.
 | `semantic.py` | Typed ownership model, metamorphisms and structural shrinking |
 | `semantic_generator_test.py` | Independent generator/oracle/shrinker controls |
 
-See [Semantic IR testing](../../docs/ko/semantic-testing.md) for model boundaries,
-failure classification and raw CFG metamorphisms in `tests/semantic_ir_test.ml`.
+Semantic model boundaries, oracle expectations, and shrinking rules are recorded
+in `semantic.py`, `semantic_generator_test.py`, and the replay instructions above.
 Opt-in measurements live in [benchmarks/](../../benchmarks/README.md).

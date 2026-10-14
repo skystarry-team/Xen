@@ -1,90 +1,76 @@
-# Guided tour: sum integers from a file
+# Build a word counter
 
-This program reads a file of whitespace-separated signed decimal integers, checks each
-token, and prints the sum. It demonstrates module imports, command-line arguments,
-`Result`, `match`, `for`, and the Xen standard library.
+Build a program that accepts a file path and prints the file's word count. This combines variables, functions, strings, and error handling.
 
-Save the following complete program as `sum.xen`:
+## Prepare the input
+
+Create a test file in your working directory:
+
+```sh
+printf 'one two\nthree four\n' > input.txt
+```
+
+This creates or overwrites `input.txt` in that directory. Save the following code as `word_count.xen`:
 
 ```xen
-module sum;
-use std.convert;
-use std.env;
-use std.fs;
-use std.io;
-use std.iter;
-use std.string;
+use std.env as env;
+use std.fs as fs;
+use std.io as io;
+use std.string as text;
 
-fn parse_message(index: Int, error: std.convert.ParseIntError) -> String {
-    return match error {
-        std.convert.ParseIntError.Empty =>
-            "empty integer token at token " + std.convert.format_int(index),
-        std.convert.ParseIntError.InvalidDigit((byte_index, byte)) =>
-            "invalid integer token " + std.convert.format_int(index) +
-            " at byte " + std.convert.format_int(byte_index) +
-            " (value " + std.convert.format_int(i64(byte)) + ")",
-        std.convert.ParseIntError.Overflow =>
-            "integer overflow at token " + std.convert.format_int(index),
-    };
+fn count_file(path: String) -> Result<Int, io.IoError> {
+    let contents = fs.read(path)?;
+    return Result.Ok(text.split_ascii_whitespace(contents).len());
 }
 
 fn main() {
-    let args = std.env.args();
-    if args.len() != 1 {
-        panic("usage: sum <path>");
+    let arguments = env.args();
+    if arguments.len() != 1 {
+        panic("usage: word_count <path>");
     }
-
-    let contents = match std.fs.read(args.get(0)) {
-        Result.Ok(text) => text,
-        Result.Err(error) => {
-            assert_msg(false, std.io.describe_error(error));
-            ""
-        },
-    };
-
-    let tokens = std.string.split_ascii_whitespace(contents);
-    let mut total: Int = 0;
-    for (index, token) in tokens.iter().enumerate() {
-        let value = match std.convert.parse_int(token) {
-            Result.Ok(number) => number,
-            Result.Err(error) => {
-                assert_msg(false, parse_message(index, error));
-                0
-            },
-        };
-        total = total + value;
-    }
-    match std.io.write_stdout(std.convert.format_int(total) + "\n") {
-        Result.Ok(_) => (),
-        Result.Err(error) => assert_msg(false, std.io.describe_error(error)),
+    match count_file(arguments.get(0)) {
+        Result.Ok(count) => println(count),
+        Result.Err(error) => { panic(io.describe_error(error)); },
     };
 }
 ```
 
-Create a small input file and run the program:
-
 ```console
-$ printf '10 -3\n5\n' > numbers.txt
-$ compiler/dist/xen check sum.xen
-$ compiler/dist/xen run sum.xen -- numbers.txt
-12
+$ xen run word_count.xen -- input.txt
+4
 ```
 
-`std.fs.read` returns `Result<String, IoError>` rather than terminating on an ordinary
-file error. `match` handles both variants. The parser returns a separate
-`Result<Int, ParseIntError>` for malformed or out-of-range tokens. The program uses
-`std.string.split_ascii_whitespace`, so the separators are ASCII whitespace bytes; it
-does not perform Unicode whitespace or UTF-8 validation.
+## Read the program
 
-Change the input to a malformed token to see a runtime failure:
+`env.args()` returns only arguments passed to the program, excluding the executable name. `input.txt` after `--` becomes the first argument. Quote a path in your shell if it contains spaces.
 
-```console
-$ printf '10 nope\n' > numbers.txt
-$ compiler/dist/xen run sum.xen -- numbers.txt
-assertion failed: invalid integer token 1 at byte 0 (value 110)
-$ echo $?
-1
+`count_file` reads the whole file using `fs.read`, propagating a failure with `?`. On success, it counts the items separated by ASCII whitespace. `main` prints that count or describes the read error and terminates.
+
+Here a word means a sequence of bytes separated by ASCII whitespace. The program does not remove punctuation or analyze language-specific words. It reads the whole file at once, so it is unsuitable for very large files.
+
+## Try failures too
+
+Pass a path that does not exist:
+
+```sh
+xen run word_count.xen -- missing.txt
 ```
 
-This `assert_msg` runtime failure exits with status 1. Unlike some runtime checks, the
-assertion message does not include a source location.
+You will see a file-opening error and a failure exit status. Omitting the path after `--` produces `usage: word_count <path>`. The precise file error number depends on your environment.
+
+## Make a standalone executable
+
+```sh
+xen build word_count.xen -o word-count
+./word-count input.txt
+```
+
+The result is again 4. Direct execution does not need `--`, which separated Xen's options from your program's arguments.
+
+## Continue experimenting
+
+Accept several paths and print a count for each. Change the error arm in `main` if you want to continue after a failed file. See [stdin_words](../../examples/stdin_words.xen) for a program reading standard input. Extracting word counting into a separate function makes it easier to add tests in the [next chapter](testing.md).
+
+---
+
+[Contents](README.md) · [Previous: Working with multiple files](modules.md) · [Next: Testing your code](testing.md) · [한국어](../ko/tutorial.md)

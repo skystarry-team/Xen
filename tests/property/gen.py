@@ -3,7 +3,7 @@
 
 Design goals
 ------------
-1. Cover every *supported* language feature listed in docs/status-and-limitations.md.
+1. Cover every *supported* language feature described in docs/en/README.md.
 2. Mix many features in a single program so cross-feature edge cases appear.
 3. Maintain a Python-side oracle (expected stdout) for well-typed programs.
 4. Also emit ill-typed / noise / contextual probes for check-only sweeps.

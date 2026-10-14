@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+use std.io as io;
+use std.string as text;
+
+fn main() {
+    let contents = match io.read_stdin() {
+        Result.Ok(value) => value,
+        Result.Err(error) => { panic(io.describe_error(error)); },
+    };
+    let words = text.split_ascii_whitespace(contents);
+    for index in 0..words.len() {
+        println(words.get(index));
+    }
+}

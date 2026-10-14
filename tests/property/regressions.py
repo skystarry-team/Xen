@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Fixed diagnostic regressions sourced from examples/errors and known asymmetry."""
+"""Fixed diagnostic regressions sourced from language error fixtures and known asymmetry."""
 
 from __future__ import annotations
 

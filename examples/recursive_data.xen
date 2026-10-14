@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+struct Node { value: Int, next: Option<Box<Node>> }
+
+fn sum(node: Node) -> Int {
+    let rest = match node.next {
+        Option.Some(next) => sum(next.into_inner()),
+        Option.None => 0,
+    };
+    return node.value + rest;
+}
+
+fn main() {
+    let last = Node { value: 20, next: Option<Box<Node>>.None };
+    let first = Node { value: 10, next: Option.Some(box(last)) };
+    println(sum(first));
+}

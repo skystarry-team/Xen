@@ -1,35 +1,26 @@
-# Xen 한국어 문서
+# Xen 사용자 문서
 
-영어 사용자 문서와 현재 구현 기준의 참조서는 [English documentation](../en/README.md)을
-참고한다.
+Xen으로 프로그램을 작성하고 실행하는 방법을 배웁니다. 다른 언어에서 변수·함수·반복문을 써 본 독자를 대상으로 하지만, Xen을 알고 있을 필요는 없습니다.
 
-- [Linux CLI 표준 라이브러리](stdlib.md): path, cwd, process identity, binary I/O, metadata와 directory
-- [의미 진단](diagnostics.md): borrow origin/later use, partial move와 capability 경계
-- [xen test](testing.md): native 테스트 선언, 검색과 실행
+처음이라면 1번부터 차례로 읽으세요. 이미 프로그램을 작성하고 있다면 필요한 주제를 골라 읽거나 [표준 라이브러리](stdlib.md)와 [문법 안내](reference.md)를 찾아보세요.
 
-이 문서는 현재 `main` 브랜치에 구현된 기능을 기준으로 한다. 계획 중인 문법은
-별도로 표시하며, 아직 구현되지 않은 기능을 언어 사양처럼 설명하지 않는다.
+1. [첫 프로그램 실행하기](getting-started.md)
+2. [변수와 값](language-basics.md)
+3. [함수와 반복](control-flow.md)
+4. [문자열과 컬렉션](collections.md)
+5. [구조체와 enum](types.md)
+6. [타입을 재사용하기](generics.md)
+7. [복사·이동·참조](ownership.md)
+8. [없을 수 있는 값과 실패](error-handling.md)
+9. [여러 파일로 나누기](modules.md)
+10. [파일의 단어 수 세기](tutorial.md)
+11. [내 코드 테스트하기](testing.md)
+12. [표준 라이브러리 찾기](stdlib.md)
+13. [명령어 안내](cli.md)
+14. [문법과 자주 만나는 문제](reference.md)
 
-- [시작하기](getting-started.md): 컴파일러 사용, 검사, ELF 생성과 실행
-- [컴파일러 빌드](../compiler-build/ko/build.md): 설치와 네이티브 소스 빌드
-- [AArch64 크로스 툴체인](../compiler-build/ko/aarch64.md): OCaml 소스 빌드와 Dune 연결
-- [컴파일러 패키징](../compiler-build/ko/packaging.md): 바이너리·소스 배포
-- [언어 가이드](language-guide.md): 기능별 문서의 시작점과 빠른 참고
-- [기본 문법과 타입](language-basics.md): 변수, 숫자, 함수, 제어 흐름과 기본 builtin
-- [String과 Vec](strings-and-vectors.md): byte string, Vec API와 파일 읽기 builtin
-- [소유권과 reference](ownership-and-references.md): clone, move, drop, borrow 규칙
-- [Box와 재귀 aggregate](box-and-recursive-aggregates.md): 명시적 owning indirection과 재귀 tree
-- [제네릭, enum, match](generics-enums-and-match.md): 단형화, tuple, exhaustive match
-- [모듈과 구조체](modules-and-structs.md): source-root import와 named struct
-- [저수준 `bb`](low-level-bb.md): lexical capability와 raw memory
-- [File/I/O API](file.md): recoverable std.fs/std.io와 owned File 호환 API
-- [구현 상태와 제한](status-and-limitations.md): 지원 범위와 아직 없는 기능
-- [Semantic IR](semantic-ir.md): CFG·provenance·cleanup의 구현 계약
-- [Semantic IR 검증](semantic-testing.md): 생성·변형·축소와 재현 명령
+예제는 각 페이지에 전체 코드와 실행 결과로 제시합니다. 같은 코드를 파일로 실행하려면 [예제 모음](../../examples/README.md)을 사용하세요.
 
-`build/run/test --opt=basic`으로 정수·Bool 계산과 제한된 leaf 함수를 최적화한다.
-기본값은 `basic`이며 `--opt-report`는 `basic`의 영역·분리 이유·변환 횟수를 stderr에
-출력한다. 상세 범위는 [Native 기본 최적화](optimization.md)를 참고한다.
+이 문서는 현재 Xen에서 사용할 수 있는 문법과 API를 설명합니다. Xen은 초기 버전이므로 문법과 API가 바뀔 수 있습니다. 실행 환경은 Linux x86-64 또는 AArch64입니다. 컴파일러 설치는 [설치·빌드 안내](../compiler-build/ko/build.md)를 참고하세요.
 
-`#scope[opt]` 안에서만 AOT 최적화를 적용한다. 스코프 밖 코드는 보존하며
-`--opt=off`로 최적화를 끌 수 있다. [스코프 AOT 최적화](optimization.md)를 참고한다.
+[English](../en/README.md)

@@ -1,39 +1,51 @@
-# Native tests
+# Testing your code
 
-Declare a parameterless, nongeneric `Unit` function with `test fn`. It is compiled
-through the normal checker and native backend, then run as an independent executable.
-The test runner does not require `main`. Tests can use `assert`, `assert_msg`, and
-`panic`. Function mode attributes such as `#![bb]` can precede a test.
-
-Save this as `tests.xen`:
+Use `test fn` to check a small behavior. Test functions take no arguments and return no value. Check and run a test-only file without `main` using `xen test`. The ordinary `check`, `run`, and `build` commands require `main`. Save this as `testing.xen`:
 
 ```xen
-test fn vector_push() {
-    let mut values = [1, 2];
-    values.push(3);
-    assert(values.len() == 3);
+fn doubled(value: Int) -> Int {
+    return value * 2;
+}
+
+test fn doubles_a_number() {
+    assert(doubled(3) == 6);
+}
+
+test fn empty_vector() {
+    let values: Vec<Int> = [];
+    assert_msg(values.len() == 0, "an empty vector has no items");
 }
 ```
 
 ```console
-$ compiler/dist/xen test tests.xen
-PASS tests.vector_push
-1 passed; 0 failed
+$ xen test testing.xen
+PASS testing.doubles_a_number
+PASS testing.empty_vector
+2 passed; 0 failed
 ```
 
-Tests discovered from source files run in sorted order. A directory remains the project
-source root, so imports resolve from that root. Hidden directories, `_build`, `dist`,
-`stdlib`, and symlinked files or directories are not recursively searched. A file
-target uses that file's directory as its source root. Toolchain tests can be selected
-with a module target such as `xen test std.fs`.
+`assert` checks that a condition is true. `assert_msg` adds a message for failure. Change the expected value in the first test to 7 and observe the failure.
 
-Each selected test compiles the full source graph, so a filter does not hide type errors
-in other functions in that graph. The runner continues after a failing test. Successful
-tests hide stdout and stderr; failed tests retain their output. Test stdin is `/dev/null`,
-arguments are empty, and cwd/environment are inherited. There is no fixture, mock,
-snapshot, async, plugin, or timeout framework. A test that does not terminate must be
-stopped manually.
+## Select tests
 
-The overall exit status is 0 when all selected tests pass, 1 for test, compile,
-discovery, or no-match failures, and 2 for invalid CLI usage. See the [CLI
-reference](cli.md) for target forms.
+```sh
+xen test testing.xen --filter doubles
+xen test .
+xen test std.string
+```
+
+Select a file, a directory, or a standard-library module. With no target, `xen test` searches the current directory. `--filter` selects names containing the given text. No discovered tests or no matching names is a failure.
+
+A directory target also becomes the root for project imports. Discovery skips hidden directories, `_build`, `dist`, `stdlib`, and symbolic links. You can still select standard-library tests explicitly with `xen test std.string`.
+
+## Understand the result
+
+Tests run individually in name order, continuing after failures. Output from passing tests is hidden; output from failing tests is shown. Tests have no program arguments and an empty standard input. The working directory and environment come from where you ran the command.
+
+Prepare temporary data yourself for tests using file input. There is no separate fixture, mock, async, or automatic timeout framework. Stop a nonterminating test manually.
+
+A filter does not hide type errors in other functions in the same project. The exit status is 0 if all selected tests pass, or 1 for errors and failures.
+
+---
+
+[Contents](README.md) · [Previous: Build a word counter](tutorial.md) · [Next: Standard library](stdlib.md) · [한국어](../ko/testing.md)

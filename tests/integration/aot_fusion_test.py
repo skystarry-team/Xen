@@ -26,7 +26,7 @@ def assert_run(result, expected):
 with tempfile.TemporaryDirectory(prefix='xen-prefix-fusion-') as directory:
     root = Path(directory)
     source = root / 'app.xen'
-    source.write_text((ROOT / 'examples/opt_fusion.xen').read_text())
+    source.write_text((ROOT / 'tests/fixtures/language/opt_fusion.xen').read_text())
     expected = b'0\n17\n5691522\n'
     cache = root / 'cache'
     flags = (f'--opt-cache={cache}', '--opt-report')

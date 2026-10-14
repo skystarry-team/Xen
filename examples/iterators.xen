@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+use std.iter;
+
+fn doubled(value: Int) -> Int {
+    return value * 2;
+}
+
+#![explc]
+fn over_two(value: &Int) -> Bool {
+    return *value > 2;
+}
+
+fn main() {
+    let values = [1, 2, 3];
+    for value in values.iter().map(doubled).filter(over_two) {
+        println(value);
+    }
+}

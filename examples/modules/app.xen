@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 module app;
-import guide.model;
-import guide.view;
+import shop.model as model;
+import shop.view as view;
 
 fn main() {
-    let user = guide.model.User { name: "Mina", role: guide.model.Role.Admin };
-    guide.view.show(user);
+    let item = model.Item { name: "tea", price: 3 };
+    view.show(item);
 }

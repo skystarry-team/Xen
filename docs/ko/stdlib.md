@@ -1,209 +1,134 @@
-# Linux CLI 표준 라이브러리
+# 표준 라이브러리 찾기
 
-모든 module은 `use std.<name>;`로 가져온다. 이 API들은 별도 Xen source로 구현되며
-일반 Semantic IR·분석·직접 native backend를 거친다. 아래 high-level 호출은 caller의
-`bb`/`explc`를 요구하지 않는다. String과 filename은 UTF-8 검증 없는 byte sequence다.
+필요한 작업에 맞는 모듈을 `use std.name;`으로 가져옵니다. `as`로 별명을 붙일 수 있습니다. 여기서는 프로그램에서 자주 쓰는 API를 정리합니다. `Int`는 정수, `String`은 바이트열이고, `IoError`는 `std.io.IoError`입니다.
 
-## 경로
+## 텍스트와 숫자
 
-`std.path`는 filesystem을 접근하지 않는 Linux `/` separator 연산이다.
-
-| API | 계약 |
+| API | 결과와 사용법 |
 | --- | --- |
-| `is_absolute(String) -> Bool` | 첫 byte가 `/`; 빈 경로는 false |
-| `join(String, String) -> String` | 오른쪽이 절대 경로면 오른쪽, 빈 쪽은 다른 쪽, 그 외 separator 연결 |
-| `basename(String) -> String` | trailing slash 제외 마지막 component; 빈 경로 `""`, root `"/"` |
-| `dirname(String) -> String` | 마지막 component 제외; 빈/단일 상대 경로 `"."`, root `"/"` |
+| `std.convert.parse_int(text: String)` | `Result<Int, ParseIntError>`; 부호가 있는 10진 정수 읽기 |
+| `std.convert.format_int(value: Int)` | 10진 문자열 |
+| `std.string.find(text: String, needle: String)` | `Option<Int>`; 첫 바이트 위치, 없으면 `None` |
+| `std.string.contains(text: String, needle: String)` | `Bool`; 포함 여부 |
+| `std.string.slice_bytes(text: String, start: Int, end: Int)` | `Result<String, BoundsError>`; 끝을 제외한 구간을 복사 |
+| `std.string.split_byte(text: String, separator: U8)` | `Vec<String>`; 구분 바이트로 분리, 빈 항목 유지 |
+| `std.string.split_ascii_whitespace(text: String)` | `Vec<String>`; ASCII 공백으로 분리, 빈 항목 제외 |
+| `std.string.is_ascii_whitespace(byte: U8)` | 공백 또는 바이트 9~13인지 확인 |
 
-`.`/`..`와 symlink를 정규화하지 않는다. 예를 들어 `join("a", "../b")`는
-`"a/../b"`다. 이를 지우면 filesystem symlink를 따라가는 의미가 달라질 수 있다.
+`parse_int`는 앞뒤 공백을 제거하지 않습니다. `+`나 `-` 뒤에 적어도 한 자리 숫자가 필요합니다. 오류는 `ParseIntError.Empty`, `InvalidDigit((위치, 바이트))`, `Overflow`입니다. 표준 라이브러리에는 실수 문자열을 파싱·포맷하는 대응 함수가 없습니다.
 
-## 환경과 process identity
+문자열 위치와 길이는 바이트 기준입니다. 검색어가 빈 문자열이면 `find`는 `Some(0)`, `contains`는 `true`입니다. `slice_bytes`에는 `0 <= start <= end <= text.len()`이 필요합니다. 잘못된 범위는 `BoundsError.InvalidRange((start, end, length))`입니다. 빈 문자열을 `split_byte`로 나누면 빈 문자열 하나가 나옵니다.
 
-`std.env.args()`는 기존 순서의 인자 목록을 반환한다. `cwd() -> Result<String,
-std.io.IoError>`는 kernel `getcwd`로 절대 경로를 얻으며 삭제된 cwd, unreachable cwd와
-4096-byte kernel 제한 등의 실패를 `IoError.Cwd(errno)`로 반환한다.
-[Linux getcwd 계약](https://man7.org/linux/man-pages/man3/getcwd.3.html)을 따른다.
+## 인자와 경로
 
-`std.process.id()`와 `parent_id()`는 각각 process ID와 parent process ID를 `Int`로
-반환한다. 현재 API는 process identity 지원이다. 실행/spawn/wait/pipe는 아직 없다.
-환경변수 조회도 아직 없다. `_start`가 envp를 보존하지 않고 `ptr_addr`는 one-way이므로,
-후속 환경 API는 제한된 process-entry primitive 설계를 별도로 검토해야 한다. 이를
-우회하는 address-to-pointer 변환이나 unrestricted dereference는 추가하지 않았다.
-
-## Byte I/O와 파일
-
-기존 `Vec<U8>`, `String.as_bytes()`, `Vec<U8>.into_string()`을 buffer로 사용한다.
-새 buffer abstraction은 없다. `std.io.read_fd(Int)`와 `read_stdin()`은 EOF까지 binary
-String을 읽어 `Result<String, IoError>`로 반환한다. `read_fd`는 caller의 fd를 닫지
-않으며 `std.fs.read_open`은 이 API를 재사용하는 호환 wrapper다. 기존 `write_fd`,
-`write_stdout`, `write_stderr`는 partial write와 EINTR를 처리한다.
-
-`std.fs`의 `read`, `write`, `copy`와 동일한 error/cleanup 규칙으로 다음 API를 제공한다.
-
-| API | 결과와 계약 |
+| API | 결과와 사용법 |
 | --- | --- |
-| `append(path, contents)` | `Result<Int, IoError>`; 기존 내용을 보존하고 뒤에 씀; 없으면 생성 |
-| `metadata(path)` | `Result<Metadata, IoError>`; symlink를 따라감; open read permission 불필요 |
-| `read_dir(path)` | `Result<Vec<String>, IoError>`; dot entry 제외 이름 목록; 재귀 없음 |
+| `std.env.args()` | `Vec<String>`; 실행 파일 이름을 제외한 프로그램 인자 |
+| `std.env.cwd()` | `Result<String, IoError>`; 현재 작업 디렉터리 |
+| `std.path.is_absolute(path: String)` | `/`로 시작하는지 확인 |
+| `std.path.join(left: String, right: String)` | 경로 연결; 오른쪽이 절대 경로이면 오른쪽을 사용 |
+| `std.path.basename(path: String)` | 마지막 경로 요소 |
+| `std.path.dirname(path: String)` | 부모 경로; 상대 파일 이름만 있으면 `"."` |
+| `std.process.id()`, `std.process.parent_id()` | 현재·부모 프로세스의 ID |
 
-`Metadata`는 `size: Int`, `modified_seconds: Int` (epoch 이후 초), `is_file: Bool`,
-`is_directory: Bool` field를 갖는다. Linux x86-64 kernel `struct stat` layout을 사용한다.
-파일 생성 mode는 `write`와 같은 0644이며 process umask가 적용된다. append syscall
-개별 write의 O_APPEND 동작을 사용하고, 전체 여러 write의 원자성은 보장하지 않는다.
-embedded NUL은 모든 filesystem pathname API에서 `InvalidPath`다.
+경로 함수는 `/`를 사용하며 파일에 접근하지 않습니다. `.`과 `..`를 정리하거나 심볼릭 링크를 따라가지 않습니다. 환경 변수 읽기, 다른 프로그램 실행, 파이프 생성은 현재 지원하지 않습니다.
 
-Directory 목록은 [Linux getdents64](https://man7.org/linux/man-pages/man2/getdents.2.html)의
-순서를 보존하며 정렬·snapshot 안정성은 보장하지 않는다. 기존 `use std.iter;`와
-`.iter()`로 순회할 수 있다. `d_type`의 지원 여부에 의존하지 않으며 type은 필요할 때
-`metadata`로 조회한다. `decode_directory(Slice<U8>)`는 header, record length/end와
-NUL terminator를 검사하는 safe Xen decoder다. 잘못된 record는 `InvalidDirectoryEntry`다.
+## 파일과 입출력
 
-`IoError`는 기존 variants에 `Metadata(Int)`, `Directory(Int)`, `Cwd(Int)`,
-`InvalidDirectoryEntry`를 추가했다. `describe_error`도 이를 처리한다. fd close와 raw
-buffer free 뒤에 operation error를 전파하며, operation이 성공한 경우 close 실패를
-전파한다. runtime panic/error의 무 unwind 정책은 기존과 같다.
-
-## Byte 문자열 처리
-
-`use std.string;` 아래 다음 API는 NUL·비 UTF-8 byte를 그대로 보존한다.
-
-| API | 계약 |
+| API | 반환값 |
 | --- | --- |
-| `slice_bytes(text: String, start: Int, end: Int) -> Result<String, BoundsError>` | `[start,end)`를 새 소유 String으로 복사; `0 <= start <= end <= len(text)` 필요 |
-| `find(text: String, needle: String) -> Option<Int>` | 첫 일치의 byte offset; 빈 needle은 `Some(0)`, 미발견은 `None` |
-| `contains(text: String, needle: String) -> Bool` | 빈 needle을 포함한 일치 여부 |
-| `split_byte(text: String, separator: U8) -> Vec<String>` | 선행·연속·후행 구분자의 빈 항목 보존; 빈 입력은 `[""]` |
+| `std.fs.read(path: String)` | `Result<String, IoError>`; 파일 전체 읽기 |
+| `std.fs.write(path: String, contents: String)` | `Result<Int, IoError>`; 생성하거나 덮어쓰고 쓴 바이트 수 반환 |
+| `std.fs.append(path: String, contents: String)` | `Result<Int, IoError>`; 뒤에 추가, 없으면 생성 |
+| `std.fs.copy(source: String, destination: String)` | `Result<Int, IoError>`; 전체를 읽어 대상에 덮어쓰기 |
+| `std.fs.metadata(path: String)` | `Result<std.fs.Metadata, IoError>` |
+| `std.fs.read_dir(path: String)` | `Result<Vec<String>, IoError>`; 바로 아래 항목 이름 |
+| `std.io.read_stdin()` | `Result<String, IoError>`; 입력 끝까지 읽기 |
+| `std.io.write_stdout(text: String)`, `std.io.write_stderr(text: String)` | `Result<Int, IoError>`; 쓴 바이트 수 |
+| `std.io.describe_error(error: IoError)` | 오류를 설명하는 문자열 |
 
-잘못된 범위는 `BoundsError.InvalidRange((start,end,length))`, 유효한 빈 범위는
-`Ok("")`다. UTF-8 encoding 중간을 잘라도 검증·정규화하지 않는다. 결과는 소유하며
-Slice가 escape하지 않는다. 내부 라이브러리 호출을 포함한 일반 by-value String clone
-규칙과 allocation 실패의 runtime error를 유지한다. 특별한 borrowed 전달 규칙은 없다.
-기존 ASCII whitespace 분해는 연속 공백의 빈 token을 생략하는 기존 계약을 유지한다.
-
-[key-value CLI](../../examples/key_values.xen)는 stdin 또는 파일의 LF 구분 `key=value`를
-읽는다. 빈 줄을 무시하고 빈 값·첫 `=` 뒤의 추가 `=`·공백·NUL·비 UTF-8을 보존한다.
-`=` 누락·빈 key는 1부터 센 줄 번호를 진단한다. CR은 일반 byte이며 설정 형식이나
-CRLF를 정규화하는 parser는 아니다.
-
-## `std.option`과 `std.result`
-
-| API | 계약 |
-| --- | --- |
-| `std.option.unwrap_or<T>(value: Option<T>, fallback: T) -> T` | `Some`의 값 또는 fallback을 반환 |
-| `std.result.map_err<T, E, F>(value: Result<T, E>, convert: fn(E) -> F) -> Result<T, F>` | `Ok`는 보존하고 `Err` payload를 변환 |
-
-두 helper는 일반 by-value 전달을 따른다. clone 가능한 값은 기존 copy/clone 규칙을,
-move-only 값은 이동 규칙을 따른다. `unwrap_or`의 fallback은 호출 전에 평가되므로
-`Some`이어도 평가되며 사용하지 않은 move-only 값은 정상 정리된다. `map_err`는 concrete
-named function 값을 `Err`에서 한 번 호출하고 `Ok`에서는 호출하지 않는다. 오류 payload도
-같은 규칙으로 by-value 전달된다. lazy fallback, closure, generic function value, 암묵적
-오류 변환을 추가하지 않는다. generic 인자는 기존 추론 규칙을 따르며 정적 인자 타입에서
-결정할 수 없으면 명시해야 한다.
-
-오류를 바깥 함수의 오류 타입으로 바꾼 뒤 기존 동일 타입 `?`로 전파할 수 있다.
+쓰는 API는 파일 내용을 바꿉니다. 특히 `write`와 `copy`는 기존 대상 내용을 지웁니다. 경로에는 NUL 바이트를 넣을 수 없습니다. `read`, `copy`, `read_stdin`은 전체 입력을 메모리에 담습니다. 표준 입력을 직접 읽으면 입력이 끝날 때까지 기다립니다. 파일 대신 파이프로 전달하는 방법은 다음과 같습니다.
 
 ```xen
-use std.fs;
-use std.io;
-use std.result;
+use std.io as io;
+use std.string as text;
 
-enum AppError { Io(std.io.IoError) }
-
-fn from_io(error: std.io.IoError) -> AppError {
-    return AppError.Io(error);
-}
-
-fn read_config(path: String) -> Result<String, AppError> {
-    let contents = std.result.map_err(std.fs.read(path), from_io)?;
-    return Result.Ok(contents);
-}
-```
-
-[key-value CLI](../../examples/key_values.xen)는 두 helper를 사용해 I/O·byte 범위 오류를
-parse 오류와 하나의 `AppError`로 합친다.
-
-## Iterator 변환
-
-`use std.iter;` 뒤에 `Vec<T>.into_iter()`는 cloneable Vec도 소비하고 원래 순서로 owned
-element를 반환한다. Iterator 자체는 move-only이며 조기 종료 시 남은 element를 정리한다.
-`.map(fn(T)->U)`·`.filter(fn(&T)->Bool)`는 receiver를 소비하는 lazy adapter다.
-Concrete named function을 받으며 생성 시 callback을 실행하지 않는다. Map은 by-value,
-filter는 받은 item을 predicate 호출 동안만 공유 대여하고 탈락한 item을 drop한다.
-Filter는 Unit 등 대여 불가능한 타입을 받지 않는다. 두 adapter는 첫 None 이후 계속 None이다.
-Borrowed iter chain은 마지막 사용까지 원래 source의 loan을 유지한다.
-
-```xen
-use std.iter;
-fn twice(value: Int) -> Int { return value * 2; }
-#![explc]
-fn large(value: &Int) -> Bool { return *value > 2; }
 fn main() {
-    let values = [1, 2, 3];
-    for value in values.iter().map(twice).filter(large) { println(value); }
+    let contents = match io.read_stdin() {
+        Result.Ok(value) => value,
+        Result.Err(error) => { panic(io.describe_error(error)); },
+    };
+    let words = text.split_ascii_whitespace(contents);
+    for index in 0..words.len() {
+        println(words.get(index));
+    }
 }
 ```
 
-결과는 `4`, `6`이다. 같은 이름의 inherent method가 있으면 그것을 우선하며 iterator import를
-요구하지 않는다. Predicate는 자신의 explc를 제공하고 adapter 생성은 caller의 explc를
-요구하지 않는다. Collection 자체를 for에 넘기는 자동 변환은 없다.
+```console
+$ printf 'one two\nthree\n' | xen run stdin_words.xen
+one
+two
+three
+```
 
-`std.iter.fold<I,T,A>(iterator,initial,step:fn(A,T)->A)->A`는 순서대로 left fold하며 빈
-iterator는 initial을 반환한다. Iterator·accumulator·callback 인자에 일반 copy/clone/move
-규칙을 적용한다. `std.iter.collect<I,T>`는 순서를 보존하는 eager Vec을 만든다. T를 인자에서
-추론할 수 없으면 `std.iter.collect<std.iter.IntoIter<Int>,Int>(values.into_iter())`처럼 모든
-타입 인자를 명시한다. For는 move-only iterator를 loop owner로 이동시킨다. 바깥 iterator의
-next를 호출하는 수동 while loop는 break 후 그 iterator를 이어서 사용할 수 있다.
+`Metadata`에는 `size: Int`, `modified_seconds: Int`, `is_file: Bool`, `is_directory: Bool`이 있습니다. 수정 시간은 Unix 기준 시각부터의 초입니다. 메타데이터 조회는 심볼릭 링크를 따라갑니다. `read_dir`는 하위 디렉터리에 들어가지 않고 `.`과 `..`를 제외하며 결과 순서는 보장하지 않습니다.
 
-## HashMap과 소유값 교체
+`IoError`의 형태는 `InvalidPath`, `Open(Int)`, `Read(Int)`, `Write(Int)`, `WriteZero`, `Close(Int)`, `Metadata(Int)`, `Directory(Int)`, `Cwd(Int)`, `InvalidDirectoryEntry`입니다. 사용자에게 보여 줄 메시지는 `describe_error`로 만드세요.
 
-`use std.hashmap;`의 `std.hashmap.HashMap<V>`는 String byte key를 쓰는 move-only map이다.
-빈 key·NUL·invalid UTF-8을 허용하고 byte equality로 collision을 구분한다. 순회와 key snapshot
-순서는 보장하지 않는다. Hash table의 expected amortized probe 수는 상수지만 hash는 key byte
-길이에 비례하며 collision에서는 전체 table을 검사할 수 있다.
+## 사전: HashMap
 
-| API | 동작 |
-| --- | --- |
-| `new<V>()`, `len()`, `is_empty()` | 생성·entry 수 조회 |
-| `insert(key:String,value:V)->Option<V>` | 중복 value 교체 후 이전 값 반환; 길이 유지 |
-| `remove(key:&String)->Option<V>` | 삭제한 값의 소유권 이전; 없으면 None |
-| `contains_key(key:&String)` | Key/value 복제 없이 존재 확인 |
-| `get_cloned(key:&String)->Option<V>` | Owned copy/clone; move-only 값은 거부 |
-| `with_value<V,R>(&HashMap<V>,&String,fn(&V)->R)->Option<R>` | 존재할 때 callback 동안만 대여; reference escape 금지 |
-| `keys()->Vec<String>`, `clear()` | Owned key snapshot·entry 정리 |
-| `into_iter()` | Map을 소비하고 owned `(String,V)` entry 반환 |
-
-명시적 reference 인자는 explc가 필요하다. File·Box의 삽입/교체/삭제/consuming 순회는 값을
-clone하지 않는다. 반환한 이전/삭제 값을 버리면 정상 cleanup이 정리한다. Unit은 저장과
-owned 조회를 지원하지만 reference callback과 `(String,Unit)` entry 순회는 기존
-referability/tuple 제한으로 지원하지 않는다. Reference 반환 get/get_mut는 없다.
-Struct field는 private이 아니므로 table invariant를 유지하려면 map API를 사용한다.
+문자열 키로 값을 찾을 때는 `std.hashmap.HashMap<V>`를 사용합니다. 다음을 `hashmap.xen`으로 저장하세요.
 
 ```xen
-use std.hashmap;
+use std.hashmap as hashmap;
+
 #![explc]
 fn main() {
-    let mut map = std.hashmap.new<Int>();
-    map.insert("answer", 42);
-    let key = "answer";
-    println(match map.get_cloned(&key) { Option.Some(value) => value, _ => 0 });
+    let mut prices = hashmap.new<Int>();
+    prices.insert("tea", 3);
+    prices.insert("coffee", 4);
+    let key = "tea";
+    println(match prices.get_cloned(&key) {
+        Option.Some(price) => price,
+        Option.None => 0,
+    });
+    println(prices.len());
 }
 ```
 
-`use std.mem;`의 `std.mem.replace<T>(&mut T,T)->T`는 준비한 새 값을 설치하고 이전 owned
-값을 반환한다. `Vec.replace(index,value)->T`도 같은 동작이며 길이를 유지한다.
-`Vec.swap(left,right)`는 element를 clone/drop 없이 교환한다. Invalid index는 runtime error다.
+```console
+$ xen run hashmap.xen
+3
+2
+```
 
-## 검사
+| 작업 | API |
+| --- | --- |
+| 새 사전 | `std.hashmap.new<V>()` |
+| 개수·비어 있음 | `map.len()`, `map.is_empty()` |
+| 추가·변경 | `map.insert(key, value)`; 이전 값이 있으면 `Some`으로 반환 |
+| 검색 | `map.get_cloned(&key)`; 값의 사본을 `Option`으로 반환 |
+| 존재 확인 | `map.contains_key(&key)` |
+| 제거 | `map.remove(&key)`; 제거한 값을 `Option`으로 반환 |
+| 키 목록 | `map.keys()`; 독립적인 `Vec<String>` |
+| 비우기 | `map.clear()` |
+| 소유권을 넘기고 반복 | `map.into_iter()`; `(String, V)` 항목 |
 
-`python3 tests/integration/stdlib_test.py`는 API 계약, binary stdin/append, symlink metadata,
-cwd 성공/실패, 여러 directory batch, malformed record와 제한된 fd 아래 반복 cleanup을
-검사한다. `--arm64`를 추가하면 QEMU 또는 native ARM64에서 off/basic 모드를 모두
-검사하며 `make test`와 `python3 scripts/test.py --suite arm64`에 포함된다.
-`std.io`·`std.fs`·`std.env`·`std.process`는 내부 `std.platform` 서비스를 사용한다.
-loader는 호스트와 별개인 `--target`으로 `stdlib/platform/<target>/std/platform.xen`을
-선택하며 check와 test 발견 단계에도 같은 타깃을 전달한다. 없는 구현을 다른 타깃으로
-대체하지 않는다. Linux x86-64와 AArch64 구현을 모든 배포본에 포함한다.
-`open_path`의 flags/mode와 `decode_directory`의 record는 타깃 native ABI 값이다.
-macOS Intel/Apple Silicon 타깃은 미지원이며 지원 계획이 없다.
-CPU 아키텍처와 기존 Darwin/Mach-O 프로토타입 구현은 보존한다.
+사전 자체는 이동 전용입니다. `get_cloned`는 `Box`·`File`처럼 복사할 수 없는 값을 읽을 때 쓸 수 없습니다. 그런 값은 `remove`로 꺼내거나 `std.hashmap.with_value<V, R>(&map, &key, inspect)`의 이름 있는 `fn(&V) -> R` 콜백으로 확인하세요. 참조를 직접 넘기는 함수에는 `explc`가 필요합니다. 키 목록과 반복의 순서는 보장하지 않습니다. 사전의 필드를 직접 변경하는 대신 API를 사용하세요.
+
+## 결과·반복·교체 도우미
+
+`std.option.unwrap_or<T>(value, fallback)`은 없는 값의 기본값을 선택합니다. `std.result.map_err<T, E, F>(value, convert)`는 오류만 변환합니다. [오류 처리](error-handling.md)에서 설명합니다.
+
+`use std.iter;`는 `.iter()`, `.into_iter()`, `.map(...)`, `.filter(...)`, `.enumerate()`를 사용할 때 필요합니다. `std.iter.fold<I, T, A>(iterator, initial, step)`은 `fn(A, T) -> A` 콜백으로 순서대로 누적하며, 빈 입력에서는 `initial`을 돌려줍니다. `std.iter.collect<I, T>(iterator)`는 항목을 새 벡터로 모읍니다. 타입을 결정할 수 없으면 모든 타입 인자를 명시하세요. [컬렉션](collections.md)에 실행 예제가 있습니다.
+
+`use std.mem;`의 `std.mem.replace<T>(&mut target, value)`는 이전 값을 반환하며 새 값으로 교체합니다. 명시적 참조를 쓰므로 `explc`가 필요합니다.
+
+## 기존 File API를 읽을 때
+
+`open_read(path)`·`open_write(path)`는 `File`을 만듭니다. `open_write`는 생성하거나 덮어씁니다. 변경 가능한 File의 `read()`는 현재 위치부터 끝까지 읽고 `write(text)`는 현재 위치에 씁니다. `close()`로 닫으며 여러 번 닫아도 됩니다. `is_open()`으로 상태를 확인할 수 있습니다. File은 이동 전용이며 블록을 나가면 자동으로 닫힙니다. 실패하면 프로그램이 종료되므로 실패를 직접 처리하려는 새 코드에는 `std.fs`·`std.io`를 사용하세요. File에는 seek나 append 메서드가 없습니다.
+
+---
+
+[목차](README.md) · [이전: 내 코드 테스트하기](testing.md) · [다음: 명령어 안내](cli.md) · [English](../en/stdlib.md)
