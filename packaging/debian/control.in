@@ -1,0 +1,11 @@
+Package: xen-lang
+Version: {version}
+Section: devel
+Priority: optional
+Architecture: {architecture}
+Maintainer: Xen maintainers <skystarry-team@users.noreply.github.com>
+Installed-Size: {installed_size}
+{depends}Homepage: https://github.com/skystarry-team/Xen
+Description: Xen programming language compiler for Linux
+ Compile, check, run and test Xen programs. Includes the standard library
+ and examples, with code generation for Linux x86-64 and AArch64.

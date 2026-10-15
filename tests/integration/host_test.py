@@ -3,7 +3,7 @@
 explicit emulated compiler; run/test then need native execution or binfmt.
 Generated-program execution remains an independent check, never implicit in Xen.
 """
-import importlib.util
+import sys
 import json
 import os
 from pathlib import Path
@@ -18,9 +18,8 @@ import unittest
 REPO = Path(__file__).resolve().parents[2]
 XEN = Path(os.getenv("XEN_BIN", str(REPO / "compiler/dist/xen"))).resolve()
 RUNNER = json.loads(os.getenv("XEN_HOST_RUNNER", "[]"))
-spec = importlib.util.spec_from_file_location("xen_package", REPO / "scripts/package.py")
-package = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(package)
+sys.path.insert(0, str(REPO))
+from packaging.archive import package
 ARCH = package.binary_architecture(XEN)
 HOST_ARCH = {"arm64": "aarch64", "amd64": "x86_64"}.get(platform.machine(), platform.machine())
 
@@ -212,9 +211,9 @@ class HostTests(unittest.TestCase):
         for value in ('"qemu-aarch64"', '{}', '[1]', '[""]', '["\\u0000"]', 'invalid'):
             with self.subTest(runner=value), self.assertRaises(ValueError):
                 package.parse_runner(value)
-        result = subprocess.run(["python3", str(REPO / "scripts/package.py"), "--binary", str(XEN),
+        result = subprocess.run([sys.executable, "-m", "packaging.cli", "--binary", str(XEN),
                                  "--runner", '"qemu-aarch64"', "--output", str(archive)],
-                                capture_output=True, text=True, timeout=30)
+                                cwd=REPO, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("runner must be a JSON array", result.stderr)
         self.assertFalse(archive.exists())

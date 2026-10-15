@@ -4,6 +4,10 @@ This archive contains the compiled Linux Xen compiler, its standard library,
 learning examples and license notices. The archive name identifies the compiler's
 host architecture; `VERSION` identifies its release version.
 
+Debian and Ubuntu users can also install the `xen-lang` `.deb` from the same
+release. See the [installation guide](https://github.com/skystarry-team/Xen/blob/main/docs/compiler-build/en/installation.md)
+for CPU selection, checksum verification, supported OS versions and apt commands.
+
 Keep `bin/` and `stdlib/` together when moving the distribution. The `.xen` files
 in `stdlib/` are runtime modules used by the compiler's source loader.
 

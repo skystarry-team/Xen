@@ -1,0 +1,128 @@
+name: Release packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'packaging/**'
+      - 'Makefile'
+      - 'VERSION'
+      - 'scripts/test.py'
+      - 'tests/integration/*package*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            architecture: x86_64
+            deb_architecture: amd64
+          - runner: ubuntu-22.04-arm
+            architecture: aarch64
+            deb_architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: test "$RELEASE_TAG" = "v$(cat VERSION)"
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.5.0'
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev qemu-user
+          opam install dune.3.24.2
+      - name: Test packaging and host behavior
+        run: |
+          opam exec -- python3 scripts/test.py --suite packaging
+          opam exec -- python3 scripts/test.py --suite host
+      - name: Build binary distributions
+        run: opam exec -- make release-package PACKAGE_ARCHS=${{ matrix.architecture }}
+      - name: Build source distribution
+        if: matrix.architecture == 'x86_64'
+        run: make source-package
+      - name: Test installation on Debian and Ubuntu
+        env:
+          DEB_ARCH: ${{ matrix.deb_architecture }}
+        run: |
+          for image in debian:12-slim debian:13-slim ubuntu:22.04 ubuntu:24.04 ubuntu:26.04; do
+            docker run --rm \
+              -v "$PWD/dist:/packages:ro" \
+              -v "$PWD/packaging/debian/smoke-test.sh:/smoke-test.sh:ro" \
+              "$image" sh /smoke-test.sh \
+              "$(basename dist/xen-lang_*_"$DEB_ARCH".deb)" "$(cat VERSION)"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.architecture }}
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+          if-no-files-found: error
+
+  assemble:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          path: dist
+          merge-multiple: true
+      - name: Validate assets and generate checksums
+        run: python3 -m packaging.github.release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: assemble
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+      - name: Publish verified release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          (cd dist && sha256sum --check SHA256SUMS)
+          python3 -m packaging.github.release --tag "$RELEASE_TAG"
+          gh release create "$RELEASE_TAG" --verify-tag --draft \
+            --title "Xen $(cat VERSION)" --generate-notes
+          gh release upload "$RELEASE_TAG" dist/*
+          prerelease=false
+          case "$(cat VERSION)" in *[-_]*|*alpha*|*beta*|*rc*) prerelease=true ;; esac
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease="$prerelease"

@@ -121,14 +121,36 @@ Native `run`/`test` checks are skipped when this suite uses a cross compiler thr
 QEMU; generated AArch64 programs are executed separately. See the
 [host test contract](../../../tests/README.md).
 
+## Debian packages for AArch64
+
+The cross setup above is sufficient for tar.gz creation. A `.deb` also needs
+`dpkg-dev` and Debian package metadata for every linked AArch64 system library.
+The `libc6-dev-arm64-cross` sysroot used by QEMU does not by itself provide the
+multiarch package metadata required by `dpkg-shlibdeps`. Prepare the target
+runtime packages as described in [Debian packaging](packaging.md#debian-packages),
+then select the format:
+
+```sh
+make package-deb PACKAGE_ARCHS=aarch64
+make release-package PACKAGE_ARCHS=aarch64
+```
+
+These commands produce `xen-lang_<debian-version>_arm64.deb`; the second also
+produces `xen-<version>-linux-aarch64.tar.gz`. Check metadata with
+`dpkg-deb -f dist/xen-lang_*_arm64.deb Architecture Depends` when the directory
+contains one matching package. Verify installation and native `run`/`test` on an
+AArch64 OS; QEMU compiler execution alone does not validate those child processes.
+GitHub release CI uses a native arm64 runner and the installation checks in
+`packaging/debian/smoke-test.sh`.
+
 ## Optional explicit Dune workspace
 
-[`scripts/dune-workspace.arm64`](../../../scripts/dune-workspace.arm64) provides
+[`packaging/toolchains/dune-workspace.arm64`](../../../packaging/toolchains/dune-workspace.arm64) provides
 an `arm64` context with `host default`. Replace both `/opt/ocaml-aarch64` paths
 with the installed cross prefix and verify its configuration before building:
 
 ```sh
-dune build --workspace=scripts/dune-workspace.arm64 _build/arm64/compiler/main.exe
+dune build --workspace=packaging/toolchains/dune-workspace.arm64 _build/arm64/compiler/main.exe
 aarch64-linux-gnu-readelf -h _build/arm64/compiler/main.exe
 qemu-aarch64 -L /usr/aarch64-linux-gnu _build/arm64/compiler/main.exe version
 ```

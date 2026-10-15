@@ -3,6 +3,9 @@
 Xen 컴파일러는 OCaml 실행 파일입니다. 컴파일러가 실행되는 CPU와 Xen 프로그램의
 출력 타깃은 별개입니다.
 
+배포된 컴파일러의 `.deb`·tar.gz 설치는 [설치 안내](installation.md)를 참고하세요.
+이 문서는 컴파일러를 소스에서 빌드하는 절차를 설명합니다.
+
 | 빌드 환경 | 필요한 OCaml |
 | --- | --- |
 | Linux x86_64에서 x86_64 컴파일러 빌드 | x86_64 네이티브 OCaml |
@@ -18,6 +21,7 @@ AArch64에서 실행되는 네이티브 OCaml을 x86_64에 설치하는 것과�
 - `PATH`에서 실행할 수 있는 네이티브 `ocamlc`와 `ocamlopt`. 기준 버전은 OCaml 5.5.0입니다.
 - Dune 3.18 이상. 기준 빌드 버전은 Dune 3.24.2입니다.
 - 저장소 빌드 명령에 사용하는 GNU Make.
+- 패키징·테스트 스크립트에 사용하는 Python 3.10 이상. `.deb` 생성에는 `dpkg-dev`도 필요합니다.
 
 크로스 OCaml과 네이티브 OCaml의 버전은 정확히 같아야 합니다. 컴파일러 테스트에는
 Python 3.10 이상과 binutils도 필요합니다. 상세 내용은 [테스트 안내](../../../tests/README.md)에 있습니다.
@@ -91,7 +95,7 @@ CLI 기본 타깃은 컴파일러의 OCaml 빌드 아키텍처를 따릅니다.
 기본 버전은 `VERSION` 파일에서 읽습니다. Make에 버전을 지정하면 실행 파일에 포함됩니다.
 
 ```sh
-make build VERSION=0.1.0_1-demo
+make build VERSION=0.1.0-demo.2
 compiler/dist/xen version
 ```
 
@@ -103,5 +107,16 @@ compiler/dist/xen version
 `make test`와 개별 실행 방법은 [테스트 안내](../../../tests/README.md)에 있습니다.
 AArch64 호스트 검증은 `python3 scripts/test.py --suite host`와 `--suite arm64`를 사용합니다.
 전체 테스트에는 x86_64 실행·스코프 AOT 검사도 포함됩니다.
-`make package`는 기본으로 Linux의 두 컴파일러 아키텍처를 빌드하므로,
-AArch64 호스트에서도 x86_64 크로스 툴체인이 필요합니다.
+네이티브 빌드를 패키징할 때는 현재 호스트 CPU를 선택합니다.
+
+```sh
+make package-deb PACKAGE_ARCHS=x86_64
+make release-package PACKAGE_ARCHS=x86_64
+```
+
+AArch64 호스트에서는 `PACKAGE_ARCHS=aarch64`를 사용합니다. 첫 명령은 `.deb`만,
+두 번째는 `.deb`와 tar.gz를 만듭니다. CPU를 지정하지 않으면 `make package`,
+`make package-deb`, `make release-package`가 두 CPU를 모두 요청하므로 다른 CPU의
+크로스 툴체인이 필요합니다. 데비안 크로스 패키징에는 대상 라이브러리 메타데이터도
+필요합니다. 디렉터리 구조·버전 변환·glibc 기준·GitHub 릴리스 절차는
+[패키징 안내](packaging.md)를 참고하세요.

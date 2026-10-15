@@ -45,6 +45,10 @@ xen build hello.xen -o hello
 
 Follow [your first program](docs/en/getting-started.md) or
 [첫 프로그램 실행하기](docs/ko/getting-started.md) for setup and explanations.
+Debian/Ubuntu users can install the matching `xen-lang` `.deb` from
+[GitHub Releases](https://github.com/skystarry-team/Xen/releases) with
+`sudo apt install ./xen-lang_<version>_amd64.deb` (or `_arm64.deb`).
+See [packaging and OS compatibility](docs/compiler-build/en/packaging.md).
 Installation and source builds are covered in the separate
 [compiler build guide](docs/compiler-build/README.md).
 From an extracted distribution use `./bin/xen`; from this repository use

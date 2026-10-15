@@ -121,5 +121,7 @@ See [Darwin/Mach-O validation scope](../compiler/platform/darwin/MACOS_VALIDATIO
 
 `python3 scripts/test.py --suite packaging` checks the default two-architecture
 Make routes, native/cross selection on both host CPUs, toolchain configuration
-validation and preservation of existing archives on package failure. Full archive
+validation, Debian version ordering, real .deb metadata/payload and relocated
+execution, exact release assets/checksums, and preservation of existing files on
+archive or Debian packaging failure. Debian checks require `dpkg-dev`. Full archive
 relocation and compiler execution checks use `integration/host_test.py`.

@@ -5,12 +5,13 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import tempfile
 
-from package import ROOT, binary_architecture, package, parse_runner
+from packaging.common import ROOT, binary_architecture, parse_runner, validate_version
+from packaging.archive.package import package
+from packaging.debian.package import package as deb_package
 
 ARCHITECTURES = ("x86_64", "aarch64")
 OCAML_ARCHITECTURES = {"amd64": "x86_64", "arm64": "aarch64"}
@@ -117,9 +118,11 @@ def workspace(native_bin: Path, builds: list[Build]) -> str:
 
 
 def build_packages(architectures: list[str], toolchains: Path, version: str,
-                   output_dir: Path, *, build_only: bool = False) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9._+-]+", version):
-        raise ValueError("invalid package version")
+                   output_dir: Path, *, build_only: bool = False,
+                   formats: tuple[str, ...] = ("tar.gz",)) -> None:
+    if not formats or len(set(formats)) != len(formats) or set(formats) - {"tar.gz", "deb"}:
+        raise ValueError("select distinct package formats: tar.gz deb")
+    validate_version(version)
     native_bin, builds = plan(architectures, load_toolchains(toolchains))
     dune = shutil.which("dune")
     if not dune:
@@ -136,16 +139,17 @@ def build_packages(architectures: list[str], toolchains: Path, version: str,
     if build_only:
         return
     output_dir.mkdir(parents=True, exist_ok=True)
-    # Complete every archive before replacing any existing release artifact.
+    # Complete every format and architecture before replacing release artifacts.
     with tempfile.TemporaryDirectory(prefix=".xen-package-", dir=output_dir) as directory:
         staging = Path(directory)
         for build in builds:
-            package(None, None, binary=build.binary, version=version, platform="linux",
-                    architecture=build.architecture, runner=build.runner, output_dir=staging)
-        for build in builds:
-            name = f"xen-{version}-linux-{build.architecture}.tar.gz"
-            (staging / name).replace(output_dir / name)
-            print(f"Published {output_dir / name}")
+            for format in formats:
+                writer = package if format == "tar.gz" else deb_package
+                writer(None, None, binary=build.binary, version=version, platform="linux",
+                       architecture=build.architecture, runner=build.runner, output_dir=staging)
+        for artifact in sorted(staging.iterdir()):
+            artifact.replace(output_dir / artifact.name)
+            print(f"Published {output_dir / artifact.name}")
 
 
 def main() -> None:
@@ -156,6 +160,7 @@ def main() -> None:
     parser.add_argument("--version", default=(ROOT / "VERSION").read_text().strip())
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
     parser.add_argument("--build-only", action="store_true")
+    parser.add_argument("--formats", nargs="+", choices=("tar.gz", "deb"), default=["tar.gz"])
     parser.add_argument("--name")
     parser.add_argument("--output")
     args = parser.parse_args()
@@ -165,7 +170,8 @@ def main() -> None:
         if args.name is not None or args.output is not None:
             raise ValueError("PACKAGE_NAME and PACKAGE require make package-one")
         build_packages(["aarch64" if arch == "arm64" else arch for arch in args.architectures],
-                       args.toolchains, args.version, args.output_dir, build_only=args.build_only)
+                       args.toolchains, args.version, args.output_dir, build_only=args.build_only,
+                       formats=tuple(args.formats))
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         detail = error.stderr if isinstance(error, subprocess.CalledProcessError) else str(error)
         parser.exit(1, f"package-build: {detail or str(error)}\n")
