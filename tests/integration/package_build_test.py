@@ -11,7 +11,8 @@ from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
-import package_build as builder
+sys.path.insert(0, str(REPO))
+from packaging import build as builder
 import test as suite_runner
 
 
@@ -46,23 +47,23 @@ class PackageBuildTests(unittest.TestCase):
     def test_make_defaults_and_explicit_single_routes(self):
         for target in ("package", "package-build"):
             command = self.make(target)
-            self.assertIn("scripts/package_build.py --architectures x86_64 aarch64", command)
-            self.assertNotIn("scripts/package.py", command)
+            self.assertIn("-m packaging.build --architectures x86_64 aarch64", command)
+            self.assertNotIn("-m packaging.cli", command)
         self.assertIn("--build-only", self.make("package-build"))
         for selector in ("DUNE_WORKSPACE", "PACKAGE_ARCH", "PACKAGE_CONTEXT", "PACKAGE_BINARY"):
             for command in (self.make("package", selector+"="),
                             self.make("package", extra_env={selector: ""})):
-                self.assertIn("scripts/package_build.py --architectures x86_64 aarch64", command)
+                self.assertIn("-m packaging.build --architectures x86_64 aarch64", command)
         self.assertIn("_build/default/compiler/main.exe", self.make("package-one", "PACKAGE_CONTEXT="))
         command = self.make("package", "PACKAGE_BINARY=/existing/xen", "DUNE_WORKSPACE=/missing")
-        self.assertIn('scripts/package.py --binary "/existing/xen"', command)
+        self.assertIn('-m packaging.cli --binary "/existing/xen"', command)
         self.assertNotIn("dune build", command)
         command = self.make("package", "PACKAGE_CONTEXT=arm64", "DUNE_WORKSPACE=/workspace")
         self.assertIn('_build/arm64/compiler/main.exe', command)
-        self.assertNotIn("scripts/package_build.py", command)
+        self.assertNotIn("-m packaging.build", command)
         command = self.make("package", "PACKAGE_ARCHS=arm64")
-        self.assertIn("scripts/package_build.py --architectures arm64", command)
-        self.assertIn("scripts/package.py", self.make("package-one"))
+        self.assertIn("-m packaging.build --architectures arm64", command)
+        self.assertIn("-m packaging.cli", self.make("package-one"))
 
     def test_make_delegates_test_suites(self):
         command = self.make("test", "QUICKCHECK_SEED=123")

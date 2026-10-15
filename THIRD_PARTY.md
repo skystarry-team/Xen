@@ -16,7 +16,12 @@ runtime. The generated-runtime license is described in [LICENSE](LICENSE).
 Dune and Python are build/test tools; they are not bundled in the binary
 distribution. The demo compiler dynamically uses the host system's glibc
 and libm; those system libraries are not copied into the archive.
-The verified executable references symbols up to `GLIBC_2.38`.
+The minimum glibc version depends on the build environment. Release CI builds
+OCaml and Xen on Ubuntu 22.04, then checks installation on the Debian/Ubuntu
+versions listed in the [packaging guide](https://github.com/skystarry-team/Xen/blob/main/docs/compiler-build/en/packaging.md).
+Debian packages record the actual ELF-derived library requirements in `Depends`;
+inspect them with `dpkg-deb -f <package.deb> Depends`. Locally built archives may
+require newer system libraries than the release artifacts.
 When changing the compiler's linked dependencies or OCaml
 distribution, check their notices and update the bundled license texts
 before creating a release archive.

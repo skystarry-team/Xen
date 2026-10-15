@@ -118,14 +118,36 @@ XEN_BIN="$PWD/_build/package_aarch64/compiler/main.exe" \
 생성된 AArch64 프로그램은 별도로 실행합니다. 상세 내용은
 [호스트 테스트 안내](../../../tests/README.md)에 있습니다.
 
+## AArch64 데비안 패키지
+
+앞의 크로스 설정으로 tar.gz를 생성할 수 있습니다. `.deb`에는 `dpkg-dev`와
+링크되는 모든 AArch64 시스템 라이브러리의 데비안 패키지 메타데이터도 필요합니다.
+QEMU가 사용하는 `libc6-dev-arm64-cross` sysroot만으로는 `dpkg-shlibdeps`에 필요한
+multiarch 패키지 메타데이터를 제공하지 않습니다.
+[데비안 패키징 안내](packaging.md#데비안-패키지)에 따라 대상 런타임 패키지를 준비하고
+형식을 선택합니다.
+
+```sh
+make package-deb PACKAGE_ARCHS=aarch64
+make release-package PACKAGE_ARCHS=aarch64
+```
+
+두 명령은 `xen-lang_<debian-version>_arm64.deb`를 만들며, 두 번째는
+`xen-<version>-linux-aarch64.tar.gz`도 만듭니다. 해당 패키지가 하나만 있는 출력
+디렉터리에서 `dpkg-deb -f dist/xen-lang_*_arm64.deb Architecture Depends`로 메타데이터를
+확인합니다. 실제 설치와 네이티브 `run`·`test`는 AArch64 OS에서 검사해야 하며,
+QEMU를 통한 컴파일러 실행만으로 자식 프로세스까지 검증되지는 않습니다.
+GitHub 릴리스 CI는 네이티브 arm64 러너와
+`packaging/debian/smoke-test.sh`의 설치 검사를 사용합니다.
+
 ## 선택적 Dune workspace
 
-[`scripts/dune-workspace.arm64`](../../../scripts/dune-workspace.arm64)는
+[`packaging/toolchains/dune-workspace.arm64`](../../../packaging/toolchains/dune-workspace.arm64)는
 `host default`인 `arm64` context를 제공합니다. 두 `/opt/ocaml-aarch64` 경로를
 설치한 prefix로 바꾸고 설정을 확인한 뒤 실행합니다.
 
 ```sh
-dune build --workspace=scripts/dune-workspace.arm64 _build/arm64/compiler/main.exe
+dune build --workspace=packaging/toolchains/dune-workspace.arm64 _build/arm64/compiler/main.exe
 aarch64-linux-gnu-readelf -h _build/arm64/compiler/main.exe
 qemu-aarch64 -L /usr/aarch64-linux-gnu _build/arm64/compiler/main.exe version
 ```

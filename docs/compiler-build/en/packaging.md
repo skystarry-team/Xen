@@ -1,12 +1,30 @@
 # Compiler distributions
 
 `make package` builds and packages **both Linux x86_64 and AArch64 compilers**.
-The output names are:
+Its default format is tar.gz. The output names are:
 
 ```text
 dist/xen-<version>-linux-x86_64.tar.gz
 dist/xen-<version>-linux-aarch64.tar.gz
 ```
+
+`make package-deb` creates `xen-lang_<debian-version>_amd64.deb` and
+`xen-lang_<debian-version>_arm64.deb`. `make release-package` creates both formats
+in one staged operation. `PACKAGE_FORMATS="tar.gz deb"` also selects both formats
+on `make package` or `make package-one`. Existing Make selectors remain available.
+
+| Command | Formats | Default compiler CPUs |
+| --- | --- | --- |
+| `make package` | tar.gz | x86_64 and aarch64 |
+| `make package-deb` | .deb | x86_64 and aarch64 |
+| `make release-package` | tar.gz and .deb | x86_64 and aarch64 |
+| `make source-package` | source tar.gz | No compiler build |
+
+For installation of downloaded artifacts, see [installing Xen](installation.md).
+
+Distribution code is organized under [`packaging/`](../../../packaging/README.md):
+`archive/`, `debian/`, `toolchains/` and `github/`, with shared validation and build
+orchestration at the top level. `scripts/` contains the general test runner.
 
 Binary archives contain `bin/xen`, the runtime standard library, learning examples,
 license notices, `VERSION` and a distribution README. The `.xen` files in `stdlib/`
@@ -24,7 +42,7 @@ to prepare the cross compiler on x86_64.
 
 Configure cross prefixes and runners in `.package-toolchains.json` at the
 repository root. This machine-local file is excluded from Git and source archives.
-[`scripts/package-toolchains.example.json`](../../../scripts/package-toolchains.example.json)
+[`packaging/toolchains/example.json`](../../../packaging/toolchains/example.json)
 describes both architecture entries:
 
 ```json
@@ -54,22 +72,22 @@ without promoting over `compiler/dist/xen`.
 
 ```sh
 make package
-make package VERSION=0.1.0_1-demo
+make package VERSION=0.1.0-demo.2
 make package-build
 make package PACKAGE_ARCHS=x86_64
 make package PACKAGE_ARCHS=aarch64
 ```
 
-`package-build` builds both compilers without archiving. `PACKAGE_ARCHS` explicitly
+`package-build` builds both compilers without packaging. `PACKAGE_ARCHS` explicitly
 selects a subset; `arm64` aliases `aarch64`. Each bundled compiler must match the
 requested ELF architecture and report the requested version. All requested
-archives are completed before existing release archives are replaced.
+artifacts are completed before existing release artifacts are replaced.
 
 For one selected context or an existing binary:
 
 ```sh
 make package-one
-make package-one DUNE_WORKSPACE=scripts/dune-workspace.arm64 \
+make package-one DUNE_WORKSPACE=packaging/toolchains/dune-workspace.arm64 \
   PACKAGE_CONTEXT=arm64 PACKAGE_ARCH=aarch64 \
   PACKAGE_RUNNER='["qemu-aarch64","-L","/usr/aarch64-linux-gnu"]'
 make package-one PACKAGE_BINARY=/path/to/xen
@@ -79,15 +97,103 @@ Adjust the workspace's two prefix paths before using the explicit context.
 `PACKAGE_BINARY` skips Dune. For compatibility, nonempty `PACKAGE_BINARY`,
 `PACKAGE_CONTEXT`, `DUNE_WORKSPACE` or `PACKAGE_ARCH` also select single mode
 when passed to `make package`. `PACKAGE_NAME` and `PACKAGE` customize the name
-or output file in single mode. `DIST_DIR` selects the archive directory in either mode.
+or output file in single mode with one format selected. Debian `PACKAGE_NAME`
+changes only the output filename; its installed package name remains `xen-lang`.
+`DIST_DIR` selects the artifact directory in either mode.
+
+## Debian packages
+
+Install build tools with `sudo apt install dpkg-dev`. Native packaging is the
+simplest route; select `PACKAGE_ARCHS=x86_64` or `PACKAGE_ARCHS=aarch64` on each
+native builder. Cross packaging also requires target libraries and their Debian
+package metadata, in addition to OCaml and the version-check runner. For example,
+on an amd64 Debian/Ubuntu builder, install the foreign runtime using
+`sudo dpkg --add-architecture arm64`, `sudo apt update` and
+`sudo apt install libc6:arm64` (configure matching arm64 apt sources first where
+required). `dpkg-shlibdeps` must resolve every linked target library; missing
+metadata fails the package rather than guessing dependencies.
+
+The package is named `xen-lang` and installs `/usr/bin/xen`, runtime modules under
+`/usr/lib/xen`, and examples/notices under `/usr/share/doc/xen-lang`. Both target
+profiles are bundled. No environment variables or maintainer scripts are needed.
+All package files belong to root, including when built by an ordinary user.
+Minimal OS images may exclude documentation using their dpkg configuration.
+
+The following amd64 example assumes `dist/` contains one matching package.
+Use `_arm64.deb` on arm64. See [installation](installation.md) for CPU selection
+and checksum verification.
+
+```sh
+sudo apt install ./dist/xen-lang_*_amd64.deb
+xen version
+xen run hello.xen
+sudo apt remove xen-lang
+```
+
+Debian versions must start with a digit. `_` and `-` suffix separators become
+`~`, and packaging revision `-1` is appended: `0.1.0-demo.2` becomes
+`0.1.0~demo.2-1`, which sorts before `0.1.0-1`. Legacy `0.1.0_1-demo`
+versions map to `0.1.0~1~demo-1`. The compiler's version and bundled
+`VERSION` retain the original text. Dependency versions are calculated from the
+actual ELF with `dpkg-shlibdeps`; rebuilding on a newer OS can raise the minimum
+required glibc version. See [Debian's version rules](https://www.debian.org/doc/debian-policy/ch-controlfields.html#version)
+and [dpkg-shlibdeps](https://manpages.debian.org/stable/dpkg-dev/dpkg-shlibdeps.1.en.html).
+
+## GitHub releases
+
+[The release workflow](../../../.github/workflows/release.yml) builds natively on
+Ubuntu 22.04 for amd64 and arm64, using OCaml 5.5.0 and Dune 3.24.2. This builds
+both the OCaml runtime and Xen against the older system libraries. Packages must
+pass installation, stdlib discovery, check/build/run/test and removal in clean
+**Debian 12/13 and Ubuntu 22.04/24.04/26.04** containers on each CPU. ARM hardware
+validation of other compiler features remains subject to the project's existing
+experimental-support scope. Other derivatives are not separately certified.
+
+1. Set `VERSION`, commit the release changes, and push the matching `v<VERSION>` tag.
+2. Both architecture jobs build tar.gz and .deb assets and run installation checks.
+3. Assembly requires exactly both binary archives, both .deb files and one source
+   archive, then generates `SHA256SUMS`.
+4. Only a tag push publishes a GitHub release. It creates a draft, uploads all six
+   assets, then publishes it. Versions with `_` or `-` suffixes, or alpha/beta/rc
+   markers, are marked as prereleases. A failed upload leaves a draft for inspection;
+   delete that draft before rerunning the publish job. Published releases are not overwritten.
+
+`workflow_dispatch` and packaging pull requests build and validate artifacts
+without publishing. Download the `release-assets` Actions artifact for review.
+Local validation uses `python3 scripts/test.py --suite packaging`. Build a complete
+local asset set in an empty output directory (both compiler toolchains and target
+Debian metadata must be configured):
+
+```sh
+make release-package DIST_DIR=dist/release
+make source-package DIST_DIR=dist/release
+python3 -m packaging.github.release --directory dist/release
+(cd dist/release && sha256sum --check SHA256SUMS)
+```
+
+`release-package` itself creates four binary packages. The source archive and
+checksum manifest are separate steps; the GitHub workflow performs all of them.
+After committing the release changes, publish the matching tag:
+
+```sh
+XEN_RELEASE_TAG="v$(cat VERSION)"
+git tag "$XEN_RELEASE_TAG"
+git push origin "$XEN_RELEASE_TAG"
+```
+
+To validate an assembled local directory, run
+`python3 -m packaging.github.release --directory /path/to/assets --tag v<VERSION>`.
+The asset directory must contain only the five release packages (and optionally
+an existing `SHA256SUMS`); stale files are rejected.
 
 ## Source distribution
 
 ```sh
-make source-package VERSION=0.1.0_1-demo
+make source-package VERSION=0.1.0-demo.2
 ```
 
 This exports `xen-<version>-source.tar.gz` with compiler and standard library
-sources, build files, scripts, tests, documentation, examples and license notices.
+sources, build files, `packaging/`, release workflows, scripts, tests, documentation,
+examples and license notices.
 It does not build compilers or include Git history, machine-local toolchains or
 generated build outputs. Compiler build guides are included in this archive.

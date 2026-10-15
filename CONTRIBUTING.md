@@ -35,6 +35,8 @@ test. English and Korean documentation are maintained in `docs/en/` and
 | `tests/integration/` | Python CLI, distribution, stdlib and scoped AOT tests |
 | `tests/property/` | Generated programs, independent oracles and metamorphic checks |
 | `benchmarks/` | Opt-in timing/size observations; no timing pass thresholds |
+| `packaging/` | Archive and Debian packaging, toolchain examples and release asset checks |
+| `scripts/` | General test runner |
 | `assets/branding/` | AI-generated artwork and its attribution notices |
 | `docs/` | User documentation in English and Korean |
 
