@@ -1,6 +1,5 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
-(* Keep the legacy Linux emitter behind a small adapter. A future Windows backend
-   must supply its own platform ABI, runtime and executable writer. *)
+(* Compose OS-independent x86-64 lowering with Linux services and ELF. *)
 include (struct
   let description : Backend_intf.description = {
     target = { architecture = Target.X86_64; operating_system = Target.Linux };
@@ -10,10 +9,6 @@ include (struct
   }
 
   type executable = bytes
-  let generate checked =
-    match Native_backend.generate checked with
-    | Ok executable -> Ok executable
-    | Error (error : Native_backend.error) ->
-        Error ({ span = error.span; message = error.message } : Backend_intf.error)
+  let generate = Native_backend.generate
   let write = Native_backend.write
 end : Backend_intf.S)

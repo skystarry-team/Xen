@@ -17,6 +17,8 @@ the generated/metamorphic checks. It does not run benchmarks.
 | Location | Purpose |
 | --- | --- |
 | `native_core_test.ml` | Language execution, ownership, cleanup and diagnostics |
+| `x86_64_runtime_test.ml` | CPU-only lowering with an injected runtime, service routing, static/C entry, relocation and compilation-state isolation |
+| `integration/x86_64_runtime_test.py`, `x86_64_runtime_fixture.ml` | Relocatable float formatting/numeric parsing, long inline services, deterministic failures and complete mapping/fd cleanup |
 | `semantic_ir_test.ml` | Verifier mutations and CFG metamorphic checks |
 | `semantic_opt_test.ml` | Scalar optimization and bounded fusion |
 | `scoped_opt_test.ml` | Scoped AOT, LICM, effects and storage lifetimes |
@@ -33,9 +35,15 @@ fixture with GNU cross binutils. Cross dynamic execution uses qemu-aarch64 and
 the installed AArch64 glibc loader/libraries (`/usr/lib/aarch64-linux-gnu`).
 Missing fixture/execution prerequisites are reported as skips; Xen compilation
 itself has no dependency on these tools or target libraries.
+The x86-64 runtime suite uses qemu-x86_64 for mapping/fd traces and native
+x86-64 or QEMU for execution. Fault injection leaves allocation-error rdi
+nonzero and lengthens inline services to check the CPU's service ABI and
+relocations independently of Linux's incidental instruction layout.
 
 ```sh
 dune exec tests/native_core_test.exe
+dune exec tests/x86_64_runtime_test.exe
+python3 tests/integration/x86_64_runtime_test.py
 dune exec tests/semantic_ir_test.exe
 python3 tests/integration/toolchain_test.py
 python3 tests/integration/scoped_opt_test.py

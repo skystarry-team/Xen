@@ -1,0 +1,427 @@
+(* SPDX-License-Identifier: Apache-2.0 *)
+(* Generated runtime code has the additional MIT OR Apache-2.0 permission in LICENSE.
+   CPU algorithms use explicit platform services; no OS implementation is selected here. *)
+module M = Machine_ir
+module Make(R : Runtime_intf.S) = struct
+(* F64 formatter: xmm0 = value, r15d = 0 for newline, nonzero without.
+   Preserve the existing 17-digit rounding/spelling algorithm, including -0,
+   subnormals and signed nonfinite values. Work in base 10^9 stack limbs;
+   only the final byte write is supplied by the platform. All internal control
+   flow uses labels so its size is independent of service implementations. *)
+let emit_float output =
+  M.label output "__xen_print_float";
+  M.bytes output [0xf3;0x0f;0x1e;0xfa]; (* endbr64 *)
+  M.bytes output [0x41;0x55]; (* push   r13 *)
+  M.bytes output [0x66;0x48;0x0f;0x7e;0xc2]; (* movq   rdx,xmm0 *)
+  M.bytes output [0x48;0xb9;0xff;0xff;0xff;0xff;0xff;0xff;0x0f;0x00]; (* movabs rcx,0xfffffffffffff *)
+  M.bytes output [0x41;0x54]; (* push   r12 *)
+  M.bytes output [0x48;0x89;0xd0]; (* mov    rax,rdx *)
+  M.bytes output [0x48;0x21;0xd1]; (* and    rcx,rdx *)
+  M.bytes output [0x55]; (* push   rbp *)
+  M.bytes output [0x48;0xc1;0xe8;0x34]; (* shr    rax,0x34 *)
+  M.bytes output [0x53]; (* push   rbx *)
+  M.bytes output [0x25;0xff;0x07;0x00;0x00]; (* and    eax,0x7ff *)
+  M.bytes output [0x48;0x81;0xec;0xf8;0x0a;0x00;0x00]; (* sub    rsp,0xaf8 *)
+  M.bytes output [0x48;0x8d;0xb4;0x24;0x98;0x01;0x00;0x00]; (* lea    rsi,[rsp+0x198] *)
+  M.bytes output [0x48;0x85;0xd2]; (* test   rdx,rdx *)
+  M.branch output [0x0f;0x89] "__xen_float_classify"; (* jns *)
+  M.bytes output [0xc6;0x84;0x24;0x98;0x01;0x00;0x00;0x2d]; (* mov    BYTE PTR [rsp+0x198],0x2d *)
+  M.bytes output [0x48;0x8d;0xb4;0x24;0x99;0x01;0x00;0x00]; (* lea    rsi,[rsp+0x199] *)
+  M.label output "__xen_float_classify";
+  M.bytes output [0x3d;0xff;0x07;0x00;0x00]; (* cmp    eax,0x7ff *)
+  M.branch output [0x0f;0x85] "__xen_float_finite"; (* jne *)
+  M.bytes output [0x48;0x83;0xf9;0x01]; (* cmp    rcx,0x1 *)
+  M.bytes output [0x48;0x8d;0x56;0x03]; (* lea    rdx,[rsi+0x3] *)
+  M.bytes output [0x45;0x19;0xc0]; (* sbb    r8d,r8d *)
+  M.bytes output [0x41;0x83;0xe0;0xfb]; (* and    r8d,0xfffffffb *)
+  M.bytes output [0x41;0x83;0xc0;0x6e]; (* add    r8d,0x6e *)
+  M.bytes output [0x48;0x83;0xf9;0x01]; (* cmp    rcx,0x1 *)
+  M.bytes output [0x19;0xff]; (* sbb    edi,edi *)
+  M.bytes output [0x44;0x88;0x06]; (* mov    BYTE PTR [rsi],r8b *)
+  M.bytes output [0x83;0xe7;0x0d]; (* and    edi,0xd *)
+  M.bytes output [0x83;0xc7;0x61]; (* add    edi,0x61 *)
+  M.bytes output [0x48;0x83;0xf9;0x01]; (* cmp    rcx,0x1 *)
+  M.bytes output [0x19;0xc0]; (* sbb    eax,eax *)
+  M.bytes output [0x40;0x88;0x7e;0x01]; (* mov    BYTE PTR [rsi+0x1],dil *)
+  M.bytes output [0x83;0xe0;0xf8]; (* and    eax,0xfffffff8 *)
+  M.bytes output [0x83;0xc0;0x6e]; (* add    eax,0x6e *)
+  M.bytes output [0x88;0x46;0x02]; (* mov    BYTE PTR [rsi+0x2],al *)
+  M.branch output [0xe9] "__xen_float_newline"; (* jmp *)
+  M.label output "__xen_float_finite";
+  M.bytes output [0x85;0xc0]; (* test   eax,eax *)
+  M.branch output [0x0f;0x85] "__xen_float_significand"; (* jne *)
+  M.bytes output [0x48;0x85;0xc9]; (* test   rcx,rcx *)
+  M.branch output [0x0f;0x85] "__xen_float_significand"; (* jne *)
+  M.bytes output [0xc6;0x06;0x30]; (* mov    BYTE PTR [rsi],0x30 *)
+  M.bytes output [0x48;0x8d;0x56;0x01]; (* lea    rdx,[rsi+0x1] *)
+  M.branch output [0xe9] "__xen_float_newline"; (* jmp *)
+  M.label output "__xen_float_significand";
+  M.bytes output [0x41;0xba;0xce;0xfb;0xff;0xff]; (* mov    r10d,0xfffffbce *)
+  M.bytes output [0x85;0xc0]; (* test   eax,eax *)
+  M.branch output [0x0f;0x84] "__xen_float_limbs"; (* je *)
+  M.bytes output [0x48;0x0f;0xba;0xe9;0x34]; (* bts    rcx,0x34 *)
+  M.bytes output [0x44;0x8d;0x90;0xcd;0xfb;0xff;0xff]; (* lea    r10d,[rax-0x433] *)
+  M.label output "__xen_float_limbs";
+  M.bytes output [0x31;0xff]; (* xor    edi,edi *)
+  M.bytes output [0x41;0xb8;0x00;0xca;0x9a;0x3b]; (* mov    r8d,0x3b9aca00 *)
+  M.label output "__xen_float_split_limbs";
+  M.bytes output [0x48;0x85;0xc9]; (* test   rcx,rcx *)
+  M.branch output [0x0f;0x84] "__xen_float_scale"; (* je *)
+  M.bytes output [0x48;0x89;0xc8]; (* mov    rax,rcx *)
+  M.bytes output [0x31;0xd2]; (* xor    edx,edx *)
+  M.bytes output [0x49;0xf7;0xf0]; (* div    r8 *)
+  M.bytes output [0x89;0x54;0xbc;0x98]; (* mov    DWORD PTR [rsp+rdi*4-0x68],edx *)
+  M.bytes output [0x48;0x89;0xc1]; (* mov    rcx,rax *)
+  M.bytes output [0x48;0xff;0xc7]; (* inc    rdi *)
+  M.branch output [0xe9] "__xen_float_split_limbs"; (* jmp *)
+  M.label output "__xen_float_scale";
+  M.bytes output [0x45;0x31;0xc9]; (* xor    r9d,r9d *)
+  M.bytes output [0x41;0xbb;0x00;0xca;0x9a;0x3b]; (* mov    r11d,0x3b9aca00 *)
+  M.bytes output [0x45;0x85;0xd2]; (* test   r10d,r10d *)
+  M.branch output [0x0f;0x88] "__xen_float_negative_exponent"; (* js *)
+  M.label output "__xen_float_multiply_power_two";
+  M.bytes output [0x45;0x39;0xca]; (* cmp    r10d,r9d *)
+  M.branch output [0x0f;0x84] "__xen_float_integer_exponent"; (* je *)
+  M.bytes output [0x45;0x31;0xc0]; (* xor    r8d,r8d *)
+  M.bytes output [0x31;0xc0]; (* xor    eax,eax *)
+  M.label output "__xen_float_double_limb";
+  M.bytes output [0x44;0x39;0xc7]; (* cmp    edi,r8d *)
+  M.branch output [0x0f;0x8e] "__xen_float_double_carry"; (* jle *)
+  M.bytes output [0x42;0x8b;0x54;0x84;0x98]; (* mov    edx,DWORD PTR [rsp+r8*4-0x68] *)
+  M.bytes output [0x48;0x01;0xd2]; (* add    rdx,rdx *)
+  M.bytes output [0x48;0x01;0xd0]; (* add    rax,rdx *)
+  M.bytes output [0x31;0xd2]; (* xor    edx,edx *)
+  M.bytes output [0x49;0xf7;0xf3]; (* div    r11 *)
+  M.bytes output [0x42;0x89;0x54;0x84;0x98]; (* mov    DWORD PTR [rsp+r8*4-0x68],edx *)
+  M.bytes output [0x49;0xff;0xc0]; (* inc    r8 *)
+  M.branch output [0xe9] "__xen_float_double_limb"; (* jmp *)
+  M.label output "__xen_float_double_carry";
+  M.bytes output [0x48;0x85;0xc0]; (* test   rax,rax *)
+  M.branch output [0x0f;0x84] "__xen_float_double_next"; (* je *)
+  M.bytes output [0x48;0x63;0xd7]; (* movsxd rdx,edi *)
+  M.bytes output [0xff;0xc7]; (* inc    edi *)
+  M.bytes output [0x89;0x44;0x94;0x98]; (* mov    DWORD PTR [rsp+rdx*4-0x68],eax *)
+  M.label output "__xen_float_double_next";
+  M.bytes output [0x41;0xff;0xc1]; (* inc    r9d *)
+  M.branch output [0xe9] "__xen_float_multiply_power_two"; (* jmp *)
+  M.label output "__xen_float_integer_exponent";
+  M.bytes output [0x45;0x31;0xd2]; (* xor    r10d,r10d *)
+  M.branch output [0xe9] "__xen_float_decimal_digits"; (* jmp *)
+  M.label output "__xen_float_negative_exponent";
+  M.bytes output [0x41;0xf7;0xda]; (* neg    r10d *)
+  M.bytes output [0x45;0x31;0xc9]; (* xor    r9d,r9d *)
+  M.bytes output [0x41;0xbb;0x00;0xca;0x9a;0x3b]; (* mov    r11d,0x3b9aca00 *)
+  M.label output "__xen_float_multiply_power_five";
+  M.bytes output [0x45;0x31;0xc0]; (* xor    r8d,r8d *)
+  M.bytes output [0x31;0xc0]; (* xor    eax,eax *)
+  M.label output "__xen_float_five_limb";
+  M.bytes output [0x44;0x39;0xc7]; (* cmp    edi,r8d *)
+  M.branch output [0x0f;0x8e] "__xen_float_five_carry"; (* jle *)
+  M.bytes output [0x42;0x8b;0x54;0x84;0x98]; (* mov    edx,DWORD PTR [rsp+r8*4-0x68] *)
+  M.bytes output [0x48;0x8d;0x14;0x92]; (* lea    rdx,[rdx+rdx*4] *)
+  M.bytes output [0x48;0x01;0xd0]; (* add    rax,rdx *)
+  M.bytes output [0x31;0xd2]; (* xor    edx,edx *)
+  M.bytes output [0x49;0xf7;0xf3]; (* div    r11 *)
+  M.bytes output [0x42;0x89;0x54;0x84;0x98]; (* mov    DWORD PTR [rsp+r8*4-0x68],edx *)
+  M.bytes output [0x49;0xff;0xc0]; (* inc    r8 *)
+  M.branch output [0xe9] "__xen_float_five_limb"; (* jmp *)
+  M.label output "__xen_float_five_carry";
+  M.bytes output [0x48;0x85;0xc0]; (* test   rax,rax *)
+  M.branch output [0x0f;0x84] "__xen_float_five_next"; (* je *)
+  M.bytes output [0x48;0x63;0xd7]; (* movsxd rdx,edi *)
+  M.bytes output [0xff;0xc7]; (* inc    edi *)
+  M.bytes output [0x89;0x44;0x94;0x98]; (* mov    DWORD PTR [rsp+rdx*4-0x68],eax *)
+  M.label output "__xen_float_five_next";
+  M.bytes output [0x41;0xff;0xc1]; (* inc    r9d *)
+  M.bytes output [0x45;0x39;0xd1]; (* cmp    r9d,r10d *)
+  M.branch output [0x0f;0x85] "__xen_float_multiply_power_five"; (* jne *)
+  M.label output "__xen_float_decimal_digits";
+  M.bytes output [0x8d;0x47;0xff]; (* lea    eax,[rdi-0x1] *)
+  M.bytes output [0x41;0xb9;0x01;0x00;0x00;0x00]; (* mov    r9d,0x1 *)
+  M.bytes output [0xbb;0x0a;0x00;0x00;0x00]; (* mov    ebx,0xa *)
+  M.bytes output [0x48;0x98]; (* cdqe *)
+  M.bytes output [0x44;0x8b;0x5c;0x84;0x98]; (* mov    r11d,DWORD PTR [rsp+rax*4-0x68] *)
+  M.label output "__xen_float_leading_digit";
+  M.bytes output [0x44;0x89;0xd8]; (* mov    eax,r11d *)
+  M.bytes output [0x31;0xd2]; (* xor    edx,edx *)
+  M.bytes output [0x4d;0x89;0xc8]; (* mov    r8,r9 *)
+  M.bytes output [0xf7;0xf3]; (* div    ebx *)
+  M.bytes output [0x83;0xc2;0x30]; (* add    edx,0x30 *)
+  M.bytes output [0x42;0x88;0x54;0x0c;0x8d]; (* mov    BYTE PTR [rsp+r9*1-0x73],dl *)
+  M.bytes output [0x44;0x89;0xda]; (* mov    edx,r11d *)
+  M.bytes output [0x49;0xff;0xc1]; (* inc    r9 *)
+  M.bytes output [0x41;0x89;0xc3]; (* mov    r11d,eax *)
+  M.bytes output [0x83;0xfa;0x09]; (* cmp    edx,0x9 *)
+  M.branch output [0x0f;0x87] "__xen_float_leading_digit"; (* ja *)
+  M.bytes output [0x4d;0x63;0xc0]; (* movsxd r8,r8d *)
+  M.bytes output [0x48;0x8d;0x94;0x24;0x48;0x06;0x00;0x00]; (* lea    rdx,[rsp+0x648] *)
+  M.bytes output [0x4c;0x89;0xc0]; (* mov    rax,r8 *)
+  M.bytes output [0x49;0x89;0xd1]; (* mov    r9,rdx *)
+  M.label output "__xen_float_reverse_leading_digits";
+  M.bytes output [0x44;0x8a;0x5c;0x04;0x8d]; (* mov    r11b,BYTE PTR [rsp+rax*1-0x73] *)
+  M.bytes output [0x48;0xff;0xc8]; (* dec    rax *)
+  M.bytes output [0x48;0xff;0xc2]; (* inc    rdx *)
+  M.bytes output [0x89;0xc3]; (* mov    ebx,eax *)
+  M.bytes output [0x44;0x88;0x5a;0xff]; (* mov    BYTE PTR [rdx-0x1],r11b *)
+  M.bytes output [0x85;0xc0]; (* test   eax,eax *)
+  M.branch output [0x0f;0x85] "__xen_float_reverse_leading_digits"; (* jne *)
+  M.bytes output [0x83;0xef;0x02]; (* sub    edi,0x2 *)
+  M.bytes output [0x41;0xbc;0x0a;0x00;0x00;0x00]; (* mov    r12d,0xa *)
+  M.bytes output [0x48;0x63;0xff]; (* movsxd rdi,edi *)
+  M.label output "__xen_float_remaining_limbs";
+  M.bytes output [0x85;0xff]; (* test   edi,edi *)
+  M.branch output [0x0f;0x88] "__xen_float_round"; (* js *)
+  M.bytes output [0x44;0x8b;0x5c;0xbc;0x98]; (* mov    r11d,DWORD PTR [rsp+rdi*4-0x68] *)
+  M.bytes output [0xbd;0x00;0xe1;0xf5;0x05]; (* mov    ebp,0x5f5e100 *)
+  M.bytes output [0x4d;0x8d;0x68;0x09]; (* lea    r13,[r8+0x9] *)
+  M.label output "__xen_float_limb_digits";
+  M.bytes output [0x44;0x89;0xd8]; (* mov    eax,r11d *)
+  M.bytes output [0x31;0xd2]; (* xor    edx,edx *)
+  M.bytes output [0xf7;0xf5]; (* div    ebp *)
+  M.bytes output [0x83;0xc0;0x30]; (* add    eax,0x30 *)
+  M.bytes output [0x41;0x89;0xd3]; (* mov    r11d,edx *)
+  M.bytes output [0x31;0xd2]; (* xor    edx,edx *)
+  M.bytes output [0x43;0x88;0x04;0x01]; (* mov    BYTE PTR [r9+r8*1],al *)
+  M.bytes output [0x89;0xe8]; (* mov    eax,ebp *)
+  M.bytes output [0x49;0xff;0xc0]; (* inc    r8 *)
+  M.bytes output [0x41;0xf7;0xf4]; (* div    r12d *)
+  M.bytes output [0x89;0xc5]; (* mov    ebp,eax *)
+  M.bytes output [0x4d;0x39;0xe8]; (* cmp    r8,r13 *)
+  M.branch output [0x0f;0x85] "__xen_float_limb_digits"; (* jne *)
+  M.bytes output [0x48;0xff;0xcf]; (* dec    rdi *)
+  M.branch output [0xe9] "__xen_float_remaining_limbs"; (* jmp *)
+  M.label output "__xen_float_round";
+  M.bytes output [0xba;0x11;0x00;0x00;0x00]; (* mov    edx,0x11 *)
+  M.bytes output [0x44;0x89;0xc0]; (* mov    eax,r8d *)
+  M.bytes output [0x45;0x89;0xc3]; (* mov    r11d,r8d *)
+  M.bytes output [0x44;0x29;0xd0]; (* sub    eax,r10d *)
+  M.bytes output [0x41;0x39;0xd0]; (* cmp    r8d,edx *)
+  M.bytes output [0x41;0x0f;0x4e;0xd0]; (* cmovle edx,r8d *)
+  M.branch output [0x0f;0x8e] "__xen_float_round_down"; (* jle *)
+  M.bytes output [0x80;0xbc;0x24;0x59;0x06;0x00;0x00;0x35]; (* cmp    BYTE PTR [rsp+0x659],0x35 *)
+  M.branch output [0x0f;0x85] "__xen_float_round_tie"; (* jne *)
+  M.bytes output [0xbf;0x12;0x00;0x00;0x00]; (* mov    edi,0x12 *)
+  M.label output "__xen_float_round_sticky";
+  M.bytes output [0x41;0x39;0xfb]; (* cmp    r11d,edi *)
+  M.branch output [0x0f;0x8e] "__xen_float_round_half_even"; (* jle *)
+  M.bytes output [0x45;0x31;0xc0]; (* xor    r8d,r8d *)
+  M.bytes output [0x41;0x80;0x3c;0x39;0x30]; (* cmp    BYTE PTR [r9+rdi*1],0x30 *)
+  M.bytes output [0x41;0x0f;0x95;0xc0]; (* setne  r8b *)
+  M.bytes output [0x48;0xff;0xc7]; (* inc    rdi *)
+  M.bytes output [0x44;0x09;0xc3]; (* or     ebx,r8d *)
+  M.branch output [0xe9] "__xen_float_round_sticky"; (* jmp *)
+  M.label output "__xen_float_round_half_even";
+  M.bytes output [0x40;0x8a;0xbc;0x24;0x58;0x06;0x00;0x00]; (* mov    dil,BYTE PTR [rsp+0x658] *)
+  M.bytes output [0x85;0xdb]; (* test   ebx,ebx *)
+  M.branch output [0x0f;0x85] "__xen_float_round_up"; (* jne *)
+  M.bytes output [0x83;0xe7;0x01]; (* and    edi,0x1 *)
+  M.branch output [0x0f;0x85] "__xen_float_round_up"; (* jne *)
+  M.branch output [0xe9] "__xen_float_round_down"; (* jmp *)
+  M.label output "__xen_float_round_tie";
+  M.branch output [0x0f;0x8e] "__xen_float_round_down"; (* jle *)
+  M.label output "__xen_float_round_up";
+  M.bytes output [0xbf;0x10;0x00;0x00;0x00]; (* mov    edi,0x10 *)
+  M.label output "__xen_float_round_carry";
+  M.bytes output [0x41;0x80;0x3c;0x39;0x39]; (* cmp    BYTE PTR [r9+rdi*1],0x39 *)
+  M.branch output [0x0f;0x85] "__xen_float_round_increment"; (* jne *)
+  M.bytes output [0x41;0xc6;0x04;0x39;0x30]; (* mov    BYTE PTR [r9+rdi*1],0x30 *)
+  M.bytes output [0x48;0x83;0xef;0x01]; (* sub    rdi,0x1 *)
+  M.branch output [0x0f;0x83] "__xen_float_round_carry"; (* jae *)
+  M.bytes output [0xc6;0x84;0x24;0x48;0x06;0x00;0x00;0x31]; (* mov    BYTE PTR [rsp+0x648],0x31 *)
+  M.bytes output [0xbf;0x01;0x00;0x00;0x00]; (* mov    edi,0x1 *)
+  M.branch output [0xe9] "__xen_float_clear_discarded"; (* jmp *)
+  M.label output "__xen_float_round_increment";
+  M.bytes output [0x48;0x63;0xff]; (* movsxd rdi,edi *)
+  M.bytes output [0xfe;0x84;0x3c;0x48;0x06;0x00;0x00]; (* inc    BYTE PTR [rsp+rdi*1+0x648] *)
+  M.label output "__xen_float_round_down";
+  M.bytes output [0xff;0xc8]; (* dec    eax *)
+  M.branch output [0xe9] "__xen_float_trim"; (* jmp *)
+  M.label output "__xen_float_clear_discarded";
+  M.bytes output [0x41;0xc6;0x04;0x39;0x30]; (* mov    BYTE PTR [r9+rdi*1],0x30 *)
+  M.bytes output [0x48;0xff;0xc7]; (* inc    rdi *)
+  M.bytes output [0x48;0x83;0xff;0x11]; (* cmp    rdi,0x11 *)
+  M.branch output [0x0f;0x85] "__xen_float_clear_discarded"; (* jne *)
+  M.label output "__xen_float_trim";
+  M.bytes output [0x48;0x63;0xd2]; (* movsxd rdx,edx *)
+  M.label output "__xen_float_trim_zero";
+  M.bytes output [0x83;0xfa;0x01]; (* cmp    edx,0x1 *)
+  M.branch output [0x0f;0x8e] "__xen_float_notation"; (* jle *)
+  M.bytes output [0x41;0x80;0x7c;0x11;0xff;0x30]; (* cmp    BYTE PTR [r9+rdx*1-0x1],0x30 *)
+  M.bytes output [0x48;0x8d;0x7a;0xff]; (* lea    rdi,[rdx-0x1] *)
+  M.branch output [0x0f;0x85] "__xen_float_notation"; (* jne *)
+  M.bytes output [0x48;0x89;0xfa]; (* mov    rdx,rdi *)
+  M.branch output [0xe9] "__xen_float_trim_zero"; (* jmp *)
+  M.label output "__xen_float_notation";
+  M.bytes output [0x44;0x8d;0x50;0x04]; (* lea    r10d,[rax+0x4] *)
+  M.bytes output [0x41;0x89;0xd0]; (* mov    r8d,edx *)
+  M.bytes output [0x48;0x63;0xfa]; (* movsxd rdi,edx *)
+  M.bytes output [0x41;0x83;0xfa;0x14]; (* cmp    r10d,0x14 *)
+  M.branch output [0x0f;0x86] "__xen_float_fixed"; (* jbe *)
+  M.bytes output [0x8a;0x8c;0x24;0x48;0x06;0x00;0x00]; (* mov    cl,BYTE PTR [rsp+0x648] *)
+  M.bytes output [0xff;0xca]; (* dec    edx *)
+  M.bytes output [0x4c;0x8d;0x56;0x01]; (* lea    r10,[rsi+0x1] *)
+  M.bytes output [0x88;0x0e]; (* mov    BYTE PTR [rsi],cl *)
+  M.branch output [0x0f;0x8e] "__xen_float_scientific_exponent"; (* jle *)
+  M.bytes output [0xc6;0x46;0x01;0x2e]; (* mov    BYTE PTR [rsi+0x1],0x2e *)
+  M.bytes output [0xba;0x01;0x00;0x00;0x00]; (* mov    edx,0x1 *)
+  M.label output "__xen_float_scientific_digits";
+  M.bytes output [0x41;0x8a;0x0c;0x11]; (* mov    cl,BYTE PTR [r9+rdx*1] *)
+  M.bytes output [0x88;0x4c;0x16;0x01]; (* mov    BYTE PTR [rsi+rdx*1+0x1],cl *)
+  M.bytes output [0x48;0xff;0xc2]; (* inc    rdx *)
+  M.bytes output [0x39;0xd7]; (* cmp    edi,edx *)
+  M.branch output [0x0f;0x8f] "__xen_float_scientific_digits"; (* jg *)
+  M.bytes output [0x41;0x8d;0x50;0xff]; (* lea    edx,[r8-0x1] *)
+  M.bytes output [0x4c;0x8d;0x54;0x16;0x02]; (* lea    r10,[rsi+rdx*1+0x2] *)
+  M.label output "__xen_float_scientific_exponent";
+  M.bytes output [0x41;0xc6;0x02;0x65]; (* mov    BYTE PTR [r10],0x65 *)
+  M.bytes output [0x49;0x8d;0x4a;0x02]; (* lea    rcx,[r10+0x2] *)
+  M.bytes output [0xb2;0x2b]; (* mov    dl,0x2b *)
+  M.bytes output [0x85;0xc0]; (* test   eax,eax *)
+  M.branch output [0x0f;0x89] "__xen_float_exponent_magnitude"; (* jns *)
+  M.bytes output [0xf7;0xd8]; (* neg    eax *)
+  M.bytes output [0xb2;0x2d]; (* mov    dl,0x2d *)
+  M.label output "__xen_float_exponent_magnitude";
+  M.bytes output [0x41;0x88;0x52;0x01]; (* mov    BYTE PTR [r10+0x1],dl *)
+  M.bytes output [0xbe;0x01;0x00;0x00;0x00]; (* mov    esi,0x1 *)
+  M.bytes output [0xbf;0x0a;0x00;0x00;0x00]; (* mov    edi,0xa *)
+  M.label output "__xen_float_exponent_digits";
+  M.bytes output [0x99]; (* cdq *)
+  M.bytes output [0xf7;0xff]; (* idiv   edi *)
+  M.bytes output [0x83;0xc2;0x30]; (* add    edx,0x30 *)
+  M.bytes output [0x88;0x54;0x34;0x89]; (* mov    BYTE PTR [rsp+rsi*1-0x77],dl *)
+  M.bytes output [0x48;0x89;0xf2]; (* mov    rdx,rsi *)
+  M.bytes output [0x48;0xff;0xc6]; (* inc    rsi *)
+  M.bytes output [0x85;0xc0]; (* test   eax,eax *)
+  M.branch output [0x0f;0x85] "__xen_float_exponent_digits"; (* jne *)
+  M.bytes output [0x48;0x63;0xc2]; (* movsxd rax,edx *)
+  M.bytes output [0xff;0xca]; (* dec    edx *)
+  M.branch output [0x0f;0x84] "__xen_float_exponent_zero"; (* je *)
+  M.bytes output [0x8a;0x54;0x24;0x8b]; (* mov    dl,BYTE PTR [rsp-0x75] *)
+  M.branch output [0xe9] "__xen_float_exponent_reverse"; (* jmp *)
+  M.label output "__xen_float_exponent_zero";
+  M.bytes output [0xb2;0x30]; (* mov    dl,0x30 *)
+  M.bytes output [0xb8;0x02;0x00;0x00;0x00]; (* mov    eax,0x2 *)
+  M.label output "__xen_float_exponent_reverse";
+  M.bytes output [0x88;0x54;0x24;0x8b]; (* mov    BYTE PTR [rsp-0x75],dl *)
+  M.bytes output [0x48;0x89;0xc6]; (* mov    rsi,rax *)
+  M.bytes output [0x48;0x89;0xca]; (* mov    rdx,rcx *)
+  M.label output "__xen_float_exponent_copy";
+  M.bytes output [0x40;0x8a;0x7c;0x04;0x89]; (* mov    dil,BYTE PTR [rsp+rax*1-0x77] *)
+  M.bytes output [0x48;0xff;0xc8]; (* dec    rax *)
+  M.bytes output [0x48;0xff;0xc2]; (* inc    rdx *)
+  M.bytes output [0x40;0x88;0x7a;0xff]; (* mov    BYTE PTR [rdx-0x1],dil *)
+  M.bytes output [0x85;0xc0]; (* test   eax,eax *)
+  M.branch output [0x0f;0x85] "__xen_float_exponent_copy"; (* jne *)
+  M.bytes output [0x48;0x8d;0x14;0x31]; (* lea    rdx,[rcx+rsi*1] *)
+  M.branch output [0xe9] "__xen_float_newline"; (* jmp *)
+  M.label output "__xen_float_fixed";
+  M.bytes output [0x85;0xc0]; (* test   eax,eax *)
+  M.branch output [0x0f;0x88] "__xen_float_fixed_leading_zero"; (* js *)
+  M.label output "__xen_float_fixed_integer_digit";
+  M.bytes output [0xba;0x30;0x00;0x00;0x00]; (* mov    edx,0x30 *)
+  M.bytes output [0x39;0xcf]; (* cmp    edi,ecx *)
+  M.branch output [0x0f;0x8e] "__xen_float_fixed_integer_store"; (* jle *)
+  M.bytes output [0x41;0x0f;0xbe;0x14;0x09]; (* movsx  edx,BYTE PTR [r9+rcx*1] *)
+  M.label output "__xen_float_fixed_integer_store";
+  M.bytes output [0x88;0x14;0x0e]; (* mov    BYTE PTR [rsi+rcx*1],dl *)
+  M.bytes output [0x48;0xff;0xc1]; (* inc    rcx *)
+  M.bytes output [0x39;0xc8]; (* cmp    eax,ecx *)
+  M.branch output [0x0f;0x8d] "__xen_float_fixed_integer_digit"; (* jge *)
+  M.bytes output [0x8d;0x48;0x01]; (* lea    ecx,[rax+0x1] *)
+  M.bytes output [0x48;0x98]; (* cdqe *)
+  M.bytes output [0x48;0x8d;0x54;0x06;0x01]; (* lea    rdx,[rsi+rax*1+0x1] *)
+  M.bytes output [0x39;0xcf]; (* cmp    edi,ecx *)
+  M.branch output [0x0f;0x8e] "__xen_float_newline"; (* jle *)
+  M.bytes output [0xc6;0x02;0x2e]; (* mov    BYTE PTR [rdx],0x2e *)
+  M.bytes output [0x4c;0x8d;0x14;0x06]; (* lea    r10,[rsi+rax*1] *)
+  M.bytes output [0x48;0x63;0xc1]; (* movsxd rax,ecx *)
+  M.label output "__xen_float_fixed_fraction_digit";
+  M.bytes output [0x39;0xc7]; (* cmp    edi,eax *)
+  M.branch output [0x0f;0x8e] "__xen_float_fixed_end"; (* jle *)
+  M.bytes output [0x41;0x8a;0x14;0x01]; (* mov    dl,BYTE PTR [r9+rax*1] *)
+  M.bytes output [0x88;0x54;0x06;0x01]; (* mov    BYTE PTR [rsi+rax*1+0x1],dl *)
+  M.bytes output [0x48;0xff;0xc0]; (* inc    rax *)
+  M.branch output [0xe9] "__xen_float_fixed_fraction_digit"; (* jmp *)
+  M.label output "__xen_float_fixed_end";
+  M.bytes output [0x41;0x29;0xc8]; (* sub    r8d,ecx *)
+  M.bytes output [0x4b;0x8d;0x54;0x02;0x02]; (* lea    rdx,[r10+r8*1+0x2] *)
+  M.branch output [0xe9] "__xen_float_newline"; (* jmp *)
+  M.label output "__xen_float_fixed_leading_zero";
+  M.bytes output [0x66;0xc7;0x06;0x30;0x2e]; (* mov    WORD PTR [rsi],0x2e30 *)
+  M.bytes output [0x48;0x89;0xf2]; (* mov    rdx,rsi *)
+  M.label output "__xen_float_fixed_fraction_zero";
+  M.bytes output [0x48;0xff;0xc2]; (* inc    rdx *)
+  M.bytes output [0x41;0x89;0xf0]; (* mov    r8d,esi *)
+  M.bytes output [0x41;0x29;0xd0]; (* sub    r8d,edx *)
+  M.bytes output [0x41;0x39;0xc0]; (* cmp    r8d,eax *)
+  M.branch output [0x0f;0x8e] "__xen_float_fixed_fraction_start"; (* jle *)
+  M.bytes output [0xc6;0x42;0x01;0x30]; (* mov    BYTE PTR [rdx+0x1],0x30 *)
+  M.branch output [0xe9] "__xen_float_fixed_fraction_zero"; (* jmp *)
+  M.label output "__xen_float_fixed_fraction_start";
+  M.bytes output [0xba;0x01;0x00;0x00;0x00]; (* mov    edx,0x1 *)
+  M.bytes output [0x29;0xc2]; (* sub    edx,eax *)
+  M.bytes output [0x48;0x01;0xf2]; (* add    rdx,rsi *)
+  M.label output "__xen_float_fixed_fraction_copy";
+  M.bytes output [0x39;0xcf]; (* cmp    edi,ecx *)
+  M.branch output [0x0f;0x8e] "__xen_float_fixed_fraction_end"; (* jle *)
+  M.bytes output [0x41;0x8a;0x04;0x09]; (* mov    al,BYTE PTR [r9+rcx*1] *)
+  M.bytes output [0x88;0x04;0x0a]; (* mov    BYTE PTR [rdx+rcx*1],al *)
+  M.bytes output [0x48;0xff;0xc1]; (* inc    rcx *)
+  M.branch output [0xe9] "__xen_float_fixed_fraction_copy"; (* jmp *)
+  M.label output "__xen_float_fixed_fraction_end";
+  M.bytes output [0x31;0xc0]; (* xor    eax,eax *)
+  M.bytes output [0x85;0xff]; (* test   edi,edi *)
+  M.bytes output [0x48;0x0f;0x49;0xc7]; (* cmovns rax,rdi *)
+  M.bytes output [0x48;0x01;0xc2]; (* add    rdx,rax *)
+  M.label output "__xen_float_newline";
+  M.bytes output [0x45;0x85;0xff]; (* test   r15d,r15d *)
+  M.branch output [0x0f;0x85] "__xen_float_write"; (* jne *)
+  M.bytes output [0xc6;0x02;0x0a]; (* mov    BYTE PTR [rdx],0xa *)
+  M.bytes output [0x48;0xff;0xc2]; (* inc    rdx *)
+  M.label output "__xen_float_write";
+  M.bytes output [0xbf;0x01;0x00;0x00;0x00]; (* mov    edi,0x1 *)
+  M.bytes output [0x48;0x8d;0xb4;0x24;0x98;0x01;0x00;0x00]; (* lea    rsi,[rsp+0x198] *)
+  M.bytes output [0x48;0x29;0xf2]; (* sub    rdx,rsi *)
+  R.write output;
+  M.bytes output [0x48;0x81;0xc4;0xf8;0x0a;0x00;0x00]; (* add    rsp,0xaf8 *)
+  M.bytes output [0x5b]; (* pop    rbx *)
+  M.bytes output [0x5d]; (* pop    rbp *)
+  M.bytes output [0x41;0x5c]; (* pop    r12 *)
+  M.bytes output [0x41;0x5d]; (* pop    r13 *)
+  M.bytes output [0xc3]; (* ret *)
+  ()
+
+let emit output ~fresh =
+  M.add_rodata output "__xen_true" "true"; M.add_rodata output "__xen_false" "false";
+  M.add_rodata output "__xen_decimal_suffix" ".0";
+  M.label output "__xen_print_bool";
+  M.bytes output [0x48;0x85;0xff]; let false_ = fresh "false" and write = fresh "bool_write" in
+  M.branch output [0x0f;0x84] false_; M.bytes output [0x48;0x8d;0x35]; M.rip_rel32 output M.Rodata "__xen_true";
+  M.bytes output [0xba;4;0;0;0]; M.branch output [0xe9] write;
+  M.label output false_; M.bytes output [0x48;0x8d;0x35]; M.rip_rel32 output M.Rodata "__xen_false";
+  M.bytes output [0xba;5;0;0;0]; M.label output write;
+  M.bytes output [0xbf;0x01;0x00;0x00;0x00]; R.write output; M.bytes output [0xc3];
+  M.label output "__xen_print_int";
+  M.bytes output [0x55;0x48;0x89;0xe5;0x48;0x83;0xec;0x20;0x48;0x8d;0x75;0xff;0xc6;0x06;0x0a;
+    0x48;0xc7;0xc1;0x01;0;0;0;0x45;0x85;0xff];
+  let int_newline = fresh "int_newline" in M.branch output [0x0f;0x84] int_newline;
+  M.bytes output [0x48;0x89;0xee;0x48;0x31;0xc9];M.label output int_newline;
+  M.bytes output [0x48;0x89;0xf8;0x45;0x31;0xc9;0x48;0x85;0xc0];
+  let positive = fresh "positive" and digits = fresh "digits" and sign_done = fresh "sign" in
+  M.branch output [0x0f;0x89] positive; M.bytes output [0x48;0xf7;0xd8;0x41;0xb9;1;0;0;0];
+  M.label output positive; M.label output digits;
+  M.bytes output [0x48;0x31;0xd2;0x41;0xb8;0x0a;0;0;0;0x49;0xf7;0xf0;0x80;0xc2;0x30;
+    0x48;0xff;0xce;0x88;0x16;0x48;0xff;0xc1;0x48;0x85;0xc0];
+  M.branch output [0x0f;0x85] digits; M.bytes output [0x45;0x85;0xc9]; M.branch output [0x0f;0x84] sign_done;
+  M.bytes output [0x48;0xff;0xce;0xc6;0x06;0x2d;0x48;0xff;0xc1]; M.label output sign_done;
+  M.bytes output [0xbf;0x01;0x00;0x00;0x00;0x48;0x89;0xca]; R.write output; M.bytes output [0xc9;0xc3]
+  ;
+  M.label output "__xen_print_uint";
+  M.bytes output[0x55;0x48;0x89;0xe5;0x48;0x83;0xec;0x20;0x48;0x8d;0x75;0xff;0x48;0x89;0xf8;0x31;0xc9];
+  let uint_digits=fresh "uint_digits" in M.label output uint_digits;
+  M.bytes output[0x48;0x31;0xd2;0x49;0xc7;0xc0;0x0a;0;0;0;0x49;0xf7;0xf0;0x80;0xc2;0x30;0x48;0xff;0xce;0x88;0x16;0x48;0xff;0xc1;0x48;0x85;0xc0];
+  M.branch output[0x0f;0x85]uint_digits;
+  M.bytes output [0xbf;0x01;0x00;0x00;0x00;0x48;0x89;0xca]; R.write output; M.bytes output [0xc9;0xc3];
+  emit_float output
+
+end

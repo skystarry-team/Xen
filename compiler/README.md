@@ -12,13 +12,14 @@ compiler/
   common/          xen_common: AST, parser, checking, Semantic IR, scoped AOT optimization,
                    project loading, Target and Backend_intf
   cpu/
-    x86_64/        xen_x86_64: x86 instruction/relocation encoding
+    x86_64/        xen_x86_64: x86 encoding, Make(Runtime) lowering and shared
+                   output/heap/collection/file/numeric routines with required OS hooks
     arm64/         xen_arm64: A64 encoding, Make(Runtime) lowering and shared
                    formatting/numeric/ownership routines with required OS hooks
   platform/
     linux/
                    xen_linux_elf: shared Linux dynamic ELF metadata writer
-      x86_64/      xen_linux_x86_64: legacy Linux emitter/runtime, ELF, backend
+      x86_64/      xen_linux_x86_64: Linux runtime, ELF, backend composition
       arm64/       xen_linux_arm64: Linux runtime, ELF, backend composition
     darwin/        xen_darwin: shared Mach-O writer, SHA-256, validation notes
       arm64/       xen_darwin_arm64: internal Darwin runtime/backend prototype
@@ -32,8 +33,9 @@ on Linux/Darwin libraries or re-export their implementations. Darwin ARM64 depen
 on the shared Darwin writer and ARM64 CPU library; it remains unregistered.
 The common library cannot import the driver or any concrete backend. Wrapped module
 names identify the boundary: `Xen_x86_64.Machine_ir` is CPU-specific,
-`Xen_linux_x86_64.Native_backend` is the legacy Linux emitter, and
-`Xen_arm64.Native_backend.Make` accepts an explicit platform implementation.
+`Xen_x86_64.Native_backend.Make` and `Xen_arm64.Native_backend.Make` accept explicit
+platform implementations. Both Linux `Native_backend` modules only instantiate
+their CPU functor with `Linux_runtime`.
 Semantic IR tests and optimizer benchmarks can build
 against `xen_common` alone. The compiler executable remains `compiler/main.exe`,
 and the release executable remains `compiler/dist/xen`.
@@ -45,15 +47,20 @@ executable type, `generate` from `Semantic_ir.checked_program`, and `write`.
 Generation includes runtime emission and executable construction. Errors carry
 an optional source span and a message. Drivers do not access machine bytes or
 choose the executable format. A backend must reject unsupported requested features
-explicitly. The x86-64 adapter translates existing emitter errors into this contract.
+explicitly. Both CPU lowerings return the common backend error type directly.
 
 `Target.t` separates architecture from operating system. ABI, syscall conventions
 and executable formats belong to a concrete combination: Linux ELF/syscalls are
 not properties of every x86-64 target. Other OS implementations need their
 own adapter and platform implementation, even if it reuses instruction encoding.
 CPU-specific ELF writers live under `platform/linux/<cpu>/`, using the corresponding
-CPU encoder. The legacy x86 emitter embeds Linux runtime/syscall blobs and lives under
-`platform/linux/x86_64/`.
+CPU encoder. x86-64 lowering and generated ownership routines use the service ABI
+in `cpu/x86_64/runtime_intf.ml`. Linux owns syscall numbers, mmap/open flags,
+register assignment for raw syscalls, process/glibc startup and executable selection.
+Float formatting, file read builtins and numeric token parsing live in CPU
+runtime modules. Their branches/calls and floating constants use machine-IR
+relocations; file allocation/I/O and the final output write use platform services.
+See the [x86-64 CPU boundary](cpu/x86_64/README.md).
 The shared Mach-O writer and signing code live under `platform/darwin/`, with
 architecture-specific Darwin services in its CPU subdirectories.
 See [platform boundaries](platform/README.md).
@@ -136,8 +143,9 @@ compare-exchange returns the observed old value, and clears a failed ARM reserva
 `extern_call<Result>(library,symbol,args...)` retains library/symbol metadata and
 typed operands in IR. It supports six fixed numeric/Ptr arguments and numeric/Unit
 results, with independent GP/FP ABI banks. Pointer arguments pass addresses only.
-Common checks reject conflicting declarations of a symbol. Linux emitters own
-glibc startup wrappers, GOT calls and dynamic executable selection; the shared
+Common checks reject conflicting declarations of a symbol. CPU lowerings own
+scalar C argument/result registers, GOT calls and the C ABI main thunk. Linux
+runtimes own glibc startup and dynamic executable selection; the shared
 Linux writer emits PT_INTERP, PT_DYNAMIC, DT_NEEDED, dynsym/hash/RELA and eager
 GLOB_DAT relocations. A C ABI main wrapper preserves callee-saved registers and
 returns through libc for initialization/termination and stdio cleanup. Plain Xen
