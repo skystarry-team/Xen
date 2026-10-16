@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/branding/full_logo.png" alt="Xen — AI-generated wordmark" width="560">
+  <picture>
+    <source srcset="assets/branding/black.png" media="(prefers-color-scheme: dark)">
+    <img src="assets/branding/full_logo.png" alt="Xen — AI-generated wordmark" width="560">
+  </picture>
 </p>
 
 <p align="center">

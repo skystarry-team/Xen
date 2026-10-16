@@ -228,11 +228,11 @@ x86의 8·16비트 쓰기는 상위 비트를 보존하고, x86의 32비트 쓰�
 
 | 타깃 | 레지스터 | 명령 |
 | --- | --- | --- |
-| x86-64 | `rax rcx rdx rsi rdi r8..r11` 및 32·16·8비트 별칭 | `mov movzx movsx movsxd`, `add sub xor and or imul`, `shl shr sar`, `neg not bswap`, `cmp test setcc`, `rdtsc`, `nop pause mfence lfence sfence` |
-| AArch64 | `x0..x14`, `w0..w14` | `mov`, `add sub adds subs mul and orr eor`, `lsl lsr asr`, `neg mvn rev`, `sxtb sxth sxtw uxtb uxth`, `cmp tst cset`, `ldr str ldur stur` 및 byte/halfword 명령, `nop yield`, `dmb sy/ish` |
+| x86-64 | `rax rbx rcx rdx rsi rdi r8..r15` 및 32·16·8비트 별칭, 제한된 `rsp` | `mov movzx movsx movsxd lea`, `push pop`, `add sub xor and or imul`, `shl shr sar`, `neg not bswap`, `cmp test setcc`, `rdtsc cpuid`, `nop pause mfence lfence sfence` |
+| AArch64 | `x0..x14`, `x17`, `x19..x28`과 `w` 별칭, 제한된 `sp` | `mov`, `add sub adds subs mul and orr eor`, `lsl lsr asr`, `neg mvn rev`, `sxtb sxth sxtw uxtb uxth`, `cmp tst cset`, `ldr str ldur stur` 및 byte/halfword 명령, 제한된 `mrs`, `nop yield`, `dmb sy/ish` |
 
-x86 별칭은 `eax/ax/al`, `ecx/cx/cl`, `edx/dx/dl`, `esi/si/sil`, `edi/di/dil`,
-`r8d/r8w/r8b`부터 `r11d/r11w/r11b`까지입니다. 확장 명령 외에는 레지스터의
+x86 별칭은 `eax/ax/al`, `ebx/bx/bl`, `ecx/cx/cl`, `edx/dx/dl`, `esi/si/sil`, `edi/di/dil`,
+`r8d/r8w/r8b`부터 `r15d/r15w/r15b`까지입니다. 확장 명령 외에는 레지스터의
 폭이 같아야 합니다. `mov`의 메모리 접근 폭은 레지스터를 따르며,
 `byte/word/dword/qword [base+offset]` 또는 `byte ptr ...`로 명시하면 일치해야 합니다.
 `movzx/movsx`의 메모리 소스는 byte/word 폭을 명시하며, `movsxd`는 dword 소스와
@@ -274,7 +274,64 @@ AArch64의 같은 계산은
 `rdtsc`는 `rax`와 `rdx` 모두를 쓰므로 하나를 출력으로, 나머지를 clobber로
 선언하거나 둘 다 clobber로 선언해야 합니다.
 
-스택·프레임 및 callee-saved 레지스터, SIMD 피연산자, 레이블, 지시어, 분기,
+### 임시 스택 공간과 레지스터 보존
+
+x86은 같은 템플릿 안에서 `sub rsp, N`으로 스택을 확보하고 `add rsp, N`으로
+반환합니다. `N`은 0 이상의 signed32 상수입니다. `push/pop`은 64비트 레지스터를
+받습니다. `push rsp`는 push 전의 포인터 값을 저장하고 `pop rsp`는 거부합니다.
+`mov rax,rsp`로 현재 포인터를 읽고, `lea rax,[rsp+8]`로 메모리에 접근하지 않고
+주소를 계산할 수 있습니다. `lea`는 64비트 목적지와 폭 지정이 없는 `[base+offset]`을 받습니다.
+
+ARM은 `sub sp,sp,#N`과 `add sp,sp,#N`을 사용하며 `N`은 `0..4095`의 16배수입니다.
+`mov xN,sp`로 포인터를 복사할 수 있습니다. 두 타깃 모두 SP를 메모리 base로
+사용하며 기존 접근 폭·변위 규칙을 따릅니다. ARM의 `sp`는 일반 산술·데이터
+레지스터가 아니므로 추가 주소 계산에는 복사한 `x` 레지스터를 사용합니다.
+
+컴파일러는 매 조정을 추적합니다. 확보한 양보다 많이 반환하거나 템플릿 끝까지
+복구하지 않으면 오류입니다. 서로 다른 asm 표현식은 스택 할당을 공유할 수 없습니다.
+`rsp/sp`는 암묵적 피연산자이며 `in/out/inout/clobber`에 지정할 수 없습니다.
+임의의 SP 쓰기와 부분 별칭 `esp/spl/wsp`도 거부합니다. 포인터 복구 검사는 원시
+메모리의 경계 검사가 아닙니다. 유효한 공간에만 접근하고 초기화한 뒤 읽으며,
+반환한 임시 공간의 주소를 유지하지 않아야 합니다. 템플릿이 보는 SP는 컴파일러의
+레지스터 저장 이후 값이며 절대 주소와 스택 배치는 고정 ABI가 아닙니다.
+
+x86-64 예제입니다.
+
+```xen
+fn main() {
+    #scope[bb] {
+        println(asm<Int>(
+            "sub rsp,16; mov [rsp],r12; mov rax,[rsp]; add rsp,16",
+            in("r12",42), out("rax")));
+    }
+}
+```
+
+ARM에서는 `sub sp,sp,#16; str x19,[sp]; ldr x0,[sp]; add sp,sp,#16`과
+`in("x19",42)`, `out("x0")`를 사용합니다.
+
+x86 `rbx/r12..r15`와 ARM `x19..x28`은 일반 별칭·초기화·제약 규칙으로 사용합니다.
+컴파일러가 입력 배치 전에 기존 값을 저장하고 모든 출력을 회수한 뒤 복원합니다.
+입력 전용 제약과 부분 폭 별칭에도 적용합니다. 프레임 레지스터 `rbp/x29`, ARM의
+링크 레지스터 `x30`, 플랫폼 레지스터 `x18`, 컴파일러 임시 레지스터 `x15/x16`은 예약합니다.
+
+### CPU 정보
+
+x86 `cpuid`는 `eax`의 leaf와 `ecx`의 subleaf를 읽고 `eax/ebx/ecx/edx`를 씁니다.
+네 쓰기를 모두 선언하고 두 입력에는 `inout`을 사용합니다.
+
+```xen
+let (leaf,b,c,d) = asm<U32,U32,U32,U32>("cpuid",
+    inout("eax",u32(0)), out("ebx"),
+    inout("ecx",u32(0)), out("edx"));
+```
+
+ARM의 `mrs xN,cntvct_el0`, `mrs xN,cntfrq_el0`, `mrs xN,tpidr_el0`는 각각 가상
+카운터, 주파수와 스레드 포인터를 읽습니다. 목적지는 출력 또는 clobber로 선언합니다.
+다른 시스템 레지스터와 특권 명령은 지원하지 않습니다. 카운터 제공 여부와 접근은
+실행 환경에 따르며 카운터 읽기만으로 메모리 순서를 보장하지 않습니다.
+
+SIMD 피연산자, 레이블, 지시어, 분기,
 호출과 지원 목록 밖의 명령은 거부합니다. `asm`은 예약어입니다.
 `xen check`는 공통 타입·제약을 검사하고 타깃별 명령과 레지스터는 코드 생성
 (`build`, `run`, `test`)에서 검증합니다. 두 백엔드 모두 내부에서 인코딩하므로

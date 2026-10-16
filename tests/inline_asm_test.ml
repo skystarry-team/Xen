@@ -61,4 +61,34 @@ let () =
       "ldur x14, [x14, #-257]";"stur x14, [x14, #256]";
       "ldr x14, [x14, #8]!";"ldr x14, [x14], #8";
       "ldr x14, [x14, ]";"ldr x14, [[x14]]";"ldr x14, [x14, #8"];
+  check "x86-64 stack, extended registers and cpuid"
+    "4881ec800000004c8904244c8b0c244488842480000000440fb69424800000004c0fbf9c247fffffff486304244c8da424800000004d89b5000000004d8b3c244881c480000000415754415e415f0fa2"
+    (Xen_x86_64.Inline_asm.assemble { (spec
+      "sub rsp,128; mov [rsp],r8; mov r9,[rsp]; mov [rsp+128],r8b; movzx r10d,byte [rsp+128]; movsx r11,word [rsp-129]; movsxd rax,dword [rsp]; lea r12,[rsp+128]; mov [r13],r14; mov r15,[r12]; add rsp,128; push r15; push rsp; pop r14; pop r15; cpuid"
+      ["rax";"rcx";"r8";"r13";"r14"]None["r9";"r10";"r11";"r12";"r15";"rbx";"rdx"]) with
+      output_registers=["rax",true;"rcx",true;"r14",true];output_types=[I64;I64;I64] });
+  check "AArch64 stack, extended registers and system reads"
+    "ff4300d1ff8300d1f1030091f30300f9f40340f9f5030239f6034239f7f31778f8f35778ff830091ff43009159e03bd51ae03bd55bd03bd5"
+    (Xen_arm64.Inline_asm.assemble(spec
+      "sub sp,sp,#16; sub sp,sp,#32; mov x17,sp; str x19,[sp]; ldr x20,[sp]; strb w21,[sp,#128]; ldrb w22,[sp,#128]; sturh w23,[sp,#-129]; ldurh w24,[sp,#-129]; add sp,sp,#32; add sp,sp,#16; mrs x25,cntvct_el0; mrs x26,cntfrq_el0; mrs x27,tpidr_el0"
+      ["x19";"w21";"w23"]None["x17";"x20";"x22";"x24";"x25";"x26";"x27"]));
+  List.iter(fun template->rejected template Xen_x86_64.Inline_asm.assemble
+    (spec template ["r8"](Some("r8",true))[]))[
+      "sub rsp,16";"add rsp,16;sub rsp,16";"push r8";"pop r8;push r8";
+      "sub rsp,8;add rsp,16";"mov rsp,r8";"mov esp,16";"and rsp,-16";
+      "sub rsp,r8";"sub rsp,-16";"push r8d;pop r8d";"push r8;pop rsp";
+      "lea rsp,[r8]";"lea r8,qword [rsp]";"lea r8d,[rsp]";
+      "cmp r8,0;sub rsp,16;add rsp,16;sete r8b";
+      "cpuid"];
+  List.iter(fun template->rejected template Xen_arm64.Inline_asm.assemble
+    (spec template ["x14"](Some("x14",true))[]))[
+      "sub sp,sp,#16";"add sp,sp,#16;sub sp,sp,#16";
+      "sub sp,sp,#8;add sp,sp,#8";"sub sp,sp,#16;add sp,sp,#32";
+      "sub sp,sp,x14";"sub sp,x14,#16";"subs sp,sp,#16";
+      "mov sp,x14";"mov w14,sp";"add x14,sp,#16";
+      "ldr sp,[x14]";"ldr x14,[wsp]";"mrs x14,sctlr_el1";"mrs w14,cntvct_el0"];
+  List.iter(fun r->rejected ("constraint "^r) Xen_x86_64.Inline_asm.assemble
+    (spec "nop"[r]None[]))["rsp";"esp";"rbp"];
+  List.iter(fun r->rejected ("constraint "^r) Xen_arm64.Inline_asm.assemble
+    (spec "nop"[r]None[]))["sp";"wsp";"x15";"x16";"x18";"x29";"x30"];
   print_endline "Inline asm encodings and implicit clobber checks passed"
