@@ -132,7 +132,7 @@ let rounded_float span typ value = match canonical typ with
 let normalize_modes modes = List.filter (fun mode -> List.mem mode modes) [Explc; Opt; Bb]
 let union_modes a b = normalize_modes (a @ b)
 
-let check_internal ~entry (program : Ast.program) =
+let check_internal ?(numeric_runtime=false) ~entry (program : Ast.program) =
  try
   Hashtbl.clear layout_table;
   let declarations=Hashtbl.create 16 in
@@ -458,10 +458,14 @@ let check_internal ~entry (program : Ast.program) =
         let typ=match Option.map canonical expected with Some t when T.is_integer t->t|_->I64 in
         make typ(Ir.Int_lit(checked_integer_literal x.span typ ~negative:true digits))
     | Unary(op,x)->let x=expression ~explc ~bb ?expected env x in (match op with
+        | "+" when T.is_numeric x.typ->make x.typ(Ir.Unary(op,x))
+        | "~" when T.is_integer x.typ->make x.typ(Ir.Unary(op,x))
         | "-" when T.is_signed_int x.typ||T.is_float x.typ->make x.typ(Ir.Unary(op,x))
         | "!"->require x.span Bool x.typ;make Bool(Ir.Unary(op,x))
+        | "+"->invalid x.span "unary + expects a numeric type"
+        | "~"->invalid x.span "bitwise ~ expects an integer operand"
         | "-"->invalid x.span "unary - expects a signed integer or float"|_->invalid v.span("unknown unary operator '"^op^"'"))
-    | Binary(op,a,b)->let operand_expected=match expected with Some t when T.is_numeric(canonical t)&&List.mem op["+";"-";"*";"/";"%"]->Some(canonical t)|_->None in
+    | Binary(op,a,b)->let operand_expected=match expected with Some t when T.is_numeric(canonical t)&&List.mem op["+";"-";"*";"/";"%";"**";"&";"|";"^";"<<";">>"]->Some(canonical t)|_->None in
         let a=expression ~explc ~bb ?expected:operand_expected ~transfer:Ir.Direct env a in let b=expression ~explc ~bb ~expected:a.typ ~transfer:Ir.Direct env b in
         if (match a.typ with Ref _->true|_->false) then invalid a.span "reference equality and arithmetic are not supported";
         if a.typ=File then invalid a.span "File equality and arithmetic are not supported";
@@ -471,8 +475,8 @@ let check_internal ~entry (program : Ast.program) =
         if (match a.typ with Named _->true|_->false) then invalid a.span "struct equality and arithmetic are not supported";
         let typ=match op with
         | "+" when a.typ=String->require b.span String b.typ;String
-        | "+"|"-"|"*"|"/"->if not(T.is_numeric a.typ) then invalid a.span "arithmetic expects a numeric type";require b.span a.typ b.typ;a.typ
-        | "%"->if not(T.is_integer a.typ)then invalid a.span "expected Int integer operand";require b.span a.typ b.typ;a.typ
+        | "+"|"-"|"*"|"/"|"%"|"**"->if not(T.is_numeric a.typ) then invalid a.span "arithmetic expects a numeric type";require b.span a.typ b.typ;a.typ
+        | "&"|"|"|"^"|"<<"|">>"->if not(T.is_integer a.typ)then invalid a.span "bitwise and shift operators expect integer operands";require b.span a.typ b.typ;a.typ
         | "<"|"<="|">"|">="->if not(T.is_numeric a.typ) then invalid a.span "comparison expects a numeric type";require b.span a.typ b.typ;Bool
         | "=="|"!="->require b.span a.typ b.typ;Bool
         | "&&"|"||"->require a.span Bool a.typ;require b.span Bool b.typ;Bool|_->invalid v.span("unknown binary operator '"^op^"'") in make typ(Ir.Binary(op,a,b))
@@ -617,6 +621,11 @@ let check_internal ~entry (program : Ast.program) =
         let count=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require count.span I64 count.typ;make(Vec value.typ)(Ir.Call(n,[value;count]))
     | Call(("read_text"|"read_ints"|"read_floats" as n),args)->args_exact n 1 args;let path=expression ~explc ~bb ~expected:String ~transfer:Ir.Direct env(List.hd args)in require path.span String path.typ;
         make (if n="read_text" then String else if n="read_ints" then Vec I64 else Vec F64) (Ir.Call(n,[path]))
+    | Call(name,args) when numeric_runtime && List.mem_assoc name Numeric_math.intrinsics ->
+        let input,result=List.assoc name Numeric_math.intrinsics in
+        args_exact name 1 args;
+        let x=expression ~explc ~bb ~expected:input ~transfer:Ir.Direct env(List.hd args)in
+        require x.span input x.typ;make result(Ir.Call(Numeric_math.private_name name,[x]))
     | Call(("print"|"println" as n),args)->args_exact n 1 args;let x=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in
         if not(T.is_numeric x.typ)&&x.typ<>Bool&&x.typ<>String&&(match x.typ with Vec(I64|F64)->false|_->true)then invalid x.span (n^" accepts Int/Float and all numeric scalars, Bool, String, or Vec");make Unit(Ir.Call(n,[x]))
     | Call("len",args)->args_exact"len" 1 args;let x=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in(match x.typ with String|Vec _->make I64(Ir.Call("len",[x]))|Slice _->make I64(Ir.Slice_len x)|Ref(_, (String|Vec _))->let d=make(match x.typ with Ref(_,t)->t|_->assert false)(Ir.Deref x)in make I64(Ir.Call("len",[d]))|_->invalid x.span "len expects String, Vec, or Slice")
@@ -630,17 +639,25 @@ let check_internal ~entry (program : Ast.program) =
     | Call(("i8"|"u8"|"i16"|"u16"|"i32"|"u32"|"i64"|"u64"|"f32"|"f64" as n),args)->
         args_exact n 1 args;
         let target=match n with "i8"->I8|"u8"->U8|"i16"->I16|"u16"->U16|"i32"->I32|"u32"->U32|"i64"->I64|"u64"->U64|"f32"->F32|_->F64 in
-        (match (List.hd args).node with
-         | Int_lit digits when T.is_integer target->ignore(checked_integer_literal (List.hd args).span target ~negative:false digits)
+        (* Unary + is transparent for literal conversion context too, including
+           U64 literals above I64.max_int. Leave nonliteral arithmetic's type
+           inference unchanged. *)
+        let original=List.hd args in
+        let rec positive_literal (x:Ast.expr)=match x.node with
+          |Unary("+",x)->positive_literal x
+          |Int_lit _|Float_lit _|Unary("-",{node=Int_lit _;_})->Some x
+          |_->None in
+        let raw=Option.value ~default:original (positive_literal original)in
+        (match raw.node with
+         | Int_lit digits when T.is_integer target->ignore(checked_integer_literal raw.span target ~negative:false digits)
          | Unary("-",{node=Int_lit digits;span;_})when T.is_integer target->ignore(checked_integer_literal span target ~negative:true digits)
          | Float_lit f when T.is_integer target->
              let lo,hi=match target with I8->(-128.,128.)|U8->(0.,256.)|I16->(-32768.,32768.)|U16->(0.,65536.)
                |I32->(-2147483648.,2147483648.)|U32->(0.,4294967296.)|I64->(-9223372036854775808.,9223372036854775808.)
                |U64->(0.,18446744073709551616.)|_->assert false in
-             if classify_float f=FP_nan||classify_float f=FP_infinite||f<lo||f>=hi then invalid (List.hd args).span(n^" conversion is outside target range")
-         | Float_lit f when target=F32->ignore(rounded_float (List.hd args).span F32 f)
+             if classify_float f=FP_nan||classify_float f=FP_infinite||f<lo||f>=hi then invalid raw.span(n^" conversion is outside target range")
+         | Float_lit f when target=F32->ignore(rounded_float raw.span F32 f)
          | _->());
-        let raw=List.hd args in
         let x=match raw.node with
           |Int_lit _->expression ~explc ~bb ~expected:(if T.is_integer target then target else U64) ~transfer:Ir.Direct env raw
           |Unary("-",{node=Int_lit _;_})->expression ~explc ~bb ~expected:(if T.is_signed_int target then target else I64) ~transfer:Ir.Direct env raw
@@ -867,9 +884,22 @@ let add_prelude program =
       enums=p.enums@program.enums;
       functions=(if range then p.functions@program.functions else program.functions)}
 
+let numeric_library = lazy(
+  let saved=Hashtbl.copy layout_table in
+  Fun.protect ~finally:(fun()->Hashtbl.clear layout_table;Hashtbl.iter(Hashtbl.add layout_table)saved)
+    (fun()->check_internal ~numeric_runtime:true ~entry:"xmath_entry"
+      (Parser.parse ~file:"<numeric runtime>" Numeric_math.source)))
+
 let finish = function
   | Error d->Error d
-  | Ok typed->try Ok(Semantic_analysis.check(Semantic_lower.lower typed))with Semantic_ir.Invalid(span,message)->Error{span;message;notes=[];help=None}
+  | Ok typed->try
+      let lowered=Semantic_lower.lower typed in
+      let lowered=if Numeric_math.roots lowered=[] then lowered else
+        match Lazy.force numeric_library with
+        |Error d->raise(Invalid d)
+        |Ok library->Numeric_math.link lowered (Semantic_lower.lower library)in
+      Ok(Semantic_analysis.check lowered)
+    with Semantic_ir.Invalid(span,message)->Error{span;message;notes=[];help=None}
     |Semantic_analysis.Diagnostic(span,message,notes)->Error{span;message;notes;help=None}
 
 let validate_tests program = List.iter(fun(f:func)->if f.is_test &&

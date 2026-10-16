@@ -388,6 +388,8 @@ let rec emit_rvalue env (expression:value) node =
       M.label output loop;M.bytes output[0x48;0x85;0xc9];M.branch output[0x0f;0x84]done_;
       M.bytes output[0x8a;0x17;0x44;0x8a;0x06;0x44;0x88;0x07;0x88;0x16;0x48;0xff;0xc7;0x48;0xff;0xc6;0x48;0xff;0xc9];M.branch output[0xe9]loop;
       M.label output done_;M.bytes output[0x48;0x83;0xc4;16];env.stack_depth<-env.stack_depth-16;mov_rax_imm output 0L
+  | Unary ("+", value) -> emit_value env value
+  | Unary ("~", value) -> emit_value env value; M.bytes output [0x48;0xf7;0xd0];normalize_rax output expression.typ
   | Unary ("-", value) when expression.typ = F32 ->
       emit_value env value;M.bytes output[0x66;0x0f;0x7e;0xc0;0x35;0;0;0;0x80;0x66;0x0f;0x6e;0xc0]
   | Unary ("-", value) when expression.typ = F64 ->
@@ -447,6 +449,28 @@ let rec emit_rvalue env (expression:value) node =
        | "+" -> M.bytes output [0x48;0x01;0xc8];normalize_rax output expression.typ
        | "-" -> M.bytes output [0x48;0x29;0xc8];normalize_rax output expression.typ
        | "*" -> M.bytes output [0x48;0x0f;0xaf;0xc1];normalize_rax output expression.typ
+       | "**" ->
+           if T.is_signed_int left.typ then begin
+             let invalid=emit_error_stub output expression.span "negative integer exponent" in
+             M.bytes output [0x48;0x85;0xc9];M.branch output [0x0f;0x88]invalid
+           end;
+           let loop=fresh "power_loop" and skip=fresh "power_skip" and done_=fresh "power_done" in
+           M.bytes output [0xba;1;0;0;0];M.label output loop;
+           M.bytes output [0x48;0x85;0xc9];M.branch output [0x0f;0x84]done_;
+           M.bytes output [0xf6;0xc1;1];M.branch output [0x0f;0x84]skip;
+           M.bytes output [0x48;0x0f;0xaf;0xd0];M.label output skip;
+           M.bytes output [0x48;0x0f;0xaf;0xc0;0x48;0xd1;0xe9];M.branch output [0xe9]loop;
+           M.label output done_;M.bytes output [0x48;0x89;0xd0];normalize_rax output expression.typ
+       | "&"|"|"|"^" ->
+           let opcode=match operator with "&"->0x21|"|"->0x09|_->0x31 in
+           M.bytes output [0x48;opcode;0xc8];normalize_rax output expression.typ
+       | "<<"|">>" ->
+           let invalid=emit_error_stub output expression.span "shift count out of range" in
+           (* Unsigned comparison rejects negative counts and full-width U64
+              counts before the CPU can mask them. *)
+           M.bytes output [0x48;0x83;0xf9;T.bits left.typ];M.branch output [0x0f;0x83] invalid;
+           let opcode=if operator="<<"then 0xe0 else if T.is_signed_int left.typ then 0xf8 else 0xe8 in
+           M.bytes output [0x48;0xd3;opcode];normalize_rax output expression.typ
        | "/" ->
            let ok = fresh "div_ok" and error_zero = emit_error_stub output expression.span "division by zero"
            and error_overflow = emit_error_stub output expression.span "signed division overflow" in
@@ -555,6 +579,14 @@ let rec emit_rvalue env (expression:value) node =
       M.bytes output [0xf2;0x0f;0x10;0x0d]; M.rip_rel32 output M.Rodata upper;
       M.bytes output [0x66;0x0f;0x2e;0xc1]; M.branch output [0x0f;0x83] error;
       M.bytes output [0xf2;0x48;0x0f;0x2c;0xc0]
+  | Call ("$math$bits_u64",[argument]) ->
+      emit_value env argument;M.bytes output[0x66;0x48;0x0f;0x7e;0xc0]
+  | Call ("$math$bits_f64",[argument]) ->
+      emit_value env argument;M.bytes output[0x66;0x48;0x0f;0x6e;0xc0]
+  | Call ("$math$narrow_f32",[argument]) ->
+      emit_value env argument;M.bytes output[0xf2;0x0f;0x5a;0xc0]
+  | Call ("$math$sqrt_f64",[argument]) ->
+      emit_value env argument;M.bytes output[0xf2;0x0f;0x51;0xc0]
   | Call (name,[argument]) when String.starts_with ~prefix:"__convert_" name ->
       emit_value env argument;
       let target=expression.typ and source=argument.typ in
@@ -841,10 +873,12 @@ and emit_call env call_span target arguments =
             M.bytes output [(if extended then 0x4c else 0x48);0x8b;0x84 lor (code lsl 3);0x24]; M.u32 output (Int64.of_int displacement)
           end
         end) arguments offsets;
-      let error = emit_error_stub output call_span "maximum call depth exceeded" in
-      M.bytes output [0x4c;0x8b;0x1d]; M.rip_rel32 output M.Data "__xen_call_depth";
-      M.bytes output [0x49;0x81;0xfb]; M.u32 output (Int64.of_int max_call_depth);
-      M.branch output [0x0f;0x8d] error;
+      if not(Option.fold ~none:false ~some:Numeric_math.is_helper target)then begin
+        let error = emit_error_stub output call_span "maximum call depth exceeded" in
+        M.bytes output [0x4c;0x8b;0x1d]; M.rip_rel32 output M.Data "__xen_call_depth";
+        M.bytes output [0x49;0x81;0xfb]; M.u32 output (Int64.of_int max_call_depth);
+        M.branch output [0x0f;0x8d] error
+      end;
       (match target with
        | Some name->aligned_call env ("fn_" ^ name)
        | None->M.bytes output [0x4c;0x8b;0x9c;0x24];M.u32 output(Int64.of_int total);
@@ -958,7 +992,9 @@ let emit_operation env op = match op.node with
 let emit_function output (func:func) =
   let epilogue=fresh "epilogue"in
   M.label output("fn_"^func.name);M.bytes output[0x55;0x48;0x89;0xe5];
-  M.bytes output[0x48;0xff;0x05];M.rip_rel32 output M.Data "__xen_call_depth";
+  if not(Numeric_math.is_helper func.name)then begin
+    M.bytes output[0x48;0xff;0x05];M.rip_rel32 output M.Data "__xen_call_depth"
+  end;
   let slots=Hashtbl.create 32 and flags=Hashtbl.create 32 and next=ref 8 in
   Array.iter(fun(l:local)->let at=T.align_up !next (descriptor l.typ).alignment in Hashtbl.add slots l.id at;next:=at+max 8(slot_size l.typ))func.locals;
   Array.iter(fun(l:local)->if l.owned then List.iter(fun(off,_)->Hashtbl.add flags(l.id,off)!next;next:= !next+8)(owned_leaves_at 0 l.typ))func.locals;
@@ -1018,7 +1054,10 @@ let emit_function output (func:func) =
      |Branch(v,a,b)->emit_value env v;M.bytes output[0x48;0x85;0xc0];M.branch output[0x0f;0x85](label a);M.branch output[0xe9](label b)
      |Return v->(match v with Some v->emit_value env v|None->mov_rax_imm output 0L);M.branch output[0xe9]epilogue
      |Stop->M.bytes output[0x0f;0x0b]))func.blocks;
-  M.label output epilogue;M.bytes output[0x48;0xff;0x0d];M.rip_rel32 output M.Data "__xen_call_depth";
+  M.label output epilogue;
+  if not(Numeric_math.is_helper func.name)then begin
+    M.bytes output[0x48;0xff;0x0d];M.rip_rel32 output M.Data "__xen_call_depth"
+  end;
   M.bytes output[0xc9;0xc3]
 
 let owned_leaves typ =

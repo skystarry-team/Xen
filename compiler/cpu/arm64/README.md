@@ -74,6 +74,15 @@ follow the existing x86-64 range checks: float-to-integer checks the input in
 and magnitudes above the largest finite F32. F32-to-F64 and same-type
 conversions preserve nonfinite values; narrowing may underflow to signed zero.
 
+`**` supports integer and real exponents. Integer power uses wrapping
+exponentiation by squaring and rejects negative exponents. Floating power and
+`%` use the portable checked-IR routines in `common/numeric_math.ml`, also used
+by x86-64. Only bit reinterpretation, sqrt and final F32 rounding need CPU
+primitives. Helpers remain static, are linked on demand, and do not consume
+the user's logical call-depth budget. Floating remainder is exact, preserves
+the dividend's sign, and follows IEEE fmod cases. F32 power widens to binary64
+and rounds the binary64 result to F32.
+
 `float_runtime.ml` emits a libc-free decimal formatter. It computes an exact
 decimal digit array from the binary64 significand and exponent, rounds to 17
 significant digits with ties to even, and selects fixed/scientific spelling as

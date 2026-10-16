@@ -357,7 +357,7 @@ class ToolchainTests(unittest.TestCase):
             names = archive.getnames()
             prefix = "xen-loader-test-source"
             for relative in ("Makefile", "dune-project", ".gitignore", "compiler/common/checker.ml",
-                             "compiler/common/dune", "compiler/common/backend_intf.ml",
+                             "compiler/common/dune", "compiler/common/backend_intf.ml", "compiler/common/numeric_math.ml",
                              "compiler/cpu/x86_64/dune", "compiler/cpu/x86_64/machine_ir.ml",
                              "compiler/cpu/x86_64/native_backend.ml", "compiler/cpu/x86_64/runtime_intf.ml",
                              "compiler/cpu/x86_64/native_backend.mli", "compiler/cpu/x86_64/README.md",

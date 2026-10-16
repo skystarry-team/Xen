@@ -11,6 +11,7 @@ default and dynamic ELF for external calls. See its [support matrix](cpu/arm64/R
 compiler/
   common/          xen_common: AST, parser, checking, Semantic IR, scoped AOT optimization,
                    project loading, Target and Backend_intf
+                   and portable checked-IR power/remainder algorithms (numeric_math.ml)
   cpu/
     x86_64/        xen_x86_64: x86 encoding, Make(Runtime) lowering and shared
                    output/heap/collection/file/numeric routines with required OS hooks

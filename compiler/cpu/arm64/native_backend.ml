@@ -204,9 +204,27 @@ let binary e (v:value) operator (a:value) (b:value) =
     let signed=division && T.is_signed_int a.typ in
     let error_overflow=if signed then runtime_error e v.span
       (if operator="/" then "signed division overflow" else "signed remainder overflow")else "" in
+    let error_shift=if operator="<<"||operator=">>" then
+      runtime_error e v.span "shift count out of range" else "" in
+    let error_power=if operator="**"&&T.is_signed_int a.typ then
+      runtime_error e v.span "negative integer exponent" else "" in
     load e 0 a;load e 1 b;
     (match operator with
     |"+"->M.add m 0 0 1|"-"->M.sub m 0 0 1|"*"->M.mul m 0 0 1
+    |"**"->
+        if T.is_signed_int a.typ then(M.cmp_zero m 1;M.cond m 11 error_power);
+        let loop=M.fresh m "power_loop_" and skip=M.fresh m "power_skip_" and done_=M.fresh m "power_done_" in
+        M.int m 2 1;M.label m loop;M.cmp_zero m 1;M.cond m 0 done_;
+        M.int m 3 1;M.bit_and m 3 1 3;M.cmp_zero m 3;M.cond m 0 skip;
+        M.mul m 2 2 0;M.label m skip;M.mul m 0 0 0;M.shift_right m 1 1 1;M.branch m loop;
+        M.label m done_;M.mov m 0 2
+    |"&"->M.bit_and m 0 0 1
+    |"|"->M.rr m 0xaa000000 0 0 1
+    |"^"->M.rr m 0xca000000 0 0 1
+    |"<<"|">>"->
+        M.int m 2 (T.bits a.typ);M.cmp m 1 2;M.cond m 2 error_shift;
+        let opcode=if operator="<<"then 0x9ac02000 else if T.is_signed_int a.typ then 0x9ac02800 else 0x9ac02400 in
+        M.rr m opcode 0 0 1
     |"/"|"%"->
         M.cmp_zero m 1;M.cond m 0 error_zero;
         if signed then begin
@@ -318,6 +336,9 @@ let call e (v:value) name args =
       M.int m 0 2;R.call m "runtime_write";R.write_constant m 2 "\n";R.exit m 1;M.label m ok
   |"panic",[message]->string_parts e 1 2 message;M.int m 0 2;
       R.call m "runtime_write";R.write_constant m 2 "\n";R.exit m 1
+  |("$math$bits_u64"|"$math$bits_f64"),[a]->load e 0 a;store e v 0
+  |"$math$narrow_f32",[a]->load_float e 0 a;M.fp_convert m ~single:true 0 0;store_float e v 0
+  |"$math$sqrt_f64",[a]->load_float e 0 a;M.fp_unary m 0x1e61c000 0 0;store_float e v 0
   |name,[a] when String.starts_with ~prefix:"__convert_" name->conversion e v a
   |"float",[a]->conversion e v a
   |"int",[a]->conversion e ~message:"Float cannot be converted to Int" v a
@@ -368,6 +389,8 @@ let rvalue e (v:value) node =
   |String_lit s->
       M.address m 0 (M.constant m s);M.int m 1(String.length s);
       address e 15 v.id;M.store m 0 15 0;M.store m 1 15 8;M.store m 31 15 16
+  |Unary("+",a)->load e 0 a;store e v 0
+  |Unary("~",a)->load e 0 a;M.rr m 0xaa200000 0 31 0;store e v 0
   |Unary("-",a) when T.is_float a.typ->
       load_float e 0 a;M.fp_neg m ~single:(a.typ=F32) 0 0;store_float e v 0
   |Unary("-",a)->load e 0 a;M.sub m 0 31 0;store e v 0
@@ -594,7 +617,7 @@ let emit_function m program box_helpers box_queue (func:func) =
   Hashtbl.iter(fun _ flag->M.offset m 15 29 (-flag);M.store m 31 15 0)flags;
   List.iteri(fun reg id->M.mov m 10 reg;address e 9 id;copy m(size program func.locals.(id).typ))func.params;
   List.iter(fun id->set_flags e(place_of_value(value_of_local func.locals.(id)))true)func.params;
-  depth_enter e func.span;
+  if not(Numeric_math.is_helper func.name)then depth_enter e func.span;
   let block_label id=Printf.sprintf "block_%d_%d" func.id id in
   M.branch m (block_label func.entry);
   Array.iter(fun(b:block)->M.label m (block_label b.id);
@@ -605,7 +628,7 @@ let emit_function m program box_helpers box_queue (func:func) =
     |Return value->Option.iter(fun(v:value)->M.offset m 15 29 (-e.result_slot);
         M.load m 9 15 0;address e 10 v.id;copy m(size program v.typ))value;M.branch m e.epilogue
     |Stop->M.word m 0xd4200000 (* brk #0: unreachable is never a normal return *))func.blocks;
-  M.label m e.epilogue;depth_exit e;
+  M.label m e.epilogue;if not(Numeric_math.is_helper func.name)then depth_exit e;
   M.word m 0x910003bf; (* mov sp,x29 *)
   M.word m 0xa8c17bfd; (* ldp x29,x30,[sp],#16 *)
   M.ret m

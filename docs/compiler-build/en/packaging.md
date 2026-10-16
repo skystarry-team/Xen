@@ -72,7 +72,7 @@ without promoting over `compiler/dist/xen`.
 
 ```sh
 make package
-make package VERSION=0.1.0-demo.2
+make package VERSION=0.1.0-demo.3
 make package-build
 make package PACKAGE_ARCHS=x86_64
 make package PACKAGE_ARCHS=aarch64
@@ -131,8 +131,8 @@ sudo apt remove xen-lang
 ```
 
 Debian versions must start with a digit. `_` and `-` suffix separators become
-`~`, and packaging revision `-1` is appended: `0.1.0-demo.2` becomes
-`0.1.0~demo.2-1`, which sorts before `0.1.0-1`. Legacy `0.1.0_1-demo`
+`~`, and packaging revision `-1` is appended: `0.1.0-demo.3` becomes
+`0.1.0~demo.3-1`, which sorts before `0.1.0-1`. Legacy `0.1.0_1-demo`
 versions map to `0.1.0~1~demo-1`. The compiler's version and bundled
 `VERSION` retain the original text. Dependency versions are calculated from the
 actual ELF with `dpkg-shlibdeps`; rebuilding on a newer OS can raise the minimum
@@ -189,7 +189,7 @@ an existing `SHA256SUMS`); stale files are rejected.
 ## Source distribution
 
 ```sh
-make source-package VERSION=0.1.0-demo.2
+make source-package VERSION=0.1.0-demo.3
 ```
 
 This exports `xen-<version>-source.tar.gz` with compiler and standard library

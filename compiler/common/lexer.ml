@@ -4,8 +4,8 @@ open Ast
 type kind =
   | Ident of string | Int_lit of string | Float_lit of string | String_lit of string
   | Fn | Let | Mut | If | Else | While | For | In | Break | Continue | Return | True | False | Match | Asm | Fat_arrow
-  | Arrow | Eq | Plus | Minus | Star | Slash | Percent | Eq_eq | Bang_eq | Bang | Amp
-  | And_and | Or_or | Lt | Lt_eq | Gt | Gt_eq
+  | Arrow | Eq | Plus | Minus | Star | Power | Slash | Percent | Eq_eq | Bang_eq | Bang | Amp
+  | And_and | Or_or | Pipe | Caret | Tilde | Shl | Shr | Lt | Lt_eq | Gt | Gt_eq
   | Lparen | Rparen | Lbrace | Rbrace | Colon | Comma | Semi | Eof
   | Hash | Lbracket | Rbracket | Dot | Dot_dot
   | Question
@@ -32,6 +32,7 @@ let lex ~file source =
     | '{' -> emit Lbrace 1 | '}' -> emit Rbrace 1
     | ':' -> emit Colon 1 | ',' -> emit Comma 1 | ';' -> emit Semi 1
     | '?' -> emit Question 1
+    | '*' when offset + 1 < length && source.[offset + 1] = '*' -> emit Power 2
     | '+' -> emit Plus 1 | '*' -> emit Star 1 | '/' -> emit Slash 1 | '%' -> emit Percent 1
     | '-' when offset + 1 < length && source.[offset + 1] = '>' -> emit Arrow 2
     | '-' -> emit Minus 1
@@ -43,6 +44,9 @@ let lex ~file source =
     | '&' when offset + 1 < length && source.[offset + 1] = '&' -> emit And_and 2
     | '&' -> emit Amp 1
     | '|' when offset + 1 < length && source.[offset + 1] = '|' -> emit Or_or 2
+    | '|' -> emit Pipe 1 | '^' -> emit Caret 1 | '~' -> emit Tilde 1
+    | '<' when offset + 1 < length && source.[offset + 1] = '<' -> emit Shl 2
+    | '>' when offset + 1 < length && source.[offset + 1] = '>' -> emit Shr 2
     | '<' when offset + 1 < length && source.[offset + 1] = '=' -> emit Lt_eq 2
     | '>' when offset + 1 < length && source.[offset + 1] = '=' -> emit Gt_eq 2
     | '<' -> emit Lt 1 | '>' -> emit Gt 1

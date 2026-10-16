@@ -18,6 +18,8 @@ the generated/metamorphic checks. It does not run benchmarks.
 | --- | --- |
 | `native_core_test.ml` | Language execution, ownership, cleanup and diagnostics |
 | `x86_64_runtime_test.ml` | CPU-only lowering with an injected runtime, service routing, static/C entry, relocation and compilation-state isolation |
+| `operators_test.ml`, `integration/operators_test.py` | Operator precedence and nested generic closers, IR contracts, integer-width bitwise folding, checked shifts, arithmetic, evaluation order and logical short circuit on both CPUs and optimizer levels |
+| `integration/power_remainder_test.py` | Real power and exact floating remainder, independent ULP/bit oracles, subnormal/overflow/IEEE cases, static linking and preserved user recursion depth on both CPUs and optimizer levels |
 | `integration/x86_64_runtime_test.py`, `x86_64_runtime_fixture.ml` | Relocatable float formatting/numeric parsing, long inline services, deterministic failures and complete mapping/fd cleanup |
 | `semantic_ir_test.ml` | Verifier mutations and CFG metamorphic checks |
 | `semantic_opt_test.ml` | Scalar optimization and bounded fusion |

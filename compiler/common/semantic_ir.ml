@@ -180,7 +180,9 @@ let verify program =
               |Float_lit _->if not(Type_desc.is_float v.typ)then bad op.span "float constant type"
               |String_lit _->require String v.typ|Bool_lit _->require Bool v.typ
               |Unary("!",x)->require Bool x.typ;require Bool v.typ
-              |Unary("-",x)->require x.typ v.typ;if not(Type_desc.is_numeric x.typ)then bad op.span "numeric unary operand"
+              |Unary("+",x)->require x.typ v.typ;if not(Type_desc.is_numeric x.typ)then bad op.span "numeric unary operand"
+              |Unary("-",x)->require x.typ v.typ;if not(Type_desc.is_signed_int x.typ||Type_desc.is_float x.typ)then bad op.span "signed numeric unary operand"
+              |Unary("~",x)->require x.typ v.typ;if not(Type_desc.is_integer x.typ)then bad op.span "integer unary operand"
               |Unary _->bad op.span "unknown unary operation"
               |Binary(("&&"|"||"),_,_)->bad op.span "short circuit operation must be CFG"
               |Binary(operator,a,b)->require a.typ b.typ;
@@ -188,8 +190,8 @@ let verify program =
                     |String|Bool|Unit->true|Vec t->equality t|t->Type_desc.is_numeric t in
                   let valid=match operator with
                     |"+"->a.typ=String||Type_desc.is_numeric a.typ
-                    |"-"|"*"|"/"|"<"|"<="|">"|">="->Type_desc.is_numeric a.typ
-                    |"%"->Type_desc.is_integer a.typ
+                    |"-"|"*"|"/"|"%"|"**"|"<"|"<="|">"|">="->Type_desc.is_numeric a.typ
+                    |"&"|"|"|"^"|"<<"|">>"->Type_desc.is_integer a.typ
                     |"=="|"!="->equality a.typ|_->false in
                   if not valid then bad op.span "invalid binary operator or operands";
                   require (if List.mem operator["==";"!=";"<";"<=";">";">="]then Bool else a.typ)v.typ
@@ -220,6 +222,10 @@ let verify program =
                     |"read_floats",[_]->call args[String](Vec F64)
                     |"$vec_into_string",[_]->call args[Vec U8]String
                     |"$inactive_pair",[]->(match v.typ with Ptr _|Slice _->()|_->bad op.span "inactive pair type")
+                    |"$math$bits_u64",[_]->call args[F64]U64
+                    |"$math$bits_f64",[_]->call args[U64]F64
+                    |"$math$narrow_f32",[_]->call args[F64]F32
+                    |"$math$sqrt_f64",[_]->call args[F64]F64
                     |name,[x] when String.starts_with ~prefix:"__convert_" name->
                         let target=List.assoc_opt name ["__convert_i8",I8;"__convert_u8",U8;"__convert_i16",I16;"__convert_u16",U16;
                           "__convert_i32",I32;"__convert_u32",U32;"__convert_i64",I64;"__convert_u64",U64;"__convert_f32",F32;"__convert_f64",F64]in

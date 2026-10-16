@@ -36,6 +36,13 @@ File read builtins retain their status/descriptor calling convention. String
 results own exactly their byte length; numeric Vec results record capacity in
 bytes so growth and drop follow the ordinary Vec layout.
 
+Integer `**` uses wrapping exponentiation by squaring and rejects negative
+exponents. Real `**` and floating `%` use the portable checked-IR functions in
+`common/numeric_math.ml`. This CPU supplies only bit reinterpretation, scalar
+sqrt and final F32 rounding. The compiler links reachable math helpers before
+ownership analysis; these helpers preserve the user's logical call-depth
+budget and require no additional platform services or dynamic libraries.
+
 `tests/x86_64_runtime_test.ml` links only CPU/common libraries and generates code
 with a probe runtime: no ELF, Linux syscall or implicit libc startup is supplied.
 Linux behavior is exercised by native core, stdlib and low-level integration tests.

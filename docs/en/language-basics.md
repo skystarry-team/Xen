@@ -37,7 +37,7 @@ Integer literals default to `Int`, and floating literals to `Float`. A known typ
 
 ## Arithmetic and conversion
 
-Use `+`, `-`, `*`, `/`, and integer remainder `%`. Dividing two `Int` values produces an integer. Convert with `float(...)` first if you need a fractional result. Functions such as `i32(...)`, `u8(...)`, and `f32(...)` select other numeric types explicitly. Values outside the destination type's range cause an error.
+Use `+`, `-`, `*`, `/`, remainder `%`, and power `**`. For example, `2 ** 3` is `8`, `9.0 ** 0.5` is `3.0`, and `5.5 % 2.0` is `1.5`. Dividing two `Int` values produces an integer. Convert with `float(...)` first if you need a fractional result. Functions such as `i32(...)`, `u8(...)`, and `f32(...)` select other numeric types explicitly. Values outside the destination type's range cause an error. See [the operator reference](reference.md#numbers-and-operators) for precedence and special values.
 
 Different numeric types do not mix automatically. This deliberately incorrect program demonstrates the rule:
 

@@ -3,28 +3,40 @@ open Ast
 open Lexer
 
 exception Error of span * string
-type state = { tokens : token array; mutable position : int; mutable pending_eq : bool;
+type state = { tokens : token array; mutable position : int; mutable pending : token list;
   mutable import_names : string list }
 let known_structs : (string, unit) Hashtbl.t = Hashtbl.create 16
 let known_enums : (string, unit) Hashtbl.t = Hashtbl.create 16
 let current_type_params : (string, unit) Hashtbl.t = Hashtbl.create 8
 
 let peek state =
-  state.tokens.(min state.position (Array.length state.tokens - 1))
+  match state.pending with token::_->token
+  |[]->state.tokens.(min state.position (Array.length state.tokens - 1))
 let bump state =
   let token = peek state in
-  if state.position < Array.length state.tokens - 1 then
-    state.position <- state.position + 1;
+  (match state.pending with _::rest->state.pending<-rest
+   |[]->if state.position < Array.length state.tokens - 1 then
+      state.position <- state.position + 1);
   token
 let fail state message = raise (Error ((peek state).span, message))
 let accept state kind =
-  if kind = Eq && state.pending_eq then (state.pending_eq <- false; true)
-  else if (peek state).kind = kind then (ignore (bump state); true) else false
+  if (peek state).kind = kind then (ignore (bump state); true) else false
 let expect state kind name = if not (accept state kind) then fail state ("expected " ^ name)
 let identifier state = match bump state with
   | { kind = Ident name; span } -> name, span | _ -> fail state "expected identifier"
 let expression span node : Ast.expr = { node; span }
 let statement span node : Ast.stmt = { node; span }
+
+(* Only type syntax splits a compound token. Keep the remaining character's
+   span and include pending tokens in every speculative-parser checkpoint. *)
+let close_type state =
+  match (peek state).kind with
+  | Gt -> ignore(bump state)
+  | Gt_eq | Shr as kind ->
+      let token=bump state in
+      let span={token.span with column=token.span.column+1} in
+      state.pending<-{kind=(if kind=Shr then Gt else Eq);span}::state.pending
+  | _ -> fail state "expected >"
 
 let dotted_name state =
   let first, span = identifier state in
@@ -57,7 +69,7 @@ let rec parse_type_arguments state =
   let rec loop acc =
     let t = parse_type state in
     if accept state Comma then loop (t :: acc)
-    else (if accept state Gt_eq then state.pending_eq <- true else expect state Gt ">"; List.rev (t :: acc))
+    else (close_type state; List.rev (t :: acc))
   in loop []
 and parse_type state = match bump state with
   | { kind = Fn; _ } ->
@@ -103,17 +115,17 @@ and parse_type state = match bump state with
   | { kind = Ident "Vec"; _ } ->
       expect state Lt "<";
       let element = parse_type state in
-      if accept state Gt_eq then state.pending_eq <- true else expect state Gt ">";
+      close_type state;
       Vec element
   | { kind = Ident "Slice"; _ } ->
       expect state Lt "<";
       let element = parse_type state in
-      if accept state Gt_eq then state.pending_eq <- true else expect state Gt ">";
+      close_type state;
       Slice element
   | { kind = Ident "Ptr"; _ } ->
       expect state Lt "<";
       let element = parse_type state in
-      if accept state Gt_eq then state.pending_eq <- true else expect state Gt ">";
+      close_type state;
       Ptr element
   | { kind = Ident name; _ } ->
       let rec rest parts = if accept state Dot then let n,_=identifier state in rest(n::parts)
@@ -170,8 +182,12 @@ and range state =
 and logical_or state = binary_left state logical_and [Or_or, "||"]
 and logical_and state = binary_left state equality [And_and, "&&"]
 and equality state = binary_left state comparison [Eq_eq, "=="; Bang_eq, "!="]
-and comparison state = binary_left state additive
+and comparison state = binary_left state bitwise_or
     [Lt, "<"; Lt_eq, "<="; Gt, ">"; Gt_eq, ">="]
+and bitwise_or state = binary_left state bitwise_xor [Pipe, "|"]
+and bitwise_xor state = binary_left state bitwise_and [Caret, "^"]
+and bitwise_and state = binary_left state shift [Amp, "&"]
+and shift state = binary_left state additive [Shl, "<<"; Shr, ">>"]
 and additive state = binary_left state multiplicative [Plus, "+"; Minus, "-"]
 and multiplicative state = binary_left state unary [Star, "*"; Slash, "/"; Percent, "%"]
 and binary_left state next operators =
@@ -189,13 +205,23 @@ and unary state =
   | Minus ->
       ignore (bump state);
       expression token.span (Unary ("-", unary state))
+  | Plus -> ignore (bump state); expression token.span (Unary ("+", unary state))
+  | Tilde -> ignore (bump state); expression token.span (Unary ("~", unary state))
   | Bang -> ignore (bump state); expression token.span (Unary ("!", unary state))
   | Star -> ignore (bump state); expression token.span (Unary ("*", unary state))
+  | Power ->
+      (* In prefix position ** retains the existing double dereference. *)
+      ignore(bump state);
+      let span={token.span with column=token.span.column+1}in
+      expression token.span(Unary("*",expression span(Unary("*",unary state))))
   | Amp ->
       ignore (bump state);
       let mutable_ = accept state Mut in
       expression token.span (Borrow (mutable_, unary state))
-  | _ -> postfix state
+  | _ -> power state
+and power state =
+  let (left:Ast.expr)=postfix state in
+  if accept state Power then expression left.span(Binary("**",left,unary state))else left
 and postfix state =
   let rec loop (value : Ast.expr) =
     if accept state Lbracket then
@@ -267,13 +293,13 @@ and primary state =
             if accept state Rbrace then List.rev statements,None else
             match (peek state).kind with
             | If ->
-                let saved_position=state.position and saved_pending_eq=state.pending_eq in
+                let saved_position=state.position and saved_pending=state.pending in
                 (try
                    let value=parse_expr state in
                    if (peek state).kind<>Rbrace then raise(Error((peek state).span,"if expression is not the match arm tail"));
                    expect state Rbrace "}";List.rev statements,Some value
                  with Error _->
-                   state.position<-saved_position;state.pending_eq<-saved_pending_eq;
+                   state.position<-saved_position;state.pending<-saved_pending;
                    block((!parse_statement_hook state)::statements))
             | Let|Return|While|For|Break|Continue|Hash|Lbrace -> block((!parse_statement_hook state)::statements)
             | _ -> let e=parse_expr state in
@@ -336,7 +362,7 @@ and primary state =
       (* A dotted sequence followed by '(' or '{' is retained as a qualified
          declaration reference. Other dotted sequences remain ordinary field
          and method postfix expressions. *)
-      let saved=state.position in
+      let saved=state.position and saved_pending=state.pending in
       let rec probe parts =
         if (peek state).kind = Dot && state.position + 1 < Array.length state.tokens &&
            (match state.tokens.(state.position + 1).kind with Ident _ -> true | _ -> false)
@@ -345,10 +371,10 @@ and primary state =
       let parts=probe [name] in
       let type_args =
         if (peek state).kind=Lt then
-          let before=state.position in
+          let before=state.position and before_pending=state.pending in
           try let xs=parse_type_arguments state in
-            (match (peek state).kind with Lparen|Lbrace|Dot->xs|_->state.position<-before;[])
-          with Error _ -> state.position<-before;[]
+            (match (peek state).kind with Lparen|Lbrace|Dot->xs|_->state.position<-before;state.pending<-before_pending;[])
+          with Error _ -> state.position<-before;state.pending<-before_pending;[]
         else [] in
       (* A generic argument list can follow the final component of a qualified
          path (module.name<T>), or precede an enum variant (Option<T>.Some).
@@ -374,7 +400,7 @@ and primary state =
         expression token.span (Var full)
       else if type_args<>[] || List.mem prefix state.import_names then
         raise(Error(token.span,"expected generic call, aggregate literal, or enum variant"))
-      else (state.position<-saved;expression token.span (Var name))
+      else (state.position<-saved;state.pending<-saved_pending;expression token.span (Var name))
   | Lparen ->
       if accept state Rparen then expression token.span (Tuple_lit []) else
       let first=parse_expr state in
@@ -585,7 +611,7 @@ let parse_enum state =
 let parse ~file source =
   Hashtbl.clear known_structs;
   Hashtbl.clear known_enums;
-  let state = { tokens = Array.of_list (Lexer.lex ~file source); position = 0; pending_eq = false; import_names=[] } in
+  let state = { tokens = Array.of_list (Lexer.lex ~file source); position = 0; pending = []; import_names=[] } in
   let module_decl =
     match (peek state).kind with
     | Ident "module" -> let _, keyword_span=identifier state in let name,_=dotted_name state in

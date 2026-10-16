@@ -20,9 +20,9 @@ let scalar t = Type_desc.is_integer t || t=Bool
 let safe_rvalue = function
   |Int_lit _|Bool_lit _->true
   |Unary("!",v)->v.typ=Bool
-  |Unary("-",v)->Type_desc.is_integer v.typ
+  |Unary(("-"|"+"|"~"),v)->Type_desc.is_integer v.typ
   |Binary(op,a,b)->a.typ=b.typ &&
-      ((Type_desc.is_integer a.typ && List.mem op ["+";"-";"*";"==";"!=";"<";"<=";">";">="])
+      ((Type_desc.is_integer a.typ && List.mem op ["+";"-";"*";"&";"|";"^";"==";"!=";"<";"<=";">";">="])
        || (a.typ=Bool && List.mem op ["==";"!="]))
   |_->false
 let safe_node = function
@@ -42,12 +42,16 @@ let wrap t n = let bits=Type_desc.bits t in
 let literal t n = if t=Bool then Bool_lit(n<>0L) else Int_lit(wrap t n)
 let fold t r get = match r with
   |Int_lit n->Some(wrap t n)|Bool_lit b->Some(if b then 1L else 0L)
-  |Unary(op,a)->Option.map(fun n->if op="!"then (if n=0L then 1L else 0L)else wrap t(Int64.neg n))(get a)
+  |Unary(op,a)->Option.map(fun n->match op with
+      |"!"->if n=0L then 1L else 0L
+      |"-"->wrap t(Int64.neg n)|"+"->wrap t n|"~"->wrap t(Int64.lognot n)
+      |_->assert false)(get a)
   |Binary(op,a,b)->(match get a,get b with Some x,Some y->
       let cmp=if Type_desc.is_unsigned_int a.typ then Int64.unsigned_compare x y else Int64.compare x y in
       let bool b=if b then 1L else 0L in
       Some(match op with "+"->wrap t(Int64.add x y)|"-"->wrap t(Int64.sub x y)
         |"*"->wrap t(Int64.mul x y)|"=="->bool(cmp=0)|"!="->bool(cmp<>0)
+        |"&"->wrap t(Int64.logand x y)|"|"->wrap t(Int64.logor x y)|"^"->wrap t(Int64.logxor x y)
         |"<"->bool(cmp<0)|"<="->bool(cmp<=0)|">"->bool(cmp>0)|">="->bool(cmp>=0)|_->assert false)
     |_->None)
   |_->None
@@ -55,6 +59,7 @@ let fold t r get = match r with
 (* Candidate decisions use the original checked program, once. Cloned code
    is never revisited for fusion, even if it later simplifies. *)
 let candidate (f:func) =
+  not(Numeric_math.is_helper f.name) &&
   Array.length f.blocks=1 && Array.length f.scopes=1 && scalar f.return_type &&
   Array.for_all(fun(l:local)->scalar l.typ)f.locals &&
   List.for_all(fun (op:operation)->op.scope=0 && safe_node op.node)f.blocks.(0).operations &&
@@ -123,7 +128,7 @@ let boundary (op:operation) = match op.node with
   |Eval(_,Foreign_call _)->"C ABI call/unknown memory"
   |Eval(_,Atomic _)->"atomic memory access"
   |Eval(_,(Volatile_load _|Volatile_store _))->"volatile memory access"
-  |Eval(_,Binary(("/"|"%"),_,_))->"fallible arithmetic"
+  |Eval(_,Binary(("/"|"%"|"**"|"<<"|">>"),_,_))->"fallible arithmetic"
   |Acquire _|Initialize _|Replace _->"projection or non-scalar memory"
   |Drop _|Forget _|Drop_flag _->"ownership bookkeeping"
   |Eval _->"non-scalar, allocation, memory or fallible operation"

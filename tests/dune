@@ -11,6 +11,11 @@
  (libraries unix xen_common))
 
 (test
+ (name operators_test)
+ (modules operators_test)
+ (libraries unix xen_common))
+
+(test
  (name semantic_opt_test)
  (modules semantic_opt_test)
  (libraries unix xen_compiler xen_linux_x86_64))
