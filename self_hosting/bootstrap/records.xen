@@ -1,0 +1,1305 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Frozen, self-contained scalar-syntax implementation of POD records.
+// stdin: Xen source; stdout: Linux x86-64 ELF; stderr: E<code> <byte>.
+#global[bb]
+
+fn main() {
+    let c = allocate(4096);
+    set(c, 0, allocate(1048576)); set(c, 2, allocate(8388608));
+    set(c, 5, allocate(4194304)); set(c, 7, allocate(65536));
+    set(c, 9, allocate(24576)); set(c, 14, allocate(1048576));
+    set(c, 18, allocate(262144));
+    let mut size = 0;
+    let mut done = false;
+    while !done {
+        if size == 1048576 { fail(c, 209); }
+        let count = syscall3(0, 0, get(c, 0) + size, 1048576 - size);
+        if count == 0 { done = true; }
+        else if count != -4 {
+            if count < 0 { fail(c, 210); }
+            size = size + count;
+        }
+    }
+    set(c, 1, size); lex(c); declarations(c);
+    let mut entry = -1;
+    let mut i = 0;
+    while i < get(c, 8) {
+        let f = function_at(c, i);
+        if load(f + 8) == 4 && packed(load(f), 4) == 1852399981 { entry = i; }
+        i = i + 1;
+    }
+    if entry < 0 { fail(c, 311); }
+    let main_function = function_at(c, entry);
+    if load(main_function + 24) != 0 || load(main_function + 32) != 0 { fail(c, 312); }
+    elf(c); call(c, entry);
+    immediate(c, 60); emit(c, 49); emit(c, 255); emit(c, 15); emit(c, 5);
+    print_runtime(c);
+    i = 0;
+    while i < get(c, 8) { compile_function(c, i); i = i + 1; }
+    i = 0;
+    while i < get(c, 15) {
+        let r = get(c, 14) + i * 16;
+        let offset = load(r);
+        let target = function_at(c, load(r + 8));
+        patch(c, offset, load(target + 40) - offset - 4, 4);
+        i = i + 1;
+    }
+    patch(c, 96, get(c, 6), 8); patch(c, 104, get(c, 6), 8);
+    write_all(1, get(c, 5), get(c, 6));
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Linux memory and I/O. These are ordinary compiled Xen functions.
+
+// The only memory primitives. These bodies are parsed and compiled normally.
+fn load(address: Int) -> Int {
+    return asm<Int>("mov rax, [rdi]", in("rdi", address), out("rax"));
+}
+
+fn store(address: Int, value: Int) {
+    asm("mov [rdi], rsi", in("rdi", address), in("rsi", value));
+}
+
+fn byte(address: Int) -> Int {
+    return asm<Int>("movzx rax, byte [rdi]", in("rdi", address), out("rax"));
+}
+
+fn put(address: Int, value: Int) {
+    asm("mov [rdi], sil", in("rdi", address), in("rsi", value));
+}
+
+fn allocate(size: Int) -> Int {
+    let address = syscall6(9, 0, size, 3, 34, -1, 0);
+    if address < 0 { syscall1(60, 70); }
+    return address;
+}
+
+fn write_all(fd: Int, address: Int, size: Int) {
+    let mut done = 0;
+    while done < size {
+        let count = syscall3(1, fd, address + done, size - done);
+        if count != -4 {
+            if count <= 0 { syscall1(60, 74); }
+            done = done + count;
+        }
+    }
+}
+
+fn character(fd: Int, value: Int) {
+    let buffer = allocate(4096);
+    put(buffer, value);
+    write_all(fd, buffer, 1);
+    syscall2(11, buffer, 4096);
+}
+
+fn number(fd: Int, value: Int) {
+    let buffer = allocate(4096);
+    let mut end = 64;
+    let mut remaining = value;
+    if remaining == 0 { end = end - 1; put(buffer + end, 48); }
+    while remaining > 0 {
+        end = end - 1;
+        put(buffer + end, 48 + remaining % 10);
+        remaining = remaining / 10;
+    }
+    write_all(fd, buffer + end, 64 - end);
+    syscall2(11, buffer, 4096);
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// This scalar seed keeps compiler buffers and counters in raw memory.
+
+// Context fields (8 bytes each): source, source size, tokens, token count,
+// cursor, output, output size, functions, function count, variables, var count,
+// lexical depth, frame slots, return type, call relocations, relocation count,
+// bb capability, println runtime offset.
+// The scalar seed passes the raw context address as Int.
+fn get(c: Int, field: Int) -> Int { return load(c + field * 8); }
+
+fn set(c: Int, field: Int, value: Int) { store(c + field * 8, value); }
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Token records, exact spelling, token navigation, and lexing.
+
+fn token(c: Int) -> Int { return get(c, 2) + get(c, 4) * 32; }
+
+fn kind(c: Int) -> Int { return load(token(c)); }
+
+fn position(c: Int) -> Int { return load(token(c) + 8); }
+
+fn length(c: Int) -> Int { return load(token(c) + 16); }
+
+fn address(c: Int) -> Int { return get(c, 0) + position(c); }
+
+fn next(c: Int) { set(c, 4, get(c, 4) + 1); }
+
+fn expect(c: Int, wanted: Int) {
+    if kind(c) != wanted { fail(c, 101); }
+    next(c);
+}
+
+fn take(c: Int, wanted: Int) -> Bool {
+    if kind(c) == wanted { next(c); return true; }
+    return false;
+}
+
+fn packed(p: Int, size: Int) -> Int {
+    let mut value = 0;
+    let mut index = size;
+    while index > 0 { index = index - 1; value = value * 256 + byte(p + index); }
+    return value;
+}
+
+fn word(c: Int) -> Int {
+    if length(c) > 8 { return 0; }
+    return packed(address(c), length(c));
+}
+
+fn is_word(c: Int, value: Int) -> Bool { return kind(c) == 256 && word(c) == value; }
+
+fn need_word(c: Int, value: Int) {
+    if !is_word(c, value) { fail(c, 102); }
+    next(c);
+}
+
+fn same(a: Int, n: Int, b: Int, m: Int) -> Bool {
+    if n != m { return false; }
+    let mut i = 0;
+    while i < n { if byte(a + i) != byte(b + i) { return false; } i = i + 1; }
+    return true;
+}
+
+fn letter(ch: Int) -> Bool {
+    return ch >= 97 && ch <= 122 || ch >= 65 && ch <= 90 || ch == 95;
+}
+
+fn digit(ch: Int) -> Bool { return ch >= 48 && ch <= 57; }
+
+fn add_token(c: Int, tag: Int, start: Int, size: Int, value: Int) {
+    let count = get(c, 3);
+    if count >= 262143 { fail(c, 201); }
+    let t = get(c, 2) + count * 32;
+    store(t, tag); store(t + 8, start); store(t + 16, size); store(t + 24, value);
+    set(c, 3, count + 1);
+}
+
+fn lex(c: Int) {
+    let source = get(c, 0);
+    let size = get(c, 1);
+    let mut i = 0;
+    while i < size {
+        let ch = byte(source + i);
+        // The next free record is a diagnostic sentinel during lexing.
+        set(c, 4, get(c, 3));
+        store(token(c) + 8, i);
+        if ch == 32 || ch == 9 || ch == 10 || ch == 13 { i = i + 1; }
+        else if ch == 47 && i + 1 < size && byte(source + i + 1) == 47 {
+            while i < size && byte(source + i) != 10 { i = i + 1; }
+        } else if letter(ch) {
+            let start = i;
+            i = i + 1;
+            while i < size && (letter(byte(source + i)) || digit(byte(source + i))) { i = i + 1; }
+            add_token(c, 256, start, i - start, 0);
+        } else if digit(ch) {
+            let start = i;
+            let mut value = 0;
+            while i < size && digit(byte(source + i)) {
+                let d = byte(source + i) - 48;
+                if value < -922337203685477580 || value == -922337203685477580 && d > 8 { fail(c, 202); }
+                value = value * 10 - d;
+                i = i + 1;
+            }
+            add_token(c, 257, start, i - start, value);
+        } else if ch == 34 {
+            i = i + 1;
+            let start = i;
+            while i < size && byte(source + i) != 34 {
+                // Only literal asm templates/registers are in this subset.
+                if byte(source + i) == 92 || byte(source + i) < 32 { fail(c, 203); }
+                i = i + 1;
+            }
+            if i == size { fail(c, 203); }
+            add_token(c, 258, start, i - start, 0);
+            i = i + 1;
+        } else {
+            let mut tag = ch;
+            let mut width = 1;
+            let mut following = 0;
+            if i + 1 < size { following = byte(source + i + 1); }
+            if ch == 45 && following == 62 { tag = 259; width = 2; }
+            else if ch == 61 && following == 61 { tag = 260; width = 2; }
+            else if ch == 33 && following == 61 { tag = 261; width = 2; }
+            else if ch == 60 && following == 61 { tag = 262; width = 2; }
+            else if ch == 62 && following == 61 { tag = 263; width = 2; }
+            else if ch == 38 && following == 38 { tag = 264; width = 2; }
+            else if ch == 124 && following == 124 { tag = 265; width = 2; }
+            else if ch == 60 && following == 60 { tag = 266; width = 2; }
+            else if ch == 62 && following == 62 { tag = 267; width = 2; }
+            else if !(ch == 40 || ch == 41 || ch == 123 || ch == 125 || ch == 58 || ch == 44 || ch == 59 || ch == 61 || ch == 43 || ch == 45 || ch == 42 || ch == 47 || ch == 37 || ch == 33 || ch == 60 || ch == 62 || ch == 38 || ch == 124 || ch == 94 || ch == 126 || ch == 35 || ch == 91 || ch == 93 || ch == 46) { fail(c, 204); }
+            add_token(c, tag, i, width, 0);
+            i = i + width;
+        }
+    }
+    add_token(c, 0, size, 0, 0);
+    set(c, 4, 0);
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Compile errors. No executable bytes are published until compilation succeeds.
+
+fn fail(c: Int, code: Int) {
+    character(2, 69);
+    number(2, code);
+    character(2, 32);
+    number(2, position(c));
+    character(2, 10);
+    syscall1(60, 1);
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// x86-64 byte encoding, frame storage, value copies, branches and integer lowering.
+
+// Byte emitter, relative fixups, x86 register operations.
+fn emit(c: Int, value: Int) {
+    let size = get(c, 6);
+    if size >= 4194304 { fail(c, 205); }
+    put(get(c, 5) + size, value);
+    set(c, 6, size + 1);
+}
+
+fn bytes(c: Int, value: Int, count: Int) {
+    let mut v = value;
+    let mut i = 0;
+    while i < count { emit(c, v & 255); v = v >> 8; i = i + 1; }
+}
+
+fn patch(c: Int, offset: Int, value: Int, size: Int) {
+    let mut v = value;
+    let mut i = 0;
+    while i < size { put(get(c, 5) + offset + i, v & 255); v = v >> 8; i = i + 1; }
+}
+
+fn immediate(c: Int, value: Int) { emit(c, 72); emit(c, 184); bytes(c, value, 8); }
+
+fn push(c: Int) { emit(c, 80); }
+
+fn pop(c: Int, reg: Int) {
+    if reg >= 8 { emit(c, 65); emit(c, 88 + reg - 8); }
+    else { emit(c, 88 + reg); }
+}
+
+fn argument_register(index: Int) -> Int {
+    if index == 0 { return 7; }
+    if index == 1 { return 6; }
+    if index == 2 { return 2; }
+    if index == 3 { return 1; }
+    return index + 4;
+}
+
+fn save_local(c: Int, slot: Int) {
+    emit(c, 72); emit(c, 137); emit(c, 133); bytes(c, -8 * (slot + 1), 4);
+}
+
+fn read_local(c: Int, slot: Int) {
+    emit(c, 72); emit(c, 139); emit(c, 133); bytes(c, -8 * (slot + 1), 4);
+}
+
+fn local_address(c: Int, slot: Int) {
+    emit(c, 72); emit(c, 141); emit(c, 133); bytes(c, -8 * (slot + 1), 4);
+}
+
+// Every frame region is independently reserved. A region's slot denotes its
+// lowest address; packed Bool fields retain their one-byte Xen layout.
+fn reserve(c: Int, t: Int) -> Int {
+    let words = (type_size(c, t) + 7) / 8;
+    let end = get(c, 12) + words;
+    if end > 8192 { fail(c, 207); }
+    set(c, 12, end);
+    return end - 1;
+}
+
+// rax = source address; destination is [rbp+offset] or [rdx+offset].
+// Only rcx is scratch; argument registers must be staged before copying.
+fn copy_memory(c: Int, size: Int, base: Int, offset: Int) {
+    let mut i = 0;
+    while i + 8 <= size {
+        emit(c, 72); emit(c, 139); emit(c, 136); bytes(c, i, 4);
+        emit(c, 72); emit(c, 137); emit(c, 136 + base); bytes(c, offset + i, 4);
+        i = i + 8;
+    }
+    while i < size {
+        emit(c, 15); emit(c, 182); emit(c, 136); bytes(c, i, 4);
+        emit(c, 136); emit(c, 136 + base); bytes(c, offset + i, 4);
+        i = i + 1;
+    }
+}
+
+fn save_value(c: Int, slot: Int, offset: Int, t: Int) {
+    let displacement = -8 * (slot + 1) + offset;
+    if t >= 3 { copy_memory(c, type_size(c, t), 5, displacement); }
+    else {
+        if t == 1 { emit(c, 72); emit(c, 137); }
+        else { emit(c, 136); }
+        emit(c, 133); bytes(c, displacement, 4);
+    }
+}
+
+fn read_value(c: Int, slot: Int, t: Int) {
+    if t >= 3 {
+        local_address(c, slot);
+        let snapshot = reserve(c, t);
+        save_value(c, snapshot, 0, t); local_address(c, snapshot);
+    } else if t == 2 {
+        emit(c, 15); emit(c, 182); emit(c, 133); bytes(c, -8 * (slot + 1), 4);
+    } else { read_local(c, slot); }
+}
+
+fn read_field(c: Int, offset: Int, t: Int) {
+    if t >= 3 { emit(c, 72); emit(c, 141); }
+    else if t == 1 { emit(c, 72); emit(c, 139); }
+    else { emit(c, 15); emit(c, 182); }
+    emit(c, 128); bytes(c, offset, 4);
+}
+
+fn jump(c: Int, condition: Int) -> Int {
+    if condition == 0 { emit(c, 233); }
+    else { emit(c, 15); emit(c, condition); }
+    let offset = get(c, 6);
+    bytes(c, 0, 4);
+    return offset;
+}
+
+fn land(c: Int, offset: Int) { patch(c, offset, get(c, 6) - offset - 4, 4); }
+
+fn test(c: Int) { emit(c, 72); emit(c, 133); emit(c, 192); }
+
+fn epilogue(c: Int) { emit(c, 201); emit(c, 195); }
+
+fn runtime_exit(c: Int, status: Int) {
+    immediate(c, 60); emit(c, 191); bytes(c, status, 4); emit(c, 15); emit(c, 5);
+}
+
+fn call(c: Int, target: Int) {
+    let n = get(c, 15);
+    if n >= 65536 { fail(c, 208); }
+    emit(c, 232);
+    let offset = get(c, 6);
+    bytes(c, 0, 4);
+    store(get(c, 14) + n * 16, offset); store(get(c, 14) + n * 16 + 8, target);
+    set(c, 15, n + 1);
+}
+
+fn binary(c: Int, op: Int, left: Int, right: Int) -> Int {
+    type_is(c, right, left);
+    if op == 260 || op == 261 {
+        if left != 1 && left != 2 { fail(c, 301); }
+    } else { type_is(c, left, 1); }
+    // right in rax, left in rcx.
+    pop(c, 1);
+    if op == 43 { emit(c, 72); emit(c, 1); emit(c, 200); }
+    else if op == 45 { emit(c, 72); emit(c, 41); emit(c, 193); emit(c, 72); emit(c, 137); emit(c, 200); }
+    else if op == 42 { emit(c, 72); emit(c, 15); emit(c, 175); emit(c, 193); }
+    else if op == 47 || op == 37 {
+        test(c); let nonzero = jump(c, 133);
+        runtime_exit(c, 101); land(c, nonzero);
+        // Both division and remainder reject Int.min / -1 before idiv.
+        emit(c, 72); emit(c, 131); emit(c, 248); emit(c, 255); // cmp rax,-1
+        let ordinary_divisor = jump(c, 133);
+        emit(c, 72); emit(c, 186); bytes(c, -9223372036854775808, 8); // mov rdx,Int.min
+        emit(c, 72); emit(c, 57); emit(c, 209); // cmp rcx,rdx
+        let ordinary_dividend = jump(c, 133);
+        runtime_exit(c, 101);
+        land(c, ordinary_divisor); land(c, ordinary_dividend);
+        emit(c, 72); emit(c, 137); emit(c, 198); // mov rsi,rax
+        emit(c, 72); emit(c, 137); emit(c, 200); // mov rax,rcx
+        emit(c, 72); emit(c, 153); emit(c, 72); emit(c, 247); emit(c, 254);
+        if op == 37 { emit(c, 72); emit(c, 137); emit(c, 208); }
+    } else if op == 38 || op == 124 || op == 94 {
+        let mut instruction = 33;
+        if op == 124 { instruction = 9; }
+        if op == 94 { instruction = 49; }
+        emit(c, 72); emit(c, instruction); emit(c, 200);
+    } else if op == 266 || op == 267 {
+        // Unsigned comparison also rejects negative counts.
+        emit(c, 72); emit(c, 131); emit(c, 248); emit(c, 63);
+        let valid = jump(c, 134);
+        runtime_exit(c, 101);
+        land(c, valid);
+        emit(c, 72); emit(c, 145); // xchg rax,rcx
+        emit(c, 72); emit(c, 211);
+        if op == 266 { emit(c, 224); } else { emit(c, 248); }
+    } else {
+        emit(c, 72); emit(c, 57); emit(c, 193); // cmp rcx,rax
+        let mut cc = 148;
+        if op == 261 { cc = 149; }
+        if op == 60 { cc = 156; }
+        if op == 62 { cc = 159; }
+        if op == 262 { cc = 158; }
+        if op == 263 { cc = 157; }
+        emit(c, 15); emit(c, cc); emit(c, 192);
+        emit(c, 72); emit(c, 15); emit(c, 182); emit(c, 192);
+        return 2;
+    }
+    return 1;
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// POD record declarations, exact Xen layouts, fields and cycle checking.
+
+fn type_is(c: Int, actual: Int, wanted: Int) { if actual != wanted { fail(c, 301); } }
+
+fn parse_type(c: Int) -> Int {
+    let w = word(c);
+    let record = find_record(c, address(c), length(c));
+    expect(c, 256);
+    if w == 7630409 { return 1; } // Int
+    if w == 1819242306 { return 2; } // Bool
+    if w == 1953066581 { return 0; } // Unit
+    if record >= 0 { return record + 3; }
+    fail(c, 302);
+    return 0;
+}
+
+// Record header: name, length, field count, byte size, alignment, DFS state,
+// body token position. Fields (40 bytes): name, length, type, offset, source token.
+fn record_at(c: Int, t: Int) -> Int { return get(c, 18) + (t - 3) * 2048; }
+
+fn field_at(c: Int, t: Int, index: Int) -> Int { return record_at(c, t) + 64 + index * 40; }
+
+fn find_record(c: Int, name: Int, size: Int) -> Int {
+    let mut i = 0;
+    while i < get(c, 19) {
+        let r = record_at(c, i + 3);
+        if same(name, size, load(r), load(r + 8)) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn find_field(c: Int, t: Int, name: Int, size: Int) -> Int {
+    if t < 3 { fail(c, 503); }
+    let mut i = 0;
+    while i < load(record_at(c, t) + 16) {
+        let f = field_at(c, t, i);
+        if same(name, size, load(f), load(f + 8)) { return i; }
+        i = i + 1;
+    }
+    fail(c, 503);
+    return 0;
+}
+
+fn type_size(c: Int, t: Int) -> Int {
+    if t == 0 { return 0; }
+    if t == 1 { return 8; }
+    if t == 2 { return 1; }
+    resolve_record(c, t);
+    return load(record_at(c, t) + 24);
+}
+
+fn type_alignment(c: Int, t: Int) -> Int {
+    if t == 1 { return 8; }
+    if t <= 2 { return 1; }
+    resolve_record(c, t);
+    return load(record_at(c, t) + 32);
+}
+
+fn align(value: Int, alignment: Int) -> Int { return ((value + alignment - 1) / alignment) * alignment; }
+
+fn resolve_record(c: Int, t: Int) {
+    let r = record_at(c, t);
+    if load(r + 40) == 2 { return; }
+    if load(r + 40) == 1 { fail(c, 505); }
+    store(r + 40, 1);
+    let mut size = 0;
+    let mut alignment = 1;
+    let mut i = 0;
+    while i < load(r + 16) {
+        let f = field_at(c, t, i);
+        let ft = load(f + 16);
+        let a = type_alignment(c, ft);
+        let n = type_size(c, ft);
+        if a > alignment { alignment = a; }
+        size = align(size, a);
+        store(f + 24, size);
+        // Each child has already passed the same cap, preventing overflow.
+        size = size + n;
+        if size > 32768 { fail(c, 506); }
+        i = i + 1;
+    }
+    store(r + 24, align(size, alignment)); store(r + 32, alignment); store(r + 40, 2);
+}
+
+fn skip_body(c: Int) {
+    expect(c, 123);
+    let mut depth = 1;
+    while depth > 0 {
+        if kind(c) == 0 { fail(c, 101); }
+        if kind(c) == 123 { depth = depth + 1; }
+        if kind(c) == 125 { depth = depth - 1; }
+        next(c);
+    }
+}
+
+fn capability(c: Int) {
+    if take(c, 35) {
+        need_word(c, 119165519096935); expect(c, 91); need_word(c, 25186); expect(c, 93);
+        set(c, 16, 1);
+    }
+}
+
+fn collect_records(c: Int) {
+    capability(c);
+    // Register every record name before reading field types or signatures.
+    while kind(c) != 0 {
+        if is_word(c, 127970521019507) {
+            next(c);
+            if reserved(word(c)) || builtin_type(c) { fail(c, 303); }
+            if find_record(c, address(c), length(c)) >= 0 { fail(c, 501); }
+            let n = get(c, 19);
+            if n >= 128 { fail(c, 506); }
+            let r = record_at(c, n + 3);
+            store(r, address(c)); store(r + 8, length(c)); expect(c, 256);
+            store(r + 48, get(c, 4)); set(c, 19, n + 1);
+        } else {
+            need_word(c, 28262);
+            while kind(c) != 123 {
+                if kind(c) == 0 { fail(c, 101); }
+                next(c);
+            }
+        }
+        skip_body(c);
+    }
+    let mut i = 0;
+    while i < get(c, 19) {
+        let r = record_at(c, i + 3);
+        set(c, 4, load(r + 48)); expect(c, 123);
+        let mut n = 0;
+        while kind(c) != 125 {
+            if n >= 32 { fail(c, 506); }
+            let name = address(c);
+            let size = length(c);
+            if reserved(word(c)) { fail(c, 303); }
+            let mut j = 0;
+            while j < n {
+                let previous = field_at(c, i + 3, j);
+                if same(name, size, load(previous), load(previous + 8)) { fail(c, 502); }
+                j = j + 1;
+            }
+            let f = field_at(c, i + 3, n);
+            store(f, name); store(f + 8, size); store(f + 32, get(c, 4));
+            expect(c, 256); expect(c, 58);
+            let t = parse_type(c);
+            if t == 0 { fail(c, 302); }
+            store(f + 16, t); n = n + 1;
+            if kind(c) != 125 { expect(c, 44); }
+        }
+        if n == 0 { fail(c, 502); }
+        store(r + 16, n); expect(c, 125);
+        i = i + 1;
+    }
+    i = 0;
+    while i < get(c, 19) { resolve_record(c, i + 3); i = i + 1; }
+    set(c, 4, 0);
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Xen keyword and reserved builtin spelling. Decimal constants pack ASCII bytes.
+
+fn reserved(w: Int) -> Bool {
+    return w == 28262 || w == 7628140 || w == 7632237 || w == 26217 || w == 1702063205 || w == 435610544247 || w == 121437875889522 || w == 1702195828 || w == 435728179558 || w == 7172961 || w == 7499622 || w == 28265 || w == 461195539042 || w == 7310870969309884259 || w == 448345170285;
+}
+
+// Match exact ASCII spelling without introducing String values into the subset.
+fn spelling(c: Int, size: Int, head: Int, middle: Int, tail: Int) -> Bool {
+    if length(c) != size { return false; }
+    let p = address(c);
+    let mut n = size;
+    if n > 8 { n = 8; }
+    if packed(p, n) != head { return false; }
+    if size > 8 {
+        n = size - 8;
+        if n > 8 { n = 8; }
+        if packed(p + 8, n) != middle { return false; }
+    }
+    if size > 16 && packed(p + 16, size - 16) != tail { return false; }
+    return true;
+}
+
+// Keep this list in sync with compiler/common/checker.ml's function builtins.
+fn builtin_name(c: Int) -> Bool {
+    if spelling(c, 2, 14441, 0, 0) { return true; } // i8
+    if spelling(c, 2, 14453, 0, 0) { return true; } // u8
+    if spelling(c, 3, 3551593, 0, 0) { return true; } // i16
+    if spelling(c, 3, 3551605, 0, 0) { return true; } // u16
+    if spelling(c, 3, 3289961, 0, 0) { return true; } // i32
+    if spelling(c, 3, 3289973, 0, 0) { return true; } // u32
+    if spelling(c, 3, 3421801, 0, 0) { return true; } // i64
+    if spelling(c, 3, 3421813, 0, 0) { return true; } // u64
+    if spelling(c, 3, 3289958, 0, 0) { return true; } // f32
+    if spelling(c, 3, 3421798, 0, 0) { return true; } // f64
+    if spelling(c, 5, 500068610672, 0, 0) { return true; } // print
+    if spelling(c, 7, 31081494762582640, 0, 0) { return true; } // println
+    if spelling(c, 3, 7234924, 0, 0) { return true; } // len
+    if spelling(c, 3, 6779489, 0, 0) { return true; } // arg
+    if spelling(c, 9, 7959390389040280161, 116, 0) { return true; } // arg_count
+    if spelling(c, 6, 128034677158753, 0, 0) { return true; } // assert
+    if spelling(c, 10, 7881145907598816097, 26483, 0) { return true; } // assert_msg
+    if spelling(c, 5, 426970603888, 0, 0) { return true; } // panic
+    if spelling(c, 5, 499850898534, 0, 0) { return true; } // float
+    if spelling(c, 3, 7630441, 0, 0) { return true; } // int
+    if spelling(c, 10, 8313485982757580393, 29300, 0) { return true; } // int_to_str
+    if spelling(c, 5, 495791007098, 0, 0) { return true; } // zeros
+    if spelling(c, 6, 127961662514546, 0, 0) { return true; } // repeat
+    if spelling(c, 9, 8675468210253948274, 116, 0) { return true; } // read_text
+    if spelling(c, 9, 8389759014264726898, 115, 0) { return true; } // read_ints
+    if spelling(c, 11, 8028904795586782578, 7566433, 0) { return true; } // read_floats
+    if spelling(c, 9, 7018141348526387311, 100, 0) { return true; } // open_read
+    if spelling(c, 10, 7598266773085188207, 25972, 0) { return true; } // open_write
+    if spelling(c, 13, 8028911401164038514, 500068605795, 0) { return true; } // raw_alloc_int
+    if spelling(c, 12, 7233184987782537586, 1953392991, 0) { return true; } // raw_load_int
+    if spelling(c, 13, 8245937481610387826, 500068605797, 0) { return true; } // raw_store_int
+    if spelling(c, 12, 7306371754492387698, 1953392991, 0) { return true; } // raw_free_int
+    if spelling(c, 9, 8028911401164038514, 99, 0) { return true; } // raw_alloc
+    if spelling(c, 8, 7233184987782537586, 0, 0) { return true; } // raw_load
+    if spelling(c, 9, 8245937481610387826, 101, 0) { return true; } // raw_store
+    if spelling(c, 8, 7306371754492387698, 0, 0) { return true; } // raw_free
+    if spelling(c, 8, 8242823587370792048, 0, 0) { return true; } // ptr_addr
+    if spelling(c, 13, 7885647256562594928, 491310571871, 0) { return true; } // ptr_from_addr
+    if spelling(c, 13, 7308332243887091574, 431131421791, 0) { return true; } // volatile_load
+    if spelling(c, 14, 7308332243887091574, 111542170579807, 0) { return true; } // volatile_store
+    if spelling(c, 9, 7020097461065969763, 120, 0) { return true; } // cpu_relax
+    if spelling(c, 12, 7376748247058834797, 1701015141, 0) { return true; } // memory_fence
+    if spelling(c, 11, 7160563370149836901, 7105633, 0) { return true; } // extern_call
+    if spelling(c, 11, 7809069583342466145, 6578543, 0) { return true; } // atomic_load
+    if spelling(c, 12, 8313472741607961697, 1701998452, 0) { return true; } // atomic_store
+    if spelling(c, 15, 7304666425076970593, 28542696426070904, 0) { return true; } // atomic_exchange
+    if spelling(c, 23, 7160551237001114721, 7304668662553668975, 28542696426070904) { return true; } // atomic_compare_exchange
+    if spelling(c, 16, 7376724019114898529, 7234013963864994917, 0) { return true; } // atomic_fetch_add
+    if spelling(c, 16, 7376724019114898529, 7094703641602520165, 0) { return true; } // atomic_fetch_sub
+    if spelling(c, 16, 7376724019114898529, 7236828713632101477, 0) { return true; } // atomic_fetch_and
+    if spelling(c, 15, 7376724019114898529, 32210602908939365, 0) { return true; } // atomic_fetch_or
+    if spelling(c, 16, 7376724019114898529, 8245941793907242085, 0) { return true; } // atomic_fetch_xor
+    if spelling(c, 8, 3489282976841431411, 0, 0) { return true; } // syscall0
+    if spelling(c, 8, 3561340570879359347, 0, 0) { return true; } // syscall1
+    if spelling(c, 8, 3633398164917287283, 0, 0) { return true; } // syscall2
+    if spelling(c, 8, 3705455758955215219, 0, 0) { return true; } // syscall3
+    if spelling(c, 8, 3777513352993143155, 0, 0) { return true; } // syscall4
+    if spelling(c, 8, 3849570947031071091, 0, 0) { return true; } // syscall5
+    if spelling(c, 8, 3921628541068999027, 0, 0) { return true; } // syscall6
+    return false;
+}
+
+fn builtin_type(c: Int) -> Bool {
+    if spelling(c, 3, 7630409, 0, 0) { return true; } // Int
+    if spelling(c, 5, 499850898502, 0, 0) { return true; } // Float
+    if spelling(c, 2, 14409, 0, 0) { return true; } // I8
+    if spelling(c, 2, 14421, 0, 0) { return true; } // U8
+    if spelling(c, 3, 3551561, 0, 0) { return true; } // I16
+    if spelling(c, 3, 3551573, 0, 0) { return true; } // U16
+    if spelling(c, 3, 3289929, 0, 0) { return true; } // I32
+    if spelling(c, 3, 3289941, 0, 0) { return true; } // U32
+    if spelling(c, 3, 3421769, 0, 0) { return true; } // I64
+    if spelling(c, 3, 3421781, 0, 0) { return true; } // U64
+    if spelling(c, 3, 3289926, 0, 0) { return true; } // F32
+    if spelling(c, 3, 3421766, 0, 0) { return true; } // F64
+    if spelling(c, 4, 1819242306, 0, 0) { return true; } // Bool
+    if spelling(c, 6, 113723913172051, 0, 0) { return true; } // String
+    if spelling(c, 4, 1701603654, 0, 0) { return true; } // File
+    if spelling(c, 3, 6514006, 0, 0) { return true; } // Vec
+    if spelling(c, 5, 435459550291, 0, 0) { return true; } // Slice
+    if spelling(c, 3, 7500880, 0, 0) { return true; } // Ptr
+    if spelling(c, 4, 1953066581, 0, 0) { return true; } // Unit
+    if spelling(c, 6, 121424789663823, 0, 0) { return true; } // Option
+    if spelling(c, 6, 128009175786834, 0, 0) { return true; } // Result
+    if spelling(c, 5, 435526984018, 0, 0) { return true; } // Range
+    return false;
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Function signatures and lexical variable bindings.
+
+fn function_at(c: Int, index: Int) -> Int { return get(c, 7) + index * 256; }
+
+fn find_function(c: Int, name: Int, size: Int) -> Int {
+    let mut i = 0;
+    while i < get(c, 8) {
+        let f = function_at(c, i);
+        if same(name, size, load(f), load(f + 8)) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn declarations(c: Int) {
+    collect_records(c);
+    capability(c);
+    while kind(c) != 0 {
+        if is_word(c, 127970521019507) {
+            next(c); expect(c, 256); skip_body(c);
+        } else {
+        need_word(c, 28262);
+        let name = address(c);
+        let size = length(c);
+        if reserved(word(c)) || builtin_name(c) { fail(c, 303); }
+        expect(c, 256);
+        if find_function(c, name, size) >= 0 { fail(c, 304); }
+        let count = get(c, 8);
+        if count >= 256 { fail(c, 206); }
+        let f = function_at(c, count);
+        store(f, name); store(f + 8, size);
+        set(c, 8, count + 1);
+        expect(c, 40);
+        let mut n = 0;
+        if kind(c) != 41 {
+            let mut more = true;
+            while more {
+                if n >= 6 { fail(c, 305); }
+                let p = f + 48 + n * 24;
+                if reserved(word(c)) { fail(c, 303); }
+                store(p, address(c)); store(p + 8, length(c)); expect(c, 256); expect(c, 58);
+                let t = parse_type(c);
+                if t == 0 { fail(c, 302); }
+                store(p + 16, t);
+                n = n + 1;
+                more = take(c, 44);
+            }
+        }
+        store(f + 24, n);
+        expect(c, 41);
+        let mut result = 0;
+        if take(c, 259) { result = parse_type(c); }
+        store(f + 32, result);
+        store(f + 16, get(c, 4));
+        expect(c, 123);
+        let mut depth = 1;
+        while depth > 0 {
+            if kind(c) == 0 { fail(c, 101); }
+            if kind(c) == 123 { depth = depth + 1; }
+            if kind(c) == 125 { depth = depth - 1; }
+            next(c);
+        }
+        }
+    }
+}
+
+// Variable records: name address, name length, slot, type, mutable, depth.
+fn variable(c: Int, index: Int) -> Int { return get(c, 9) + index * 48; }
+
+fn lookup_variable(c: Int, name: Int, size: Int) -> Int {
+    let mut i = get(c, 10);
+    while i > 0 {
+        i = i - 1;
+        let v = variable(c, i);
+        if same(name, size, load(v), load(v + 8)) { return v; }
+    }
+    return 0;
+}
+
+fn find_variable(c: Int, name: Int, size: Int) -> Int {
+    let v = lookup_variable(c, name, size);
+    if v == 0 { fail(c, 306); }
+    return v;
+}
+
+fn declare(c: Int, name: Int, size: Int, t: Int, mutable: Int) -> Int {
+    let count = get(c, 10);
+    let depth = get(c, 11);
+    let mut i = count;
+    while i > 0 {
+        i = i - 1;
+        let v = variable(c, i);
+        if load(v + 40) == depth && same(name, size, load(v), load(v + 8)) { fail(c, 307); }
+    }
+    if count >= 512 { fail(c, 207); }
+    let v = variable(c, count);
+    let slot = reserve(c, t);
+    store(v, name); store(v + 8, size); store(v + 16, slot); store(v + 24, t);
+    store(v + 32, mutable); store(v + 40, depth);
+    set(c, 10, count + 1);
+    return slot;
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// The supported bb assembly templates and Linux syscall signatures.
+
+// Four exact asm templates, with full constraint/type validation.
+fn template(c: Int) -> Int {
+    expect(c, 258);
+    let t = get(c, 2) + (get(c, 4) - 1) * 32;
+    let p = get(c, 0) + load(t + 8);
+    let n = load(t + 16);
+    if n == 14 {
+        let a = packed(p, 8);
+        let b = packed(p + 8, 6);
+        if a == 3204418277672906605 && b == 102707238165280 { return 1; }
+        if a == 7594320607365721965 && b == 115944556866653 { return 2; }
+        if a == 7594320607365721965 && b == 119200158854237 { return 4; }
+    }
+    if n == 21 && packed(p, 8) == 7021710470846771053 && packed(p + 8, 8) == 2334400046547610744 && packed(p + 16, 5) == 401200149083 { return 3; }
+    fail(c, 401);
+    return 0;
+}
+
+fn register_name(c: Int, wanted: Int) {
+    if kind(c) != 258 || word(c) != wanted { fail(c, 402); }
+    next(c);
+}
+
+fn assembly(c: Int) -> Int {
+    if get(c, 16) == 0 { fail(c, 403); }
+    next(c);
+    let mut result = 0;
+    if take(c, 60) { result = parse_type(c); expect(c, 62); }
+    expect(c, 40);
+    let op = template(c);
+    let mut wanted = 0;
+    if op == 1 || op == 3 { wanted = 1; }
+    type_is(c, result, wanted);
+    expect(c, 44); need_word(c, 28265); expect(c, 40); register_name(c, 6906994); expect(c, 44);
+    type_is(c, expression(c, 1), 1); push(c); expect(c, 41); expect(c, 44);
+    if wanted == 1 {
+        need_word(c, 7632239); expect(c, 40); register_name(c, 7889266); expect(c, 41);
+    } else {
+        need_word(c, 28265); expect(c, 40); register_name(c, 6910834); expect(c, 44);
+        type_is(c, expression(c, 1), 1); push(c); expect(c, 41);
+    }
+    expect(c, 41);
+    if wanted == 0 { pop(c, 6); }
+    pop(c, 7);
+    if op == 1 { emit(c, 72); emit(c, 139); emit(c, 7); }
+    if op == 2 { emit(c, 72); emit(c, 137); emit(c, 55); }
+    if op == 3 { emit(c, 72); emit(c, 15); emit(c, 182); emit(c, 7); }
+    if op == 4 { emit(c, 64); emit(c, 136); emit(c, 55); }
+    if wanted == 0 { immediate(c, 0); }
+    return wanted;
+}
+
+fn syscall_arity(w: Int) -> Int {
+    if w == 3489282976841431411 { return 1; }
+    if w == 3561340570879359347 { return 2; }
+    if w == 3633398164917287283 { return 3; }
+    if w == 3705455758955215219 { return 4; }
+    if w == 3777513352993143155 { return 5; }
+    if w == 3849570947031071091 { return 6; }
+    if w == 3921628541068999027 { return 7; }
+    return 0;
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Expression parsing, calls, constructors, postfix fields and precedence.
+
+fn invocation(c: Int, name: Int, size: Int, w: Int) -> Int {
+    let arity = syscall_arity(w);
+    let output = w == 31081494762582640;
+    let assertion = w == 128034677158753;
+    let mut f = 0;
+    let mut target = -1;
+    let mut n = arity;
+    let mut result = 1;
+    if arity > 0 {
+        if get(c, 16) == 0 { fail(c, 403); }
+    } else if output || assertion { n = 1; result = 0; }
+    else {
+        if lookup_variable(c, name, size) != 0 { fail(c, 313); }
+        target = find_function(c, name, size);
+        if target < 0 { fail(c, 308); }
+        f = function_at(c, target); n = load(f + 24); result = load(f + 32);
+    }
+    expect(c, 40);
+    let mut i = 0;
+    while i < n {
+        if i > 0 { expect(c, 44); }
+        let mut t = 1;
+        if assertion { t = 2; }
+        if target >= 0 { t = load(f + 48 + i * 24 + 16); }
+        type_is(c, expression(c, 1), t);
+        push(c);
+        i = i + 1;
+    }
+    expect(c, 41);
+    while i > 0 {
+        i = i - 1;
+        let mut reg = argument_register(i);
+        if arity > 0 {
+            if i == 0 { reg = 0; }
+            else if i == 4 { reg = 10; }
+            else { reg = argument_register(i - 1); }
+        }
+        if assertion { reg = 0; }
+        pop(c, reg);
+    }
+    if arity > 0 { emit(c, 15); emit(c, 5); }
+    else if output {
+        emit(c, 232);
+        let offset = get(c, 6);
+        bytes(c, get(c, 17) - offset - 4, 4);
+    } else if assertion {
+        test(c);
+        let ok = jump(c, 133);
+        runtime_exit(c, 101);
+        land(c, ok); immediate(c, 0);
+    } else {
+        let mut result_slot = 0;
+        if result >= 3 {
+            result_slot = reserve(c, result);
+            emit(c, 76); emit(c, 141); emit(c, 149); bytes(c, -8 * (result_slot + 1), 4);
+        }
+        call(c, target);
+        if result >= 3 { local_address(c, result_slot); }
+    }
+    return result;
+}
+
+// Collect initializer token ranges, then compile in declaration order, matching
+// the original Xen checker even when literal fields are written out of order.
+fn skip_initializer(c: Int) {
+    let mut parentheses = 0;
+    let mut braces = 0;
+    let mut scanning = true;
+    while scanning {
+        let k = kind(c);
+        if k == 0 { fail(c, 101); }
+        if parentheses == 0 && braces == 0 && (k == 44 || k == 125) { scanning = false; }
+        else {
+            if k == 40 { parentheses = parentheses + 1; }
+            if k == 41 { parentheses = parentheses - 1; }
+            if k == 123 { braces = braces + 1; }
+            if k == 125 { braces = braces - 1; }
+            if parentheses < 0 || braces < 0 { fail(c, 101); }
+            next(c);
+        }
+    }
+}
+
+fn constructor(c: Int, t: Int) -> Int {
+    let initializers = allocate(4096);
+    expect(c, 123);
+    while kind(c) != 125 {
+        let index = find_field(c, t, address(c), length(c));
+        let entry = initializers + index * 16;
+        if load(entry) != 0 { fail(c, 504); }
+        expect(c, 256); expect(c, 58);
+        store(entry, get(c, 4)); skip_initializer(c); store(entry + 8, get(c, 4));
+        if kind(c) != 125 { expect(c, 44); }
+    }
+    expect(c, 125);
+    let end = get(c, 4);
+    let slot = reserve(c, t);
+    let mut i = 0;
+    while i < load(record_at(c, t) + 16) {
+        let entry = initializers + i * 16;
+        if load(entry) == 0 { fail(c, 504); }
+        let f = field_at(c, t, i);
+        set(c, 4, load(entry));
+        let ft = expression(c, 1);
+        type_is(c, ft, load(f + 16));
+        if get(c, 4) != load(entry + 8) { fail(c, 101); }
+        save_value(c, slot, load(f + 24), ft);
+        i = i + 1;
+    }
+    set(c, 4, end); syscall2(11, initializers, 4096);
+    local_address(c, slot); return t;
+}
+
+fn atom(c: Int) -> Int {
+    if kind(c) == 257 {
+        let value = load(token(c) + 24);
+        if value == -9223372036854775808 { fail(c, 202); }
+        immediate(c, -value); next(c); return 1;
+    }
+    if take(c, 40) { let t = expression(c, 1); expect(c, 41); return t; }
+    if is_word(c, 7172961) { return assembly(c); }
+    if kind(c) != 256 { fail(c, 103); }
+    let w = word(c);
+    if w == 1702195828 || w == 435728179558 {
+        let mut value = 0;
+        if w == 1702195828 { value = 1; }
+        immediate(c, value); next(c); return 2;
+    }
+    let name = address(c);
+    let size = length(c);
+    next(c);
+    if kind(c) == 40 { return invocation(c, name, size, w); }
+    let r = find_record(c, name, size);
+    if r >= 0 && kind(c) == 123 { return constructor(c, r + 3); }
+    let v = find_variable(c, name, size);
+    read_value(c, load(v + 16), load(v + 24));
+    return load(v + 24);
+}
+
+fn primary(c: Int) -> Int {
+    let mut t = atom(c);
+    while take(c, 46) {
+        let index = find_field(c, t, address(c), length(c));
+        let f = field_at(c, t, index);
+        expect(c, 256);
+        t = load(f + 16);
+        read_field(c, load(f + 24), t);
+    }
+    return t;
+}
+
+fn unary(c: Int) -> Int {
+    let op = kind(c);
+    if op == 45 || op == 43 || op == 33 || op == 126 {
+        next(c);
+        // Decimal tokens accumulate negatively, including Int.min.
+        if op == 45 && kind(c) == 257 {
+            immediate(c, load(token(c) + 24)); next(c); return 1;
+        }
+        let t = unary(c);
+        if op == 33 {
+            type_is(c, t, 2); test(c); emit(c, 15); emit(c, 148); emit(c, 192);
+            emit(c, 72); emit(c, 15); emit(c, 182); emit(c, 192); return 2;
+        }
+        type_is(c, t, 1);
+        if op == 45 { emit(c, 72); emit(c, 247); emit(c, 216); }
+        if op == 126 { emit(c, 72); emit(c, 247); emit(c, 208); }
+        return 1;
+    }
+    return primary(c);
+}
+
+fn precedence(op: Int) -> Int {
+    if op == 265 { return 1; }
+    if op == 264 { return 2; }
+    if op == 260 || op == 261 { return 3; }
+    if op == 60 || op == 62 || op == 262 || op == 263 { return 4; }
+    if op == 124 { return 5; }
+    if op == 94 { return 6; }
+    if op == 38 { return 7; }
+    if op == 266 || op == 267 { return 8; }
+    if op == 43 || op == 45 { return 9; }
+    if op == 42 || op == 47 || op == 37 { return 10; }
+    return 0;
+}
+
+fn expression(c: Int, minimum: Int) -> Int {
+    let mut t = unary(c);
+    let mut p = precedence(kind(c));
+    while p >= minimum {
+        let op = kind(c);
+        next(c);
+        if op == 264 || op == 265 {
+            type_is(c, t, 2); test(c);
+            let mut condition = 132;
+            if op == 265 { condition = 133; }
+            let end = jump(c, condition);
+            type_is(c, expression(c, p + 1), 2);
+            land(c, end); t = 2;
+        } else {
+            push(c);
+            let right = expression(c, p + 1);
+            t = binary(c, op, t, right);
+        }
+        p = precedence(kind(c));
+    }
+    return t;
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Blocks, mutable places, control flow, function entry and return lowering.
+
+fn block(c: Int) -> Bool {
+    expect(c, 123);
+    let depth = get(c, 11) + 1;
+    set(c, 11, depth);
+    let mut returns = false;
+    while kind(c) != 125 {
+        if kind(c) == 0 { fail(c, 101); }
+        if returns { fail(c, 314); }
+        let returned = statement(c);
+        returns = returns || returned;
+    }
+    expect(c, 125);
+    let mut count = get(c, 10);
+    while count > 0 && load(variable(c, count - 1) + 40) == depth { count = count - 1; }
+    set(c, 10, count); set(c, 11, depth - 1);
+    return returns;
+}
+
+fn assignment_ahead(c: Int) -> Bool {
+    if kind(c) != 256 { return false; }
+    let tokens = get(c, 2);
+    let mut i = get(c, 4) + 1;
+    while i + 1 < get(c, 3) && load(tokens + i * 32) == 46 && load(tokens + (i + 1) * 32) == 256 {
+        i = i + 2;
+    }
+    return i < get(c, 3) && load(tokens + i * 32) == 61;
+}
+
+fn statement(c: Int) -> Bool {
+    if is_word(c, 7628140) {
+        next(c);
+        let mut mutable = 0;
+        if is_word(c, 7632237) { mutable = 1; next(c); }
+        let name = address(c);
+        let size = length(c);
+        if reserved(word(c)) { fail(c, 303); }
+        expect(c, 256);
+        let mut annotation = -1;
+        if take(c, 58) { annotation = parse_type(c); }
+        expect(c, 61);
+        let t = expression(c, 1);
+        if t == 0 { fail(c, 301); }
+        if annotation >= 0 { type_is(c, t, annotation); }
+        expect(c, 59);
+        save_value(c, declare(c, name, size, t, mutable), 0, t);
+        return false;
+    }
+    if is_word(c, 121437875889522) {
+        next(c);
+        let mut t = 0;
+        if kind(c) != 59 { t = expression(c, 1); }
+        else { immediate(c, 0); }
+        type_is(c, t, get(c, 13)); expect(c, 59);
+        if t >= 3 {
+            emit(c, 72); emit(c, 139); emit(c, 149); bytes(c, -8 * (get(c, 21) + 1), 4);
+            copy_memory(c, type_size(c, t), 2, 0);
+        }
+        epilogue(c); return true;
+    }
+    if is_word(c, 26217) {
+        next(c); type_is(c, expression(c, 1), 2); test(c);
+        let no = jump(c, 132);
+        let yes_returns = block(c);
+        let end = jump(c, 0);
+        land(c, no);
+        let mut no_returns = false;
+        if is_word(c, 1702063205) {
+            next(c);
+            if is_word(c, 26217) { no_returns = statement(c); }
+            else { no_returns = block(c); }
+        }
+        land(c, end);
+        return yes_returns && no_returns;
+    }
+    if is_word(c, 435610544247) {
+        next(c);
+        let start = get(c, 6);
+        type_is(c, expression(c, 1), 2); test(c);
+        let end = jump(c, 132);
+        block(c);
+        let back = jump(c, 0);
+        patch(c, back, start - back - 4, 4); land(c, end); return false;
+    }
+    if kind(c) == 123 { return block(c); }
+    if assignment_ahead(c) {
+        let v = find_variable(c, address(c), length(c));
+        if load(v + 32) == 0 { fail(c, 309); }
+        let mut t = load(v + 24);
+        let mut offset = 0;
+        next(c);
+        while take(c, 46) {
+            let index = find_field(c, t, address(c), length(c));
+            let f = field_at(c, t, index);
+            expect(c, 256); offset = offset + load(f + 24); t = load(f + 16);
+        }
+        expect(c, 61);
+        type_is(c, expression(c, 1), t); expect(c, 59);
+        save_value(c, load(v + 16), offset, t); return false;
+    }
+    expression(c, 1); expect(c, 59); return false;
+}
+
+fn compile_function(c: Int, index: Int) {
+    let f = function_at(c, index);
+    store(f + 40, get(c, 6));
+    set(c, 4, load(f + 16)); set(c, 10, 0); set(c, 11, 0); set(c, 12, 0);
+    set(c, 13, load(f + 32));
+    emit(c, 85); emit(c, 72); emit(c, 137); emit(c, 229);
+    emit(c, 72); emit(c, 129); emit(c, 236);
+    let frame = get(c, 6); bytes(c, 0, 4);
+    if load(f + 32) >= 3 {
+        let destination = reserve(c, 1);
+        set(c, 21, destination);
+        emit(c, 76); emit(c, 137); emit(c, 208); save_local(c, destination);
+    }
+    // Save all raw argument registers before aggregate copies use rcx.
+    let staging = get(c, 12);
+    let mut i = 0;
+    while i < load(f + 24) {
+        let slot = reserve(c, 1);
+        let reg = argument_register(i);
+        let mut prefix = 72;
+        if reg >= 8 { prefix = 76; }
+        emit(c, prefix); emit(c, 137); emit(c, 192 + (reg % 8) * 8);
+        save_local(c, slot); i = i + 1;
+    }
+    i = 0;
+    while i < load(f + 24) {
+        let p = f + 48 + i * 24;
+        let t = load(p + 16);
+        let slot = declare(c, load(p), load(p + 8), t, 0);
+        read_local(c, staging + i); save_value(c, slot, 0, t);
+        i = i + 1;
+    }
+    // Parameters share the outer body scope; duplicate let bindings are errors.
+    set(c, 11, -1);
+    let returns = block(c);
+    if load(f + 32) != 0 && !returns { fail(c, 310); }
+    immediate(c, 0); epilogue(c);
+    let slots = get(c, 12);
+    patch(c, frame, ((slots * 8 + 15) / 16) * 16, 4);
+}
+
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Standalone ELF64 construction and the signed-decimal println runtime.
+
+// A small signed-decimal println(Int) runtime. rdi is the input, all scratch
+// registers are caller-saved; unsigned division handles abs(Int.min).
+fn print_runtime(c: Int) {
+    set(c, 17, get(c, 6));
+    bytes(c, 3850979413, 4); // push rbp; mov rbp,rsp
+    bytes(c, 1089241928, 4); // sub rsp,64
+    bytes(c, 15108424, 3); // mov rsi,rsp
+    bytes(c, 1069974344, 4); // add rsi,63
+    bytes(c, 657094, 3); // mov byte [rsi],10
+    emit(c, 185); bytes(c, 1, 4); // mov ecx,1
+    bytes(c, 16288072, 3); // mov rax,rdi
+    bytes(c, 12618057, 3); // mov r8,rax
+    bytes(c, 1073267017, 4); // sar r8,63
+    test(c); let positive = jump(c, 137);
+    bytes(c, 14219080, 3); // neg rax
+    land(c, positive);
+    emit(c, 65); emit(c, 185); bytes(c, 10, 4); // mov r9d,10
+    let loop = get(c, 6);
+    bytes(c, 53809, 2); // xor edx,edx
+    bytes(c, 15857481, 3); // div r9
+    bytes(c, 3195520, 3); // add dl,48
+    bytes(c, 13565768, 3); // dec rsi
+    bytes(c, 5768, 2); // mov [rsi],dl
+    bytes(c, 12713800, 3); // inc rcx
+    test(c); let back = jump(c, 133); patch(c, back, loop - back - 4, 4);
+    bytes(c, 12617037, 3); // test r8,r8
+    let nonnegative = jump(c, 132);
+    bytes(c, 13565768, 3); bytes(c, 2950854, 3); // dec rsi; mov byte [rsi],45
+    bytes(c, 12713800, 3); land(c, nonnegative);
+    bytes(c, 13273416, 3); // mov rdx,rcx
+    let write = get(c, 6);
+    emit(c, 191); bytes(c, 1, 4); emit(c, 184); bytes(c, 1, 4);
+    emit(c, 15); emit(c, 5);
+    // Retry EINTR; otherwise require progress and finish partial writes.
+    emit(c, 72); emit(c, 131); emit(c, 248); emit(c, 252);
+    let retry = jump(c, 132); patch(c, retry, write - retry - 4, 4);
+    test(c); let progress = jump(c, 143);
+    runtime_exit(c, 74);
+    land(c, progress);
+    emit(c, 72); emit(c, 41); emit(c, 194); // sub rdx,rax
+    emit(c, 72); emit(c, 1); emit(c, 198); // add rsi,rax
+    emit(c, 72); emit(c, 133); emit(c, 210); // test rdx,rdx
+    let more = jump(c, 133); patch(c, more, write - more - 4, 4);
+    epilogue(c);
+}
+
+fn elf(c: Int) {
+    // ELF64 header + one executable PT_LOAD. No linker, libc, or interpreter.
+    bytes(c, 1179403647, 4); emit(c, 2); emit(c, 1); emit(c, 1);
+    bytes(c, 0, 9); bytes(c, 2, 2); bytes(c, 62, 2); bytes(c, 1, 4);
+    bytes(c, 4194424, 8); bytes(c, 64, 8); bytes(c, 0, 8); bytes(c, 0, 4);
+    bytes(c, 64, 2); bytes(c, 56, 2); bytes(c, 1, 2); bytes(c, 0, 6);
+    bytes(c, 1, 4); bytes(c, 5, 4); bytes(c, 0, 8);
+    bytes(c, 4194304, 8); bytes(c, 4194304, 8);
+    bytes(c, 0, 8); bytes(c, 0, 8); bytes(c, 4096, 8);
+}
+

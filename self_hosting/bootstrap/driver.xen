@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Transitional entry: records-seed can compile this using only existing syntax.
+// Shared src/ code emits the new startup page needed by the native CLI.
+#global[bb]
+
+fn main() {
+    let c = make_context();
+    read_source(c, 0);
+    compile(c);
+    write_all(1, c.output, state_get(c, 6));
+}
