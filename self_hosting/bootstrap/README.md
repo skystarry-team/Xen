@@ -1,20 +1,18 @@
-# 부트스트랩 스냅샷
+# Bootstrap Snapshots
 
-현재 구현은 상위 `src/`에서 개발한다. 아래 두 스냅샷은 이전 문법만으로 다음 문법을
-구현할 수 있음을 재현하기 위한 독립된 단일 파일 스냅샷이다.
+The current implementation is developed in the parent `src/` directory. The two snapshots below are independent, single-file snapshots preserved to demonstrate that the next language subset can be implemented using only the preceding subset's syntax.
 
-| 파일 | 작성에 사용한 문법 | 컴파일할 수 있는 범위 |
+| File | Syntax Used for Implementation | Compilation Capabilities |
 | --- | --- | --- |
-| `scalar.xen` | Int·Bool·함수·bb | 최초 스칼라 부분집합 |
-| `records.xen` | 동일한 스칼라 부분집합 | 스칼라 값과 POD 구조체 |
+| `scalar.xen` | Int, Bool, functions, bb | Initial scalar subset |
+| `records.xen` | Same scalar subset | Scalar values and POD structs |
 
-부트스트랩 순서는 `OCaml stage0 → scalar → records → driver → 현재 소스`다.
-기존 컴파일러로 직접 현재 소스를 빌드하는 단계를 생략해도 이 경로가 동작해야 한다.
-현재 기능의 수정에 맞춰 스냅샷을 갱신하지 않는다. 이후 기존 부트스트랩 범위를
-넘는 문법이 추가되면 다음 스냅샷을 별도로 보존한다.
+The bootstrap sequence is `OCaml stage0 → scalar → records → driver → current sources`.
 
-`driver.xen`은 고정 스냅샷이 아니라 현재 `src/`를 호출하는 stdin 전용 진입점이다.
-`assemble.sh bootstrap/driver.xen`으로 조립한다. 과거 records 컴파일러가 만든
-실행 파일에는 CLI에 필요한 초기 스택 보관 영역이 없으므로, 이 진입점으로
-현재 백엔드를 실행해 새 ELF 시작 규약을 가진 첫 CLI 실행 파일을 만든다.
-새 문법이나 asm을 추가하지 않으며 과거 스냅샷도 수정하지 않는다.
+This path must work without directly compiling the current sources using the existing compiler. The snapshots are not updated to reflect changes to the current implementation. If future language features extend beyond the existing bootstrap subset, a new snapshot will be preserved separately.
+
+`driver.xen` is not a frozen snapshot. It is a stdin-only entry point that uses the current `src/` implementation. It is assembled using `assemble.sh bootstrap/driver.xen`.
+
+Executables produced by the historical records compiler lack the initial stack storage area required by the CLI. This entry point runs the current backend to produce the first CLI executable with the new ELF startup convention.
+
+It introduces no new syntax or asm features and does not modify the historical snapshots.

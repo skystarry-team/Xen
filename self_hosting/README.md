@@ -1,78 +1,74 @@
-# Xen으로 Xen 만들기
+# Building Xen with Xen
 
-이 폴더는 **자기 소스를 컴파일할 수 있는 Xen 부분집합 컴파일러**다.
-어휘 분석, 함수 선언 수집, 파싱, 타입 검사, x86-64 기계어 생성, ELF 작성까지
-전부 Xen으로 구현한다. 기존 OCaml 컴파일러는 첫 실행 파일을 만드는 데 사용한다.
-그 이후 세대는 외부 컴파일러·어셈블러·링커를 호출하지 않는다.
+This directory contains a **self-hosting compiler for a subset of Xen**. Lexical analysis, function declaration collection, parsing, type checking, x86-64 machine code generation, and ELF construction are all implemented in Xen. The existing OCaml compiler is used to produce the initial executable. Subsequent stages do not invoke an external compiler, assembler, or linker.
 
-현재 범위는 **Linux x86-64에서 동작하는 스칼라 값과 POD 구조체를 가진 Xen**이다.
-기존 Xen 전체나 표준 라이브러리를 컴파일하는 단계까지 구현한 것은 아니다.
+The current scope is **a subset of Xen supporting scalar values and POD structs on Linux x86-64**. It does not yet support compiling the full Xen language or its standard library.
 
-## 코드를 읽는 순서
+## Where to Start Reading
 
-진입점은 `compiler.xen`이다. 구현은 역할에 따라 `src/`로 나눴다.
+The entry point is `compiler.xen`. The implementation is divided by responsibility under `src/`.
 
-| 파일 | 역할 |
+| File | Responsibility |
 | --- | --- |
-| `compiler.xen` | CLI → 입력 → 컴파일 → 결과 저장의 전체 흐름 |
-| `src/compiler.xen` | 입력 읽기, 분석·코드 생성·재배치의 공통 파이프라인 |
-| `src/cli.xen` | 인자·파일 경로 처리, build/check, 실행 파일 저장 |
-| `src/cli_text.xen` | 도움말과 CLI 오류의 고정 바이트 문구 |
-| `src/context.xen` | `Context` 구조체, 버퍼 확보, 공유 카운터의 위치 |
-| `src/runtime.xen` | 메모리 읽기·쓰기, mmap, Linux 입출력 |
-| `src/lexer.xen` | 토큰 저장, 이동, 어휘 분석 |
-| `src/diagnostics.xen` | 컴파일 오류 출력과 종료 |
-| `src/keywords.xen` | 키워드와 예약된 내장 이름 |
-| `src/records.xen` | 타입·구조체 선언, 크기·정렬, 필드, 순환 검사 |
-| `src/symbols.xen` | 함수 시그니처와 지역 변수의 범위 |
-| `src/expressions.xen` | 표현식 파싱, 호출, 생성자, 필드 읽기 |
-| `src/statements.xen` | 대입, 분기·반복, 함수 진입·반환 |
-| `src/intrinsics.xen` | 지원하는 asm 제약과 syscall 시그니처 |
-| `src/x86_64.xen` | 명령어 바이트, 프레임, 값 복사, 분기·정수 연산 |
-| `src/elf.xen` | ELF64 헤더와 println 런타임 |
+| `compiler.xen` | Overall flow: CLI → input → compilation → output |
+| `src/compiler.xen` | Shared pipeline for input reading, analysis, code generation, and relocation |
+| `src/cli.xen` | Argument and file path handling, build/check commands, executable output |
+| `src/cli_text.xen` | Fixed byte sequences for help text and CLI errors |
+| `src/context.xen` | `Context` struct, buffer allocation, and shared counter locations |
+| `src/runtime.xen` | Memory reads and writes, mmap, Linux I/O |
+| `src/lexer.xen` | Token storage, traversal, and lexical analysis |
+| `src/diagnostics.xen` | Compilation error reporting and termination |
+| `src/keywords.xen` | Keywords and reserved intrinsic names |
+| `src/records.xen` | Type and struct declarations, size and alignment, fields, cycle detection |
+| `src/symbols.xen` | Function signatures and local variable scopes |
+| `src/expressions.xen` | Expression parsing, calls, constructors, field access |
+| `src/statements.xen` | Assignment, branching, loops, function entry and return |
+| `src/intrinsics.xen` | Supported asm constraints and syscall signatures |
+| `src/x86_64.xen` | Instruction bytes, stack frames, value copying, branches, integer operations |
+| `src/elf.xen` | ELF64 headers and println runtime |
 
-현재 파일 분리는 **소스 구성 단위**다. 이름 공간이나 Xen의 `import`를 구현한 것은
-아니다. `sources.list`에 명시한 파일들을 `assemble.sh`가 내용 변환 없이 이어 붙여
-`build/compiler.xen`이라는 단일 컴파일 단위를 만든다. 파일을 추가할 때는 이 목록을
-수정한다. 실제 모듈 로딩·이름 공간 처리는 다음 확장 대상이다.
+The current file organization is **a source-level separation**, not an implementation of namespaces or Xen's `import` mechanism. `assemble.sh` concatenates the files listed in `sources.list` without transforming their contents, producing a single compilation unit at `build/compiler.xen`. When adding a file, update this list. Actual module loading and namespace handling are planned extensions.
 
-## 재현
+## Reproducing the Build
 
-저장소 루트에서:
+From the repository root:
 
 ```sh
 ./self_hosting/bootstrap.sh
 ./self_hosting/verify.sh
 ```
 
-기본 stage0는 `compiler/dist/xen`이다. 다른 Xen 실행 파일을 쓰려면 절대 경로로
-`XEN_STAGE0=/path/to/xen ./self_hosting/verify.sh`를 실행한다.
-기존 컴파일러가 없으면 먼저 저장소 루트에서 `make build`를 실행한다.
-생성물은 Git에서 제외되는 `self_hosting/build/`에 저장한다.
+The default stage0 compiler is `compiler/dist/xen`. To use a different Xen executable, specify its absolute path:
 
-| 세대 | 만든 도구 | 입력 |
+```sh
+XEN_STAGE0=/path/to/xen ./self_hosting/verify.sh
+```
+
+If the existing compiler is unavailable, first run `make build` from the repository root. Generated artifacts are stored in `self_hosting/build/`, which is excluded from Git.
+
+| Stage | Built by | Input |
 | --- | --- | --- |
-| stage0 | 기존 OCaml 구현 | 기존 컴파일러 |
-| scalar-seed | stage0 | `bootstrap/scalar.xen` — 첫 스칼라 구현 |
-| records-seed | scalar-seed | `bootstrap/records.xen` — 스칼라 문법으로 쓴 구조체 지원 구현 |
-| driver | records-seed | `bootstrap/driver.xen` 진입점과 현재 `src/` — stdin 전용 전환 드라이버 |
-| stage1 | driver | 조립된 `build/compiler.xen` — CLI를 사용하는 현재 구현 |
-| stage2 | stage1 | 동일한 `build/compiler.xen` |
-| stage3 | stage2 | 동일한 `build/compiler.xen` |
+| stage0 | Existing OCaml implementation | Existing compiler |
+| scalar-seed | stage0 | `bootstrap/scalar.xen` — initial scalar implementation |
+| records-seed | scalar-seed | `bootstrap/records.xen` — struct-supporting implementation written using scalar syntax |
+| driver | records-seed | `bootstrap/driver.xen` entry point and current `src/` — stdin-only transitional driver |
+| stage1 | driver | Assembled `build/compiler.xen` — current implementation with CLI |
+| stage2 | stage1 | Same `build/compiler.xen` |
+| stage3 | stage2 | Same `build/compiler.xen` |
 
-`bootstrap.sh`는 **stage2와 stage3의 바이트 일치**를 확인하고 SHA-256을 출력한다.
-stage1은 과거 seed에서 출발한 전환 드라이버가 만들고, stage2·stage3는 새 CLI로
-만든다. 고정점 확인의 필수 조건은 stage2·stage3의 일치다.
-셸은 소스 파일 연결, 프로그램 실행, 초기 단계의 리다이렉션·실행 권한 설정,
-결과 비교를 담당한다. stage1부터는 Xen CLI의 `build`로 다음 세대를 저장한다.
-언어 처리와 실행 파일 생성, CLI 인자·파일 처리는 Xen 코드가 수행한다.
-`bootstrap/scalar.xen`과 `bootstrap/records.xen`은 확장 경로를 보존하는 과거 구현이며, 일반 개발에서는
-현재의 `src/`를 수정한다. 새 기능을 넣을 때 이 스냅샷들을 같이 수정하지 않는다.
+`bootstrap.sh` verifies that **stage2 and stage3 are byte-for-byte identical** and prints their SHA-256 hashes.
+
+Stage1 is produced by a transitional driver originating from the earlier seeds, while stage2 and stage3 are built using the new CLI. The required fixed-point check is byte-for-byte equality between stage2 and stage3.
+
+The shell handles source concatenation, program execution, redirection and executable permissions during the initial stages, and output comparison. Starting with stage1, Xen's CLI `build` command writes the next-stage executable. Language processing, executable generation, CLI argument handling, and file operations are performed by Xen code.
+
+`bootstrap/scalar.xen` and `bootstrap/records.xen` are historical implementations retained to preserve the incremental bootstrap path. Normal development takes place in the current `src/` directory. New features do not require updating these snapshots.
 
 ## CLI
 
-부트스트랩은 최종 실행 파일을 `self_hosting/build/xen`에도 복사한다.
-별도 프로그램을 컴파일하려면:
+The bootstrap process also copies the final executable to `self_hosting/build/xen`.
+
+To compile a separate program:
 
 ```sh
 ./self_hosting/build/xen --help
@@ -81,27 +77,25 @@ stage1은 과거 seed에서 출발한 전환 드라이버가 만들고, stage2·
 /tmp/xen-core
 ```
 
-`build`의 기본 출력은 현재 디렉터리의 `a.out`이다. `-o`는 입력 경로 앞이나 뒤에
-둘 수 있다. 출력 파일은 컴파일이 성공한 뒤 같은 디렉터리의 고유 임시 파일에
-기록하고, 권한을 `0755`로 설정하고 닫은 뒤 이름 변경으로 교체한다. 컴파일·저장
-실패 시 기존 출력 파일은 유지한다. 정상적으로 처리한 저장 오류에서는 임시 파일을
-삭제한다. 강제 종료 시 임시 파일이 남을 수 있으며, 디스크 영속성을 위한 fsync는
-수행하지 않는다.
+The default output of `build` is `a.out` in the current directory. The `-o` option may appear before or after the input path.
 
-`check`는 실행 파일을 저장하거나 실행하지 않는다. 현재는 전체 파이프라인을
-사용하므로 코드 생성 단계의 제한과 오류도 적용한다.
+After successful compilation, the output is written to a unique temporary file in the destination directory. The file is given `0755` permissions, closed, and then published by renaming it over the destination.
 
-입력·출력 경로의 `-`는 stdin·stdout이다. 공백·한글 경로는 셸에서 따옴표로 묶으면
-된다. `-`로 시작하는 입력 파일 이름은 `--` 뒤에 둔다.
+If compilation or output fails, the existing output file is preserved. Temporary files are removed on handled output errors. A forced termination may leave temporary files behind, and `fsync` is not performed for disk durability.
+
+`check` does not save or execute an executable. It currently runs the full compilation pipeline, so code generation restrictions and errors also apply.
+
+The path `-` represents stdin or stdout. Paths containing spaces or Korean characters can be quoted in the shell. Input filenames beginning with `-` must follow `--`.
 
 ```sh
-./self_hosting/build/xen build '작업 폴더/예제.xen' -o '작업 폴더/예제'
+./self_hosting/build/xen build 'working folder/example.xen' -o 'working folder/example'
 ./self_hosting/build/xen check -- -example.xen
 ./self_hosting/build/xen build - -o - < self_hosting/examples/core.xen > /tmp/xen-core
 ```
 
-인자가 없으면 `--help`와 동일하게 도움말을 출력하고 0으로 종료한다.
-stdin → stdout 컴파일은 `build - -o -`로 명시한다:
+When invoked without arguments, the compiler prints the same help text as `--help` and exits with status 0.
+
+To compile from stdin to stdout, explicitly use `build - -o -`:
 
 ```sh
 ./self_hosting/build/xen build - -o - < self_hosting/examples/core.xen > /tmp/xen-core
@@ -109,45 +103,47 @@ chmod +x /tmp/xen-core
 /tmp/xen-core
 ```
 
-완성된 ELF만 stdout으로 전달하고 오류는 stderr로 보낸다. 컴파일 오류가 발생하면
-ELF를 출력하지 않는다. `run`, 프로젝트 로딩, 모듈·import는 아직 없다.
-도움말과 CLI 오류 문구는 String 지원 전까지 `cli_text.xen`의 고정 바이트로 쓴다.
-`arg_count()`·`arg()` 내장 함수는 아직 구현하지 않았다.
+Only the completed ELF executable is written to stdout. Errors are written to stderr. If compilation fails, no ELF data is emitted.
 
-## 지원하는 Xen 범위
+The `run` command, project loading, modules, and imports are not yet implemented. Until String support is available, help text and CLI error messages are emitted as fixed byte sequences from `cli_text.xen`.
 
-| 영역 | 지원 |
+The `arg_count()` and `arg()` intrinsics are not yet implemented.
+
+## Supported Xen Subset
+
+| Area | Supported features |
 | --- | --- |
-| 값 | `Int`(64비트 부호 정수), `Bool`, 함수 반환형 `Unit` |
-| 구조체 | Int·Bool·중첩 구조체 필드, 생성자, 필드 읽기·대입, 값 복사 |
-| 함수 | 인자 0~6개, 구조체 인자·반환, 타입 검사, 재귀, 상호 재귀, 전방 호출 |
-| 변수 | `let`, `let mut`, 타입 추론·명시, 대입, 블록 범위·이름 가리기 |
-| 제어 흐름 | 블록, `if` / `else if` / `else`, `while`, `return` |
-| 정수 | 십진 리터럴, `+ - * / %`, 단항 `+ - ~`, `& \| ^ << >>` |
-| 비교 | `== != < <= > >=`, 불리언 `== !=` |
-| 논리 | `!`, `&&`, `\|\|`; 오른쪽 피연산자의 단락 평가 |
-| 출력·검사 | `println(Int)`, `assert(Bool)` |
-| 저수준 | 파일 앞의 `#global[bb]`, `syscall0`~`syscall6`, 아래 asm 4종 |
-| 기타 | 공백, `//` 주석, 필수 `fn main()` |
+| Values | `Int` (signed 64-bit integer), `Bool`, `Unit` as a function return type |
+| Structs | Int, Bool, and nested struct fields; constructors; field reads and assignments; value copying |
+| Functions | 0–6 arguments, struct arguments and returns, type checking, recursion, mutual recursion, forward calls |
+| Variables | `let`, `let mut`, inferred and explicit types, assignment, block scopes, shadowing |
+| Control flow | Blocks, `if` / `else if` / `else`, `while`, `return` |
+| Integers | Decimal literals, `+ - * / %`, unary `+ - ~`, `& \| ^ << >>` |
+| Comparisons | `== != < <= > >=`, Boolean `== !=` |
+| Logic | `!`, `&&`, `\|\|`, with short-circuit evaluation of the right operand |
+| Output and checks | `println(Int)`, `assert(Bool)` |
+| Low-level operations | File-leading `#global[bb]`, `syscall0`–`syscall6`, and the four asm forms below |
+| Other | Whitespace, `//` comments, required `fn main()` |
 
-일반 함수는 인자를 왼쪽부터 한 번씩 평가한다. syscall은 번호를 포함해 최대
-7개의 표현식을 받는다. `main`은 인자가 없고 반환형은 `Unit`이어야 한다.
-`#global[bb]` 뒤의 선언은 새 줄에서 시작해야 한다.
-`Int`의 덧셈·뺄셈·곱셈·부호 반전은 wrapping이다. 나눗셈은 0 방향으로 버림하고
-나머지 부호는 피제수와 같다. 나눗셈·나머지의 0 제수와 `Int.min / -1`,
-범위를 벗어난 시프트, 실패한 `assert`는 종료 코드 101로 중단한다.
+Ordinary function arguments are evaluated exactly once, from left to right. Syscalls accept up to seven expressions, including the syscall number. `main` must take no arguments and return `Unit`. Declarations following `#global[bb]` must begin on a new line.
 
-구조체는 값으로 복사한다. 지역 변수 복사, 대입, 함수 인자·반환 뒤에 한쪽을
-변경해도 다른 값은 바뀌지 않는다. 중첩 필드 대입은 `let mut`로 선언한 원본을
-수정한다. 필드 배치는 기존 Xen과 동일하게 `Int`는 크기·정렬 8,
-`Bool`은 크기·정렬 1이며, 중첩 구조체는 자신의 정렬을 따른다.
-생성자의 필드는 **구조체 선언 순서**로 평가한다. 이는 현재 기존 Xen의 동작이다.
-필드 누락·중복·잘못된 타입, 빈 구조체, 직접·간접 값 순환은 거부한다.
-구조체의 `==`·`!=`는 지원하지 않는다.
+Integer addition, subtraction, multiplication, and negation use wrapping semantics. Division truncates toward zero, and the remainder has the same sign as the dividend.
 
-지원하는 asm은 다음 **정확한 템플릿과 제약**이다. 문자열은 이 구문에만 사용한다.
-함수 이름에 따라 본문을 대체하지 않으며, 메모리 헬퍼도 다른 함수와 동일하게
-파싱하고 컴파일한다.
+Division or remainder by zero, `Int.min / -1`, out-of-range shifts, and failed assertions terminate execution with exit status 101.
+
+Structs have value semantics. Modifying one value after a local variable copy, assignment, function argument passing, or function return does not modify the other.
+
+Nested field assignments modify the original value declared with `let mut`.
+
+Field layout matches the existing Xen implementation: `Int` has size and alignment 8, `Bool` has size and alignment 1, and nested structs use their own alignment.
+
+Constructor fields are evaluated in **struct declaration order**, matching the current behavior of the existing Xen compiler.
+
+Missing, duplicate, or incorrectly typed fields, empty structs, and direct or indirect value cycles are rejected. Struct equality and inequality (`==` and `!=`) are not supported.
+
+The following are the **only supported asm templates and constraints**. String literals are supported only in this syntax.
+
+Function bodies are not replaced based on function names. Memory helper functions are parsed and compiled in the same way as any other function.
 
 ```xen
 asm<Int>("mov rax, [rdi]", in("rdi", address), out("rax"))
@@ -156,109 +152,155 @@ asm<Int>("movzx rax, byte [rdi]", in("rdi", address), out("rax"))
 asm("mov [rdi], sil", in("rdi", address), in("rsi", value))
 ```
 
-주소와 매핑은 `Int`로 전달하며 `mmap` syscall로 메모리를 확보한다.
-이는 기존 Xen의 `bb`·asm 의미를 사용한다. 메모리 주소의 유효성과 수명은 호출자가
-관리한다. `String`이나 `Ptr<T>`의 기존 표현을 다른 의미로 축약하지 않는다.
+Addresses and mappings are represented as `Int` values, with memory allocated through the `mmap` syscall.
 
-## 아직 지원하지 않는 것
+This uses the existing Xen semantics for `bb` and asm. The caller is responsible for managing memory address validity and lifetime.
 
-`String` 값, 벡터, 열거형, 튜플, 제네릭, Box·소유권·참조,
-표준 라이브러리, 모듈·import, 부동소수점, `for`, `break`, `continue`,
-`match`, 조건식으로 값을 만드는 `if`, 거듭제곱, 일반적인 asm,
-`#scope`·함수 속성, 최적화, 다른 CPU·OS는 미구현이다.
-블록의 마지막 표현식과 `()` 값도 아직 지원하지 않는다.
-지원하지 않는 구문은 오류로 거부하며, stage0에 전달하는 우회 경로는 없다.
+The existing representations of `String` and `Ptr<T>` are not replaced with simplified or incompatible representations.
 
-고정 상한은 소스 **1MiB 미만**, 토큰 262,142개(EOF 제외), 출력 4MiB,
-함수 256개, 함수당 활성 변수 512개, 임시 값·인자를 포함한 프레임 64KiB,
-호출 재배치 65,536개다. 구조체는 128개, 필드는 구조체당 32개,
-구조체 크기는 32KiB까지다.
-파서 재귀 깊이와 실행 스택에 대한 별도 제한·진단은 아직 없다.
-오류 문구·종료 코드는 기존 컴파일러와 동일하지 않다.
+## Not Yet Supported
 
-## 구현 구조
+The following features are not implemented:
 
-`sources.list`로 조립한 동일 소스를 stage1~stage3의 입력으로 사용한다.
-전환 드라이버만 `assemble.sh bootstrap/driver.xen`으로 진입점을 교체해 조립한다.
-드라이버도 현재와 동일한 `src/`를 사용하므로 구현 전체를 복제하지 않는다.
-과거 records-seed가 만든 실행 파일에는 새 시작 정보가 없으므로, stdin 전용
-드라이버가 현재 백엔드로 CLI의 첫 실행 파일을 만드는 단계를 거친다.
+`String` values, vectors, enums, tuples, generics, Box, ownership, references, the standard library, modules and imports, floating-point values, `for`, `break`, `continue`, `match`, value-producing `if` expressions, exponentiation, general-purpose asm, `#scope`, function attributes, optimization, and other CPU architectures or operating systems.
 
-1. `lex`: 토큰을 32바이트 레코드로 저장한다.
-2. `declarations`: 함수 시그니처와 본문 토큰 위치를 수집한다.
-3. `compile_function`: 본문을 파싱하며 타입을 확인하고 코드를 생성한다.
-4. `expression`: 우선순위 파싱, 정수 연산, 단락 평가, 호출을 처리한다.
-5. `block`·`statement`: 변수 범위, 분기, 반복, 반환을 처리한다.
-6. `elf`·`patch`: 정적 ELF64 헤더와 상대 호출·분기 주소를 완성한다.
+Trailing block expressions and the `()` value are also unsupported.
 
-버퍼 주소는 `Context` 구조체로 전달한다. 공유 카운터와 토큰·심볼 테이블은 아직
-원시 메모리에 두며, 카운터는 `state_get`·`state_set`으로 접근한다. 카운터 번호는
-`src/context.xen`에 정리했다. `make_context() -> Context`가 실제 컴파일러에서
-구조체 반환도 사용하므로 자기 컴파일 과정에서 인자와 반환 규약을 함께 검증한다.
+Unsupported syntax is rejected with an error. There is no fallback path that delegates compilation to stage0.
 
-지역 변수와 구조체 임시 값은 `rbp` 기준의 스택 영역에 둔다. 표현식의 스칼라 임시
-값은 `push`·`pop`을 사용한다. 일반 함수의 인자 레지스터는
-`rdi rsi rdx rcx r8 r9`, syscall은 `rax`에 번호를 두고
-`rdi rsi rdx r10 r8 r9`에 인자를 둔다.
-구조체 인자는 독립된 스냅샷 주소를 전달하고, 피호출자가 모든 인자 레지스터를
-보관한 뒤 자신의 프레임으로 복사한다. 구조체 반환은 호출자가 마련한 임시 영역의
-주소를 숨은 `r10` 인자로 전달하고, 반환 전에 결과를 복사한다. 이는 이 컴파일러의
-내부 규약이며 C ABI는 아니다.
-ELF는 실행 코드용 RX 세그먼트와 시작 정보용 RW 세그먼트를 분리한다.
-진입 코드는 첫 함수 호출 전에 Linux의 초기 스택 주소를 `0x800000`에 보관한다.
-CLI는 기존 메모리 읽기 함수로 argc와 NUL로 끝나는 argv를 읽으며 procfs에
-의존하지 않는다. 코드 세그먼트는 `0x400000`에서 시작해 최대 4MiB이므로 겹치지
-않는다. 이 주소는 생성된 실행 파일의 내부 규약이며 일반 포인터·String API가 아니다.
-키워드·asm 비교에 쓰는 큰 십진 상수는 해당 ASCII 바이트를 little-endian으로
-묶은 값이다. 이름 비교는 원본 바이트 전체를 비교하므로 해시 충돌에 의존하지 않는다.
+The implementation has the following fixed limits:
 
-## 검증과 진척
-
-2026-10-16에 Linux x86-64에서 다음을 실행했다.
-
-- stage1 → stage2 → stage3 자기 컴파일과 stage2/stage3 바이트 일치.
-- `core.xen`: 재귀·전방 호출, 6인자·중첩 호출의 평가 순서, 정수 경계,
-  부호 있는 나눗셈, 우선순위, 단락 평가, 변수 범위, 분기·반복.
-- `memory.xen`: 실제 mmap, asm 4종, syscall. 두 예제 모두 stage0와 stage2의
-  실행 출력 일치.
-- `records.xen`: 선언 순서에 따른 생성자 평가, 중첩 필드 수정, 복사 독립성,
-  구조체 반환 수명·재귀, 구조체와 스칼라를 섞은 6인자, 연속 Bool 필드와
-  크기 1·5바이트 구조체의 복사. stage0와 stage2 실행 출력 일치.
-- 첫 스칼라 구현 → 구조체 지원 스칼라 구현 → Context 기반 구현으로 이어지는
-  확장 경로와 최종 stage2/stage3의 바이트 일치.
-- 잘못된 타입·변수·함수·반환·리터럴, bb 없는 syscall, 미지원 구문을 거부하고
-  stdout이 비어 있는지 확인.
-- 지역 변수에 가려진 함수 호출, 내장 이름의 함수 선언, 반환 이후의 문장은
-  stage0와 stage2 모두 거부하는지 확인.
-- 잘못된 나눗셈·나머지·시프트와 실패한 assert의 종료 코드 확인.
-
-첫 스칼라 자기 호스팅에 이어 **구조체를 사용하는 컴파일러의 자기 호스팅**까지
-확장했다. 다음에는 `String`·동적 버퍼를 추가해 주소 기반 테이블과 숫자 진단을
-일반적인 자료형으로 옮길 수 있다. 실제 모듈·표준 라이브러리 지원도 후속 과제다.
-
-CLI 추가 후에는 `bootstrap.sh`를 실행해 새 `build` 명령으로 stage2·stage3를
-생성하고 두 파일의 바이트 일치를 확인했다. 위의 전체 회귀 검사는 CLI 변경 후
-다시 실행하지 않았다.
-
-## 오류 코드
-
-형식은 `E<코드> <0부터 시작하는 소스 바이트 위치>`다.
-컴파일러 자체를 빌드할 때 이 위치는 조립된 `build/compiler.xen`을 기준으로 한다.
-
-| 코드 | 의미 |
+| Resource | Limit |
 | --- | --- |
-| 101~103 | 필요한 기호·키워드·표현식이 없음, 또는 미지원 문법 |
-| 201~210 | 토큰·숫자·문자열·문자·출력·함수·변수·재배치·소스·입력 오류 |
-| 301~302 | 타입 불일치 또는 미지원 타입 |
-| 303~305 | 예약 이름, 중복 함수, 인자 수 초과 |
-| 306~309 | 없는 변수, 중복 변수, 없는 함수, 불변 변수 대입 |
-| 310~312 | 반환 경로 부족, main 없음, main 시그니처 오류 |
-| 313~314 | 스칼라 지역 변수 호출, 도달 불가능한 문장 |
-| 401~404 | 미지원 asm, 잘못된 레지스터 제약, bb 권한 없음, global 선언 뒤 줄바꿈 없음 |
-| 501~506 | 중복 구조체, 잘못된 필드 선언, 없는 필드, 생성자 누락·중복, 값 순환, 구조체 상한 초과 |
+| Source size | Less than 1 MiB |
+| Tokens | 262,142, excluding EOF |
+| Output size | 4 MiB |
+| Functions | 256 |
+| Active variables per function | 512 |
+| Stack frame, including temporaries and arguments | 64 KiB |
+| Call relocations | 65,536 |
+| Structs | 128 |
+| Fields per struct | 32 |
+| Struct size | 32 KiB |
 
-메모리 확보 실패는 70, 출력 실패는 74, 컴파일 오류는 1로 종료한다.
-CLI 인자 오류는 64, 입력 파일 열기 실패는 66, 출력 파일 생성·게시 실패는 73,
-파일 쓰기·닫기 실패는 74다. 파일 시스템 오류에는 경로와 Linux errno를 표시한다.
-소스 읽기 실패는 기존 `E210`·종료 코드 1을 유지한다. `--help`와 성공한 `check`는
-0으로 종료한다.
+There are no separate limits or diagnostics for parser recursion depth or runtime stack usage.
+
+Error messages and exit codes are not identical to those of the existing compiler.
+
+## Implementation Architecture
+
+The same source assembled through `sources.list` is used as input for stage1 through stage3.
+
+Only the transitional driver replaces the entry point, using:
+
+```sh
+assemble.sh bootstrap/driver.xen
+```
+
+The driver uses the same current `src/` implementation, avoiding duplication of the compiler.
+
+Executables produced by the historical records-seed lack the new startup information. Therefore, a stdin-only transitional driver is used to produce the first executable with the CLI using the current backend.
+
+The compilation pipeline consists of the following stages:
+
+1. `lex`: Stores tokens as 32-byte records.
+2. `declarations`: Collects function signatures and body token positions.
+3. `compile_function`: Parses function bodies while performing type checking and code generation.
+4. `expression`: Handles precedence parsing, integer operations, short-circuit evaluation, and function calls.
+5. `block` and `statement`: Handle variable scopes, branches, loops, and returns.
+6. `elf` and `patch`: Complete the static ELF64 headers and relative call and branch addresses.
+
+Buffer addresses are passed through the `Context` struct.
+
+Shared counters and token and symbol tables are still stored in raw memory. Counters are accessed through `state_get` and `state_set`, and their numeric identifiers are defined in `src/context.xen`.
+
+The compiler itself uses `make_context() -> Context`, so self-compilation also exercises the calling and return conventions for struct values.
+
+Local variables and temporary struct values reside in stack storage relative to `rbp`. Scalar expression temporaries use `push` and `pop`.
+
+Ordinary function arguments use the registers:
+
+```text
+rdi rsi rdx rcx r8 r9
+```
+
+Syscalls place the syscall number in `rax` and arguments in:
+
+```text
+rdi rsi rdx r10 r8 r9
+```
+
+Struct arguments are passed as addresses of independent snapshots. The callee saves all argument registers before copying the arguments into its own stack frame.
+
+For struct returns, the caller passes the address of a temporary return area as a hidden `r10` argument. The result is copied into this area before returning.
+
+This is the compiler's internal calling convention, not the C ABI.
+
+The ELF executable separates the RX code segment from the RW startup-information segment.
+
+Before the first function call, the entry code stores the initial Linux stack address at `0x800000`.
+
+The CLI reads `argc` and NUL-terminated `argv` strings through the existing memory-reading functions, without depending on procfs.
+
+The code segment begins at `0x400000` and is limited to 4 MiB, so it does not overlap the startup-information area.
+
+This address is part of the generated executable's internal convention, not a general pointer or String API.
+
+Large decimal constants used for keyword and asm comparisons encode ASCII bytes packed in little-endian order.
+
+Name comparisons examine the complete original byte sequences and do not rely on hash collisions.
+
+## Verification and Progress
+
+The following tests were performed on Linux x86-64 on October 16, 2026.
+
+- Self-compilation from stage1 through stage2 to stage3, including byte-for-byte equality between stage2 and stage3.
+- `core.xen`: Recursion, forward calls, evaluation order for six arguments and nested calls, integer boundaries, signed division, operator precedence, short-circuit evaluation, variable scopes, branching, and loops.
+- `memory.xen`: Actual mmap allocation, all four asm forms, and syscalls. Both examples produced identical runtime output with stage0 and stage2.
+- `records.xen`: Constructor evaluation in declaration order, nested field mutation, copy independence, struct return lifetime and recursion, six arguments mixing structs and scalars, consecutive Bool fields, and copying structs of sizes 1 and 5 bytes. Runtime output matched between stage0 and stage2.
+- The incremental bootstrap path from the initial scalar implementation to the struct-supporting scalar implementation and then to the Context-based implementation, including final stage2/stage3 byte equality.
+- Rejection of invalid types, variables, functions, returns, literals, syscalls without `bb`, and unsupported syntax, with verification that stdout remains empty.
+- Rejection of calls to functions shadowed by local variables, function declarations using reserved intrinsic names, and statements after returns, by both stage0 and stage2.
+- Verification of exit codes for invalid division, remainder, shifts, and failed assertions.
+
+Following initial scalar self-hosting, the compiler has now reached **self-hosting with structs used in the compiler implementation itself**.
+
+A possible next step is to add `String` and dynamic buffers, allowing address-based tables and numeric diagnostics to migrate to ordinary data types.
+
+Actual modules and standard library support are also future work.
+
+After adding the CLI, `bootstrap.sh` was run to generate stage2 and stage3 using the new `build` command, and the two files were confirmed to be byte-for-byte identical.
+
+The full regression suite described above was not rerun after the CLI changes.
+
+## Error Codes
+
+Compilation errors use the format:
+
+```text
+E<code> <zero-based source byte offset>
+```
+
+When compiling the compiler itself, the byte offset refers to the assembled `build/compiler.xen`.
+
+| Code | Meaning |
+| --- | --- |
+| 101–103 | Missing required symbol, keyword, or expression, or unsupported syntax |
+| 201–210 | Token, number, string, character, output, function, variable, relocation, source, or input errors |
+| 301–302 | Type mismatch or unsupported type |
+| 303–305 | Reserved name, duplicate function, too many arguments |
+| 306–309 | Unknown variable, duplicate variable, unknown function, assignment to immutable variable |
+| 310–312 | Missing return path, missing main, invalid main signature |
+| 313–314 | Calling a scalar local variable, unreachable statement |
+| 401–404 | Unsupported asm, invalid register constraint, missing bb permission, missing newline after global declaration |
+| 501–506 | Duplicate struct, invalid field declaration, unknown field, missing or duplicate constructor field, value cycle, struct limit exceeded |
+
+Memory allocation failures exit with status 70, output failures with 74, and compilation errors with 1.
+
+CLI argument errors exit with status 64, input file open failures with 66, output file creation or publication failures with 73, and file write or close failures with 74.
+
+Filesystem errors include the path and Linux errno.
+
+Source read failures retain the existing `E210` diagnostic and exit status 1.
+
+Both `--help` and a successful `check` exit with status 0.
