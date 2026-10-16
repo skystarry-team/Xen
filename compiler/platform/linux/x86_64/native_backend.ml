@@ -712,7 +712,7 @@ let rec emit_rvalue env (expression:value) node =
       push_rax env; M.bytes output [0x48;0x89;0xc6;0x48;0x69;0xf6];M.u32 output(Int64.of_int stride);M.bytes output [0x48;0x31;0xff;0xba;3;0;0;0;0x41;0xba;0x22;0;0;0;0x41;0xb8;0xff;0xff;0xff;0xff;0x45;0x31;0xc9;0xb8;9;0;0;0;0x0f;0x05];
       M.bytes output [0x48;0x3d;0x00;0xf0;0xff;0xff]; M.branch output [0x0f;0x83] failed;
       M.u8 output 0x5a; env.stack_depth<-env.stack_depth-8; M.label output ok
-  | Raw_load (typ,pointer,offset) ->
+  | Raw_load (typ,pointer,offset) | Volatile_load (typ,pointer,offset) ->
       emit_value env pointer; push_rax env; M.u8 output 0x52; env.stack_depth<-env.stack_depth+8; emit_value env offset;
       let bounds=emit_error_stub output expression.span "raw pointer offset out of bounds" in
       M.bytes output [0x48;0x85;0xc0]; M.branch output [0x0f;0x88] bounds;
@@ -723,7 +723,7 @@ let rec emit_rvalue env (expression:value) node =
        | F64->M.bytes output[0xf2;0x0f;0x10;0x00]
        | Named _->let size=slot_size typ in M.bytes output[0x48;0x89;0xc6;0x48;0x8d;0xbd];M.u32 output(Int64.of_int(-(env.scratch+aggregate_bias size)));M.bytes output[0x48;0xc7;0xc1];M.u32 output(Int64.of_int size);M.bytes output[0xf3;0xa4;0x48;0x8d;0x85];M.u32 output(Int64.of_int(-(env.scratch+aggregate_bias size)))
        | _->load_scalar_ptr output typ)
-  | Raw_store (typ,pointer,offset,value) ->
+  | Raw_store (typ,pointer,offset,value) | Volatile_store (typ,pointer,offset,value) ->
       emit_value env pointer; push_rax env; M.u8 output 0x52; env.stack_depth<-env.stack_depth+8; emit_value env offset; push_rax env; emit_value env value;
       (match typ with F32|F64->push_float env typ|_->push_rax env);
       let bounds=emit_error_stub output expression.span "raw pointer offset out of bounds" in
@@ -741,6 +741,94 @@ let rec emit_rvalue env (expression:value) node =
       M.bytes output [0x48;0x85;0xd2]; M.branch output [0x0f;0x84] done_;
       M.bytes output [0x48;0x89;0xc7;0x48;0x89;0xd6;0x48;0x69;0xf6];M.u32 output(Int64.of_int(element_stride typ));M.bytes output[0xb8;11;0;0;0;0x0f;0x05;0x48;0x85;0xc0]; M.branch output [0x0f;0x88] failed;
       M.label output done_; mov_rax_imm output 0L
+  | Ptr_from_addr(typ,address,count)->
+      emit_value env address;push_rax env;emit_value env count;
+      M.bytes output[0x48;0x89;0xc2];pop_reg env [];
+      let invalid=emit_error_stub output expression.span "invalid raw pointer address/count"
+      and nonnull=fresh "ptr_nonnull" in
+      M.bytes output[0x48;0x85;0xd2];M.branch output[0x0f;0x88]invalid;
+      M.bytes output[0x48;0xb9];M.u64 output(Int64.div Int64.max_int(Int64.of_int(element_stride typ)));
+      M.bytes output[0x48;0x39;0xca];M.branch output[0x0f;0x87]invalid;
+      M.bytes output[0x48;0xa9];M.u32 output(Int64.of_int((descriptor typ).alignment-1));M.branch output[0x0f;0x85]invalid;
+      M.bytes output[0x48;0x85;0xc0];M.branch output[0x0f;0x85]nonnull;
+      M.bytes output[0x48;0x85;0xd2];M.branch output[0x0f;0x85]invalid;M.label output nonnull;
+      M.bytes output[0x48;0x69;0xca];M.u32 output(Int64.of_int(element_stride typ));
+      M.bytes output[0x48;0x01;0xc1];M.branch output[0x0f;0x82]invalid
+  | Inline_asm(spec,inputs)->
+      let module A=Xen_x86_64.Inline_asm in
+      let code=try A.assemble ~input_types:(List.map(fun(v:value)->v.typ)inputs)spec with Asm_contract.Error message->unsupported ~span:expression.span message in
+      List.iter(fun v->emit_value env v;push_rax env)inputs;
+      let n=List.length inputs in
+      List.iteri(fun i name->let r=A.register name in
+        M.bytes output[if r>=8 then 0x4c else 0x48;0x8b;0x84 lor((r land 7)lsl 3);0x24];
+        M.u32 output(Int64.of_int((n-1-i)*8)))spec.input_registers;
+      if n>0 then(M.bytes output[0x48;0x81;0xc4];M.u32 output(Int64.of_int(n*8));env.stack_depth<-env.stack_depth-n*8);
+      String.iter(fun c->M.u8 output(Char.code c))code;
+      (* Capture every output before loading RAX or computing a tuple address. *)
+      List.iter(fun(name,_)->let r=A.register name in
+        if r>=8 then M.u8 output 0x41;M.u8 output(0x50 lor(r land 7));env.stack_depth<-env.stack_depth+8)spec.output_registers;
+      (match spec.output_registers,expression.typ with
+       |[],_->mov_rax_imm output 0L
+       |[_],_->pop_reg env [];normalize_rax output expression.typ
+       |_,Named name->let layout=Hashtbl.find layouts name in
+           List.iter(fun(field:struct_field)->pop_reg env [];
+             store_scalar_disp output field.typ (-(env.scratch+aggregate_bias layout.size-field.offset)))(List.rev layout.fields);
+           M.bytes output[0x48;0x8d;0x85];M.u32 output(Int64.of_int(-(env.scratch+aggregate_bias layout.size)))
+       |_->assert false)
+  | Cpu_relax->M.bytes output[0xf3;0x90];mov_rax_imm output 0L
+  | Memory_fence->M.bytes output[0x0f;0xae;0xf0];mov_rax_imm output 0L
+  | Atomic(kind,typ,_,_,pointer::index::values)->
+      let width=(descriptor typ).size in
+      let invalid=emit_error_stub output expression.span "atomic pointer/index is out of bounds or not naturally aligned"in
+      emit_value env pointer;push_rax env;M.u8 output 0x52;env.stack_depth<-env.stack_depth+8;
+      emit_value env index;M.bytes output[0x48;0x3b;0x04;0x24];M.branch output[0x0f;0x83]invalid;
+      M.bytes output[0x48;0x69;0xc0];M.u32 output(Int64.of_int width);
+      M.bytes output[0x48;0x03;0x44;0x24;0x08;0x48;0x83;0xc4;0x10];env.stack_depth<-env.stack_depth-16;
+      M.bytes output[0x48;0xa9];M.u32 output(Int64.of_int(width-1));M.branch output[0x0f;0x85]invalid;
+      M.bytes output[0x48;0x89;0xc7;0x0f;0xae;0xf0];
+      let prefix ()=if width=2 then M.u8 output 0x66 else if width=8 then M.u8 output 0x48 in
+      let locked_prefix ()=if width=2 then M.u8 output 0x66;M.u8 output 0xf0;if width=8 then M.u8 output 0x48 in
+      let exchange ()=prefix();M.bytes output[if width=1 then 0x86 else 0x87;0x07]in
+      let cmpxchg ()=locked_prefix();M.bytes output[0x0f;if width=1 then 0xb0 else 0xb1;0x17]in
+      (match kind,values with
+       |Atomic_load,[]->M.bytes output[0x48;0x89;0xf8];load_scalar_ptr output typ
+       |(Atomic_store|Atomic_exchange),[value]->emit_value env value;exchange()
+       |Atomic_compare_exchange,[expected;desired]->
+           emit_value env desired;M.bytes output[0x48;0x89;0xc2];emit_value env expected;cmpxchg()
+       |(Atomic_fetch_add|Atomic_fetch_sub),[value]->emit_value env value;
+           if kind=Atomic_fetch_sub then M.bytes output[0x48;0xf7;0xd8];
+           M.bytes output[0x48;0x89;0xc1];locked_prefix();M.bytes output[0x0f;if width=1 then 0xc0 else 0xc1;0x0f];
+           M.bytes output[0x48;0x89;0xc8]
+       |(Atomic_fetch_and|Atomic_fetch_or|Atomic_fetch_xor),[value]->
+           emit_value env value;M.bytes output[0x48;0x89;0xc1;0x48;0x89;0xf8];load_scalar_ptr output typ;
+           let retry=fresh "atomic_retry"in M.label output retry;
+           M.bytes output[0x48;0x89;0xc2;0x48;(match kind with Atomic_fetch_and->0x21|Atomic_fetch_or->0x09|_->0x31);0xca];
+           cmpxchg();M.branch output[0x0f;0x85]retry
+       |_->assert false);
+      M.bytes output[0x0f;0xae;0xf0];
+      if kind=Atomic_store then mov_rax_imm output 0L else normalize_rax output typ
+  | Atomic _->assert false
+  | Foreign_call(symbol,inputs)->
+      let got=M.import output symbol.library symbol.symbol in
+      List.iter(fun(v:value)->emit_value env v;
+        if T.is_float v.typ then push_float env v.typ else push_rax env)inputs;
+      let gp=ref 0 and fp=ref 0 and count=List.length inputs in
+      List.iteri(fun i(v:value)->let displacement=(count-1-i)*8 in
+        if T.is_float v.typ then begin
+          let reg= !fp in incr fp;
+          M.bytes output[if v.typ=F32 then 0xf3 else 0xf2;0x0f;0x10;0x84 lor(reg lsl 3);0x24]
+        end else begin
+          let reg=List.nth[7;6;2;1;8;9] !gp in incr gp;
+          M.bytes output[if reg>=8 then 0x4c else 0x48;0x8b;0x84 lor((reg land 7)lsl 3);0x24]
+        end;M.u32 output(Int64.of_int displacement))inputs;
+      let pad=if env.stack_depth mod 16=0 then 0 else 8 in
+      if pad<>0 then M.bytes output[0x48;0x83;0xec;0x08];
+      M.bytes output[0xff;0x15];M.rip_rel32 output M.Data got;
+      let total=count*8+pad in
+      if total>0 then(M.bytes output[0x48;0x81;0xc4];M.u32 output(Int64.of_int total));
+      env.stack_depth<-env.stack_depth-count*8;
+      if expression.typ=Unit then mov_rax_imm output 0L
+      else if T.is_integer expression.typ then normalize_rax output expression.typ
   | Ptr_addr (_,pointer)->emit_value env pointer
   | Ptr_len pointer->emit_value env pointer;M.bytes output[0x48;0x89;0xd0]
   | Syscall arguments ->
@@ -1327,18 +1415,32 @@ let generate checked =
     Semantic_ir.verify program;
     Hashtbl.clear layouts;Hashtbl.clear requested_vec_helpers;List.iter(fun (l:struct_layout)->Hashtbl.add layouts l.name l)program.layouts;
     serial := 0;
+    let dynamic=List.exists(fun(f:func)->Array.exists(fun(b:block)->List.exists(fun op->match op.node with Eval(_,Foreign_call _)->true|_->false)b.operations)f.blocks)program.functions in
     let output = M.create () in M.add_data_u64 output "__xen_call_depth" 0L;
     M.add_data_u64 output "__xen_argc" 0L; M.add_data_u64 output "__xen_argv" 0L;
     M.label output "_start";
     M.bytes output [0x48;0x8b;0x04;0x24;0x48;0xff;0xc8;0x48;0x89;0x05]; M.rip_rel32 output M.Data "__xen_argc";
     M.bytes output [0x48;0x8d;0x44;0x24;0x10;0x48;0x89;0x05]; M.rip_rel32 output M.Data "__xen_argv";
-    M.branch output [0xe8] ("fn_" ^ program.entry);
-    M.bytes output [0x48;0x31;0xff;0xb8;0x3c;0;0;0;0x0f;0x05];
+    if dynamic then begin
+      let startup=M.import output "libc.so.6" "__libc_start_main" in
+      M.bytes output[0x49;0x89;0xd1;0x48;0x8b;0x34;0x24;0x48;0x8d;0x54;0x24;0x08];
+      M.bytes output[0x48;0x8d;0x3d];M.rel32 output "__xen_c_main";
+      M.bytes output[0x31;0xc9;0x45;0x31;0xc0;0x31;0xed;0x48;0x83;0xe4;0xf0;0x50;0x54;0xff;0x15];
+      M.rip_rel32 output M.Data startup;M.bytes output[0x0f;0x0b];
+      M.label output "__xen_c_main";
+      M.bytes output[0x55;0x48;0x89;0xe5;0x53;0x41;0x54;0x41;0x55;0x41;0x56;0x41;0x57;0x48;0x83;0xec;0x08];
+      M.branch output[0xe8]("fn_"^program.entry);
+      M.bytes output[0x48;0x83;0xc4;0x08;0x41;0x5f;0x41;0x5e;0x41;0x5d;0x41;0x5c;0x5b;0x31;0xc0;0xc9;0xc3]
+    end else begin
+      M.branch output [0xe8] ("fn_" ^ program.entry);
+      M.bytes output [0x48;0x31;0xff;0xb8;0x3c;0;0;0;0x0f;0x05]
+    end;
     emit_print_runtime output; emit_string_runtime output; emit_vec_runtime output; emit_file_runtime output;
     while M.position output mod 16 <> 0 do M.u8 output 0x90 done;
     M.label output "__xen_read_builtin"; emit_hex output read_builtin_runtime_hex;
     List.iter (emit_function output) program.functions;emit_requested_vec_helpers output;
-    let entry = Hashtbl.find output.labels "_start" in Ok (Elf_writer.static_x86_64 ~entry output)
+    let entry = Hashtbl.find output.labels "_start" in
+    Ok (if dynamic then Elf_writer.dynamic_x86_64 ~entry output else Elf_writer.static_x86_64 ~entry output)
   with Unsupported error -> Error error | M.Missing_label label ->
     Error { span = None; message = "missing machine label '" ^ label ^ "'" }
 

@@ -25,6 +25,13 @@ type rvalue =
   | Box_new of value | Box_take of value
   | Raw_alloc of typ * value | Raw_load of typ * value * value
   | Raw_store of typ * value * value * value | Raw_free of typ * value
+  | Volatile_load of typ * value * value
+  | Volatile_store of typ * value * value * value
+  | Ptr_from_addr of typ * value * value
+  | Inline_asm of asm_spec * value list
+  | Cpu_relax | Memory_fence
+  | Foreign_call of foreign_symbol * value list
+  | Atomic of atomic_kind * typ * memory_order * memory_order option * value list
   | Ptr_addr of typ * value | Ptr_len of value | Syscall of value list
   | Vec_lit of value list | Index of value * value | Vec_get of value * value | Vec_len of value
   | Slice_make of value * value * value | Slice_len of value | Slice_get of value * value
@@ -66,12 +73,12 @@ let program (Checked p) = p
 let place_of_value (v:value) = {root=v.id;projections=[];typ=v.typ;span=v.span}
 let value_of_local (l:local) : value = {id=l.id;typ=l.typ;span=l.span}
 let rvalue_uses = function
-  | Int_lit _|Float_lit _|String_lit _|Bool_lit _|Function_address _ -> []
+  | Int_lit _|Float_lit _|String_lit _|Bool_lit _|Function_address _|Cpu_relax|Memory_fence -> []
   | Box_new x|Box_take x|Unary(_,x)|Raw_alloc(_,x)|Raw_free(_,x)|Ptr_addr(_,x)|Ptr_len x|Vec_len x|Slice_len x
   | Vec_pop x|File_read x|File_close x|File_is_open x -> [x]
-  | Binary(_,a,b)|Raw_load(_,a,b)|Index(a,b)|Vec_get(a,b)|Slice_get(a,b)|Vec_push(a,b)|File_write(a,b)|Exchange(a,b) -> [a;b]
-  | Raw_store(_,a,b,c)|Slice_make(a,b,c)|Vec_set(a,b,c)|Vec_swap(a,b,c)|Vec_replace(a,b,c) -> [a;b;c]
-  | Call(_,xs)|Syscall xs|Vec_lit xs -> xs
+  | Binary(_,a,b)|Raw_load(_,a,b)|Volatile_load(_,a,b)|Ptr_from_addr(_,a,b)|Index(a,b)|Vec_get(a,b)|Slice_get(a,b)|Vec_push(a,b)|File_write(a,b)|Exchange(a,b) -> [a;b]
+  | Raw_store(_,a,b,c)|Volatile_store(_,a,b,c)|Slice_make(a,b,c)|Vec_set(a,b,c)|Vec_swap(a,b,c)|Vec_replace(a,b,c) -> [a;b;c]
+  | Call(_,xs)|Syscall xs|Inline_asm(_,xs)|Foreign_call(_,xs)|Atomic(_,_,_,_,xs)|Vec_lit xs -> xs
   | Indirect_call(c,xs) -> c::xs
   | Struct_lit(_,fs) -> List.map snd fs
 let place_uses p = p.root :: List.filter_map(function Element v->Some v.id|_->None)p.projections
@@ -91,6 +98,7 @@ let terminator_uses = function Branch(v,_,_)|Return(Some v)->[v.id]|_->[]
 exception Invalid of span * string
 let verify program =
   let bad span s = raise(Invalid(span,"Semantic IR: "^s)) in
+  let foreign_signatures=Hashtbl.create 8 in
   let program_span={file="<ir>";line=1;column=1}in
   let names=Hashtbl.create 16 in
   List.iter(fun(f:func)->if Hashtbl.mem names f.name then bad f.span "duplicate function name";
@@ -248,8 +256,26 @@ let verify program =
               |Box_take x->require(Box v.typ)x.typ;
                   if not(local x.span x.id).owned then bad op.span "Box extraction consumes an owned operand"
               |Raw_alloc(t,n)->index n;require(Ptr t)v.typ
-              |Raw_load(t,p,i)->require(Ptr t)p.typ;index i;require t v.typ
-              |Raw_store(t,p,i,x)->require(Ptr t)p.typ;index i;require t x.typ;require Unit v.typ
+              |Volatile_load(t,_,_)|Volatile_store(t,_,_,_) when not(Type_desc.is_numeric t)->bad op.span "volatile element must be a numeric scalar"
+              |Ptr_from_addr(t,a,n)->index a;index n;require(Ptr t)v.typ
+              |Inline_asm(spec,xs)->
+                  let tuple_fields=function Named n when String.starts_with ~prefix:"$Tuple<" n->
+                    Some(List.map(fun(f:struct_field)->f.typ)(layout op.span n).fields)|_->None in
+                  (match Asm_contract.validate ~tuple_fields spec v.typ(List.map(fun(x:value)->x.typ)xs)with Ok()->()|Error message->bad op.span message)
+              |Cpu_relax|Memory_fence->require Unit v.typ
+              |Atomic(kind,t,success,failure,xs)->
+                  (match Atomic_contract.validate kind t success failure with Ok()->()|Error message->bad op.span message);
+                  (match xs with p::i::values when List.length values=Atomic_contract.payloads kind->
+                    require(Ptr t)p.typ;index i;List.iter(fun(x:value)->require t x.typ)values
+                   |_->bad op.span "atomic operand arity");
+                  require(if kind=Atomic_store then Unit else t)v.typ
+              |Foreign_call(symbol,xs)->
+                  (match Foreign_contract.validate symbol v.typ(List.map(fun(x:value)->x.typ)xs)with
+                   |Error message->bad op.span message|Ok()->());
+                  (match Foreign_contract.register foreign_signatures symbol v.typ(List.map(fun(x:value)->x.typ)xs)with
+                   |Error message->bad op.span message|Ok()->())
+              |Raw_load(t,p,i)|Volatile_load(t,p,i)->require(Ptr t)p.typ;index i;require t v.typ
+              |Raw_store(t,p,i,x)|Volatile_store(t,p,i,x)->require(Ptr t)p.typ;index i;require t x.typ;require Unit v.typ
               |Raw_free(t,p)->require(Ptr t)p.typ;require Unit v.typ
               |Ptr_addr(t,p)->require(Ptr t)p.typ;require I64 v.typ
               |Ptr_len p->(match p.typ with Ptr _->require I64 v.typ|_->bad op.span "pointer length operand")
@@ -267,7 +293,7 @@ let verify program =
              |(id,scope)::rest when id=target && scope=op.scope->calls:=rest
              |_->bad op.span "unbalanced logical call exit")
          | Storage_live _|Storage_dead _->());
-        (match op.node with Eval(_, (Raw_alloc _|Raw_load _|Raw_store _|Raw_free _|Ptr_addr _|Ptr_len _|Syscall _))->
+        (match op.node with Eval(_, (Raw_alloc _|Raw_load _|Raw_store _|Raw_free _|Volatile_load _|Volatile_store _|Ptr_from_addr _|Inline_asm _|Cpu_relax|Memory_fence|Foreign_call _|Atomic _|Ptr_addr _|Ptr_len _|Syscall _))->
           if not(List.mem Bb f.scopes.(op.scope).mode_set)then bad op.span "raw operation outside bb scope"|_->()))b.operations;
       if !calls<>[] then bad f.span "logical call crosses block terminator";
       (match b.terminator with Branch(v,_,_)->value v;if v.typ<>Bool then bad v.span "branch expects Bool"
@@ -286,7 +312,7 @@ let dump p =
         |Storage_live n->"live l"^string_of_int n|Storage_dead n->"dead l"^string_of_int n
         |Acquire(v,k,p)->Printf.sprintf "v%d = %s %s" v.id(match k with Read->"read"|Copy->"copy"|Clone->"clone"|Move->"move")(string_of_place p)
         |Borrow(v,m,r,p)->Printf.sprintf "v%d = borrow %s%s %s" v.id(if m then "mut "else "")(if r then "reserved"else "")(string_of_place p)
-        |Eval(v,r)->Printf.sprintf "v%d = %s(%s)" v.id(match r with Call(n,_)->"call "^n|Indirect_call _->"indirect-call"|_->"operation")(String.concat ","(List.map(fun(v:value)->"v"^string_of_int v.id)(rvalue_uses r)))
+        |Eval(v,r)->Printf.sprintf "v%d = %s(%s)" v.id(match r with Call(n,_)->"call "^n|Indirect_call _->"indirect-call"|Foreign_call(s,_)->"extern-call "^s.symbol|Atomic(k,_,_,_,_)->Atomic_contract.name k|Inline_asm _->"asm volatile memory=unknown"|Cpu_relax->"cpu-relax"|Memory_fence->"memory-fence"|Volatile_load _->"volatile-load"|Volatile_store _->"volatile-store"|Ptr_from_addr _->"ptr-from-addr"|_->"operation")(String.concat ","(List.map(fun(v:value)->"v"^string_of_int v.id)(rvalue_uses r)))
         |Initialize(p,v)->Printf.sprintf "init %s <- v%d"(string_of_place p)v.id
         |Replace(p,v)->Printf.sprintf "replace %s <- v%d"(string_of_place p)v.id
         |Drop p->"drop "^string_of_place p|Forget p->"forget "^string_of_place p

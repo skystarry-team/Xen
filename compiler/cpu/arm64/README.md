@@ -6,9 +6,10 @@ qemu-aarch64 ./app hello
 python3 scripts/test.py --suite arm64
 ```
 
-`arm64-linux` is an alias. The compiler emits AArch64 machine code and a static,
+`arm64-linux` is an alias. The compiler emits AArch64 machine code and a
 little-endian Linux ELF64 executable directly; no assembler, linker, libc, cross
-toolchain or emulator is required to **build** it. Execution requires Linux ARM64
+toolchain or emulator is required to **build** it. External C calls select dynamic
+glibc ELF; other programs remain static. Execution requires Linux ARM64
 or an emulator such as QEMU. `run` and `test` use the host kernel and never launch
 QEMU automatically. Their process-launch errors identify the selected target.
 The CLI defaults to the compiler's build architecture on Linux: `x86_64-linux`
@@ -50,7 +51,8 @@ validates language semantics; it does not certify support by this backend.
 
 ## Internal calling convention and storage
 
-This is a Xen-only convention, not a C FFI ABI. x0..x5 hold pointers to argument
+The internal Xen convention is separate from `extern_call`'s scalar AAPCS64 ABI.
+For internal calls, x0..x5 hold pointers to argument
 values. The callee copies arguments into its frame before evaluating its body.
 x8 points to caller-provided result storage for every return type. Aggregate and
 String returns therefore never point into a returned stack frame. x29/x30 form

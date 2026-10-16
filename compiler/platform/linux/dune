@@ -1,0 +1,5 @@
+; SPDX-License-Identifier: Apache-2.0
+(library
+ (name xen_linux_elf)
+ (modules dynamic_elf)
+ (libraries xen_common))

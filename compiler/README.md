@@ -3,8 +3,9 @@
 The frontend produces checked Semantic IR. The driver selects a backend for an
 explicit CPU/OS pair; that backend owns machine lowering, its calling convention,
 runtime emission and executable construction. `x86_64-linux` retains full existing support.
-`aarch64-linux` (alias `arm64-linux`) now has an initial static backend for the
-core language and collections. See its [support matrix](cpu/arm64/README.md).
+`aarch64-linux` (alias `arm64-linux`) supports the core language and collections,
+including bb atomics and scalar C interop. Both Linux targets emit static ELF by
+default and dynamic ELF for external calls. See its [support matrix](cpu/arm64/README.md).
 
 ```text
 compiler/
@@ -16,6 +17,7 @@ compiler/
                    formatting/numeric/ownership routines with required OS hooks
   platform/
     linux/
+                   xen_linux_elf: shared Linux dynamic ELF metadata writer
       x86_64/      xen_linux_x86_64: legacy Linux emitter/runtime, ELF, backend
       arm64/       xen_linux_arm64: Linux runtime, ELF, backend composition
     darwin/        xen_darwin: shared Mach-O writer, SHA-256, validation notes
@@ -100,16 +102,47 @@ prototypes are retained for implementation testing. Recognition of
 an unsupported host cannot crash module initialization or prevent `version` from
 running. See the [platform support policy](platform/README.md).
 
-## Future bb-scoped inline assembly
+## bb-scoped low-level operations
 
-No syntax or assembly IR is introduced here. When it is added, common checking
-should enforce the `bb` capability and represent typed inputs/outputs, volatility
-and memory effects in Semantic IR. Optimization must preserve those effects,
-including barriers and unknown memory writes. The selected backend should validate
-instruction text, registers, operand constraints and clobbers, and perform register
-allocation and encoding. CPU intrinsics need the same division between common
-type/effect contracts and target-specific validation/lowering. The current opaque
-backend contract does not expose x86-64 registers to the frontend.
+`asm<T...>(template, in(...), out(...), inout(...), clobber(...))` has a dedicated
+AST node. Common checking enforces `bb`, integer inputs/outputs, tuple layout for
+multiple outputs, and constraint consistency. CPU checking tracks physical
+register aliases and valid low bits, including 32-bit zero extension and partial
+8/16-bit writes. Semantic IR retains constraints, typed operands,
+volatility and unknown memory read/write effects. All asm, volatile accesses,
+`cpu_relax()` and `memory_fence()` are effect boundaries excluded from scalar
+optimization, loop motion and fusion. The latter two have dedicated Unit-valued
+IR nodes: x86-64 emits `pause`/`mfence`, AArch64 emits `yield`/`dmb ish`.
+CPU-local `inline_asm.ml` modules validate a closed instruction/register subset,
+check reads and writes (including implicit clobbers), and encode without external
+tools. Stack/frame and callee-saved registers and control flow are rejected.
+Operands live in Semantic IR storage before backend register staging; ARM64's
+x15/x16 address scratch registers cannot be used by assembly.
+
+`volatile_load/store` support numeric scalars with one access at the element's
+width, including ARM64 where ordinary raw POD access uses byte copying.
+`ptr_from_addr<T>` constructs a bounded descriptor with count, alignment and
+address-overflow checks; mapping validity and allocation lifetime remain the
+bb caller's responsibility. See the [low-level reference](../docs/en/low-level.md)
+for syntax, guarantees and the per-target instruction subset, including immediate
+arithmetic, shifts, unary operations and checked byte-displacement encoding.
+
+`atomic_*` uses dedicated IR nodes with validated integer widths, arity, natural
+alignment and memory orders. All atomics are effect boundaries. The initial
+lowering conservatively strengthens ordering: x86 uses scalar/locked operations
+with mfence; ARM uses LDAR/STLR and LDAXR/STLXR retry loops with dmb ish. Strong
+compare-exchange returns the observed old value, and clears a failed ARM reservation.
+
+`extern_call<Result>(library,symbol,args...)` retains library/symbol metadata and
+typed operands in IR. It supports six fixed numeric/Ptr arguments and numeric/Unit
+results, with independent GP/FP ABI banks. Pointer arguments pass addresses only.
+Common checks reject conflicting declarations of a symbol. Linux emitters own
+glibc startup wrappers, GOT calls and dynamic executable selection; the shared
+Linux writer emits PT_INTERP, PT_DYNAMIC, DT_NEEDED, dynsym/hash/RELA and eager
+GLOB_DAT relocations. A C ABI main wrapper preserves callee-saved registers and
+returns through libc for initialization/termination and stdio cleanup. Plain Xen
+programs retain the existing static executable path. No host assembler or linker
+is invoked; target shared libraries are resolved by the runtime loader.
 
 ## Validation
 

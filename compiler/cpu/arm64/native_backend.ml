@@ -10,6 +10,7 @@ module type Runtime = sig
   val write_constant : M.t -> int -> string -> unit
   val fail : M.t -> string -> unit
   val start : M.t -> unit
+  val foreign_start : M.t -> main:string -> (unit, string) result
   val raw_syscall : M.t -> unit
   val emit : M.t -> unit
   val executable : M.t -> bytes
@@ -466,6 +467,84 @@ let rvalue e (v:value) node =
       address e 9 v.id;copy m (size e.program typ)
   |Raw_store(typ,pointer,index,a)->
       raw_address e v.span typ pointer index;address e 10 a.id;copy m (size e.program typ)
+  |Volatile_load(typ,pointer,index)->
+      raw_address e v.span typ pointer index;
+      M.load m ~bytes:(size e.program typ) 0 9 0;store e v 0
+  |Volatile_store(typ,pointer,index,a)->
+      raw_address e v.span typ pointer index;load e 0 a;
+      M.store m ~bytes:(size e.program typ) 0 9 0
+  |Ptr_from_addr(typ,a,n)->
+      let invalid=runtime_error e v.span "invalid raw pointer address/count"
+      and nonnull=M.fresh m "ptr_nonnull_"in
+      load e 0 a;load e 1 n;M.cmp_zero m 1;M.cond m 11 invalid;
+      M.imm m 2(Int64.div Int64.max_int(Int64.of_int(stride e.program typ)));
+      M.cmp m 1 2;M.cond m 8 invalid;
+      let alignment=match typ with Named name->(layout e.program name).alignment|t->(T.describe t).alignment in
+      M.int m 2(alignment-1);M.bit_and m 2 0 2;
+      M.cmp_zero m 2;M.cond m 1 invalid;
+      M.cmp_zero m 0;M.cond m 1 nonnull;M.cmp_zero m 1;M.cond m 1 invalid;M.label m nonnull;
+      M.int m 2(stride e.program typ);M.mul m 2 1 2;M.add m 3 0 2;
+      M.cmp m 3 0;M.cond m 3 invalid;
+      address e 15 v.id;M.store m 0 15 0;M.store m 1 15 8
+  |Inline_asm(spec,inputs)->
+      let code=try Inline_asm.assemble ~input_types:(List.map(fun(v:value)->v.typ)inputs)spec with Asm_contract.Error message->unsupported ~span:v.span message in
+      List.iter2(fun name value->load e (Inline_asm.register name)value)spec.input_registers inputs;
+      Buffer.add_string m.code code;
+      let count=List.length spec.output_registers in
+      if count>0 then begin
+        M.offset m 31 31 (-16*count);
+        List.iteri(fun i(name,_)->M.store m(Inline_asm.register name)31(i*16))spec.output_registers;
+        (match v.typ with
+         |Named name->let l=layout e.program name in
+             List.iteri(fun i(field:struct_field)->M.load m 0 31(i*16);address e 15 v.id;
+               M.offset m 15 15 field.offset;M.store m ~bytes:(size e.program field.typ)0 15 0)l.fields
+         |_->M.load m 0 31 0;store e v 0);
+        M.offset m 31 31(16*count)
+      end
+  |Cpu_relax->M.word m 0xd503203f
+  |Memory_fence->M.word m 0xd5033bbf
+  |Atomic(kind,typ,_,_,pointer::index::values)->
+      let width=size e.program typ in
+      raw_address e v.span typ pointer index;
+      let invalid=runtime_error e v.span "atomic pointer is not naturally aligned"in
+      M.int m 10(width-1);M.bit_and m 10 9 10;M.cmp_zero m 10;M.cond m 1 invalid;
+      List.iteri(fun i value->load e (i+1)value)values;
+      if width<8 then begin
+        M.imm m 10(Type_desc.max_unsigned(width*8));
+        List.iteri(fun i _->M.bit_and m(i+1)(i+1)10)values
+      end;
+      let sized base=base lor((match width with 1->0|2->1|4->2|_->3)lsl 30)in
+      M.word m 0xd5033bbf;
+      (match kind with
+       |Atomic_load->M.word m(sized 0x08dffc00 lor(9 lsl 5))
+       |Atomic_store->M.word m(sized 0x089ffc00 lor(9 lsl 5)lor 1)
+       |_->
+           let retry=M.fresh m "atomic_retry_"and failed=M.fresh m "atomic_failed_"and done_=M.fresh m "atomic_done_"in
+           M.label m retry;M.word m(sized 0x085ffc00 lor(9 lsl 5));
+           let source=match kind with
+             |Atomic_compare_exchange->M.cmp m 0 1;M.cond m 1 failed;2
+             |Atomic_exchange->1
+             |_->let emit=match kind with
+                 |Atomic_fetch_add->M.add|Atomic_fetch_sub->M.sub
+                 |Atomic_fetch_and->M.bit_and|Atomic_fetch_or->M.bit_or
+                 |Atomic_fetch_xor->fun m->M.rr m 0xca000000|_->assert false in
+                 emit m 4 0 1;4 in
+           M.word m(sized 0x0800fc00 lor(3 lsl 16)lor(9 lsl 5)lor source);
+           M.cmp_zero m 3;M.cond m 1 retry;
+           if kind=Atomic_compare_exchange then begin
+             M.branch m done_;M.label m failed;M.word m 0xd5033f5f;M.label m done_
+           end);
+      M.word m 0xd5033bbf;if kind<>Atomic_store then store e v 0
+  |Atomic _->assert false
+  |Foreign_call(symbol,inputs)->
+      let got=M.import m symbol.library symbol.symbol in
+      let fp=ref 0 and gp=ref 0 in
+      List.iter(fun(v:value)->if T.is_float v.typ then(load_float e !fp v;incr fp))inputs;
+      List.iter(fun(v:value)->if not(T.is_float v.typ)then begin
+        (match v.typ with Ptr _->address e 15 v.id;M.load m !gp 15 0|_->load e !gp v);incr gp
+      end)inputs;
+      M.address m 16 got;M.load m 16 16 0;M.word m 0xd63f0200;
+      if T.is_float v.typ then store_float e v 0 else store e v 0
   |Raw_free(typ,pointer)->
       let failed=runtime_error e v.span "raw free failed" and done_=M.fresh m "raw_freed_" in
       address e 15 pointer.id;M.load m 0 15 0;M.load m 1 15 8;
@@ -605,9 +684,16 @@ let generate checked =
     List.iter(fun(f:func)->validate_type program f.span f.return_type;
       Array.iter(fun(l:local)->validate_type program l.span l.typ)f.locals)program.functions;
     let m=M.create() in
+    let dynamic=List.exists(fun(f:func)->Array.exists(fun(b:block)->List.exists(fun op->match op.node with Eval(_,Foreign_call _)->true|_->false)b.operations)f.blocks)program.functions in
     List.iter(M.global m)["call_depth";"argc";"argv"];
-    R.start m;
-    R.call m ("fn_"^program.entry);R.exit m 0;
+    if dynamic then begin
+      (match R.foreign_start m ~main:"__xen_c_main" with Ok()->()|Error message->unsupported message);
+      M.label m "__xen_c_main";M.offset m 31 31 (-112);
+      for r=19 to 30 do M.store m r 31 ((r-19)*8)done;
+      M.offset m 8 31 96;R.call m("fn_"^program.entry);M.int m 0 0;
+      for r=19 to 30 do M.load m r 31 ((r-19)*8)done;
+      M.offset m 31 31 112;M.ret m
+    end else(R.start m;R.call m ("fn_"^program.entry);R.exit m 0);
     let box_helpers=Hashtbl.create 16 and box_queue=Queue.create() in
     R.emit m;List.iter(emit_function m program box_helpers box_queue)program.functions;
     while not(Queue.is_empty box_queue)do

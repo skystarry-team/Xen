@@ -3,9 +3,9 @@
 include (struct
   let description : Backend_intf.description = {
     target={architecture=Target.Aarch64;operating_system=Target.Linux};
-    calling_convention="Xen internal AArch64: x0..x5 argument addresses, x8 result address; not C FFI";
-    runtime="Linux AArch64 static runtime with FP, managed ownership, Ptr/raw syscalls and target-selected stdlib";
-    executable_format="Static non-PIE ELF64, little-endian, EM_AARCH64";
+    calling_convention="Xen internal AArch64: argument/result addresses; extern_call uses scalar AAPCS64";
+    runtime="Linux AArch64 runtime; optional glibc C startup and shared libraries";
+    executable_format="Non-PIE ELF64, EM_AARCH64; static or dynamic for extern_call";
   }
   type executable = bytes
   let generate = Native_backend.generate

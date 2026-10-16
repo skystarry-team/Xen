@@ -66,7 +66,7 @@ The error includes `moved`. Replace the last line with `println(transferred.into
 
 Closures, traits, exceptions, async, FFI, and package management are unavailable. Reference returns, mutable slices, string indexing, and match guards are also unsupported. Use the functions, loops, and `Result` patterns described in the relevant chapter.
 
-The `bb` facility for direct raw memory and operating-system calls is unnecessary for ordinary programs. Use the standard-library APIs for files, input/output, and paths.
+The [`bb` low-level facility](low-level.md) supports raw memory, operating-system calls, bounded addresses, volatile and integer atomic accesses, CPU hints/fences, multiple-output inline `asm`, and scalar C ABI `extern_call`. Use the standard-library APIs for ordinary files, input/output, and paths.
 
 ---
 

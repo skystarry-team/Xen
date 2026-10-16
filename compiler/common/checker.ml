@@ -207,7 +207,7 @@ let check_internal ~entry (program : Ast.program) =
       "global opt mode is not supported; use #scope[opt]";
   let signatures = Hashtbl.create 16 in
   let conversions=["i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"] in
-  let builtins = conversions @ ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";"panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6"] in
+  let builtins = conversions @ ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";"panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";"syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6"] in
   List.iter (fun (f:func) ->
     List.iter(fun(p:param)->validate_type p.span p.typ)f.params;validate_type f.span f.return_type;
     let effective_modes = union_modes program.global_mode_set f.mode_set in
@@ -243,6 +243,7 @@ let check_internal ~entry (program : Ast.program) =
     invalid ~notes:[!capability_boundary,"enclosing function or scope does not provide "^string_of_mode mode]
       ~help:("add "^string_of_mode mode^" only to the function or #scope that needs this operation") span message in
   let unique = ref 0 in
+  let foreign_signatures=Hashtbl.create 8 in
   let fresh_binding name = incr unique; Printf.sprintf "%s$%d" name !unique in
   let rec expression ~explc ~bb ?mode_set ?expected ?(transfer=Ir.Clone) env (v:expr) : Ir.expr =
     let mode_set = match mode_set with Some modes -> modes | None -> normalize_modes
@@ -287,6 +288,55 @@ let check_internal ~entry (program : Ast.program) =
     | Generic_call("$inactive_box",[t],[])->make(Box(canonical t))(Ir.Int_lit 0L)
     | Generic_call("$inactive_function",[(Function _ as t)],[])->make(canonical t)(Ir.Int_lit 0L)
     | Call("$unit",[])->make Unit(Ir.Int_lit 0L)
+    | Inline_asm(spec,result,args)->
+        if not bb then capability_error v.span Bb "asm requires #![bb]";
+        let result=canonical result in
+        let inputs=List.map(expression ~explc ~bb ~transfer:Ir.Direct env)args in
+        let spec={spec with output_types=List.map canonical spec.output_types}in
+        let tuple_fields=function Named n when String.starts_with ~prefix:"$Tuple<" n->
+          Option.map(fun(l:Ir.struct_layout)->List.map(fun(f:Ir.struct_field)->f.typ)l.fields)(Hashtbl.find_opt layout_table n)|_->None in
+        (match Asm_contract.validate ~tuple_fields spec result(List.map(fun(x:Ir.expr)->x.typ)inputs)with
+         |Ok()->()|Error message->invalid v.span message);
+        make result(Ir.Inline_asm(spec,inputs))
+    | Call(("cpu_relax"|"memory_fence" as n),args)->
+        if not bb then capability_error v.span Bb (n^" requires #![bb]");
+        args_exact n 0 args;
+        make Unit(if n="cpu_relax"then Ir.Cpu_relax else Ir.Memory_fence)
+    | Generic_call(("cpu_relax"|"memory_fence" as n),_,_)->
+        invalid v.span(n^" does not accept type arguments")
+    | Generic_call("extern_call",[result],library::symbol::args)->
+        if not bb then capability_error v.span Bb "extern_call requires #![bb]";
+        let literal (x:Ast.expr)=match x.node with String_lit s->s|_->invalid x.span "extern_call library and symbol must be string literals"in
+        let symbol={library=literal library;symbol=literal symbol}and result=canonical result in
+        let inputs=List.map(expression ~explc ~bb ~transfer:Ir.Direct env)args in
+        let types=List.map(fun(x:Ir.expr)->x.typ)inputs in
+        (match Foreign_contract.validate symbol result types with Ok()->()|Error message->invalid v.span message);
+        (match Foreign_contract.register foreign_signatures symbol result types with Ok()->()|Error message->invalid v.span message);
+        make result(Ir.Foreign_call(symbol,inputs))
+    | Generic_call("extern_call",_,_)|Call("extern_call",_)->
+        invalid v.span "extern_call requires one explicit result type, library, symbol and up to six C arguments"
+    | Call(n,args)when Atomic_contract.kind n<>None->
+        expression ~explc ~bb env {v with node=Generic_call(n,[],args)}
+    | Generic_call(n,types,args)when Atomic_contract.kind n<>None->
+        if not bb then capability_error v.span Bb (n^" requires #![bb]");
+        let kind=Option.get(Atomic_contract.kind n)in
+        let base=2+Atomic_contract.payloads kind in
+        let orders=if kind=Atomic_compare_exchange then 2 else 1 in
+        if List.length args<>base && List.length args<>base+orders then
+          invalid v.span(n^" expects pointer, index, values and optional literal memory order(s)");
+        let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in
+        let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in
+        (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));
+        let order i=if List.length args=base then Seq_cst else
+          let arg=List.nth args i in match arg.node with
+          |String_lit s->(match Atomic_contract.order s with Some order->order|None->invalid arg.span "unknown atomic memory order")
+          |_->invalid arg.span "atomic memory order must be a string literal"in
+        let success=order base and failure=if orders=2 then Some(order(base+1))else None in
+        (match Atomic_contract.validate kind t success failure with Ok()->()|Error message->invalid v.span message);
+        let index=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require index.span I64 index.typ;
+        let values=List.init(Atomic_contract.payloads kind)(fun i->
+          let x=expression ~explc ~bb ~expected:t env(List.nth args(i+2))in require x.span t x.typ;x)in
+        make(if kind=Atomic_store then Unit else t)(Ir.Atomic(kind,t,success,failure,p::index::values))
     | Intrinsic(Exchange,types,args)->
         if not explc then capability_error v.span Explc "replacement requires #![explc]";
         args_exact "replace" 2 args;
@@ -538,12 +588,23 @@ let check_internal ~entry (program : Ast.program) =
     | Generic_call(("raw_alloc" as n),[t],args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");let t=canonical t in if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");args_exact n 1 args;let c=expression ~explc ~bb ~expected:I64 env(List.hd args)in require c.span I64 c.typ;make(Ptr t)(Ir.Raw_alloc(t,c))
     | Generic_call("$inactive_ptr",[t],[])->make(Ptr(canonical t))(Ir.Call("$inactive_pair",[]))
     | Generic_call("$inactive_slice",[t],[])->make(Slice(canonical t))(Ir.Call("$inactive_pair",[]))
-    | Generic_call(("raw_load" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 2 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");let i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require i.span I64 i.typ;make t(Ir.Raw_load(t,p,i))
-    | Generic_call(("raw_store" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 3 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");let i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)and x=expression ~explc ~bb ~expected:t env(List.nth args 2)in require i.span I64 i.typ;require x.span t x.typ;make Unit(Ir.Raw_store(t,p,i,x))
+    | Generic_call((("raw_load"|"volatile_load") as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 2 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");let i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require i.span I64 i.typ;if n="volatile_load" then (if not(T.is_numeric t)then invalid v.span "volatile_load requires a numeric scalar element";make t(Ir.Volatile_load(t,p,i)))else make t(Ir.Raw_load(t,p,i))
+    | Generic_call((("raw_store"|"volatile_store") as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 3 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");let i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)and x=expression ~explc ~bb ~expected:t env(List.nth args 2)in require i.span I64 i.typ;require x.span t x.typ;if n="volatile_store" then (if not(T.is_numeric t)then invalid v.span "volatile_store requires a numeric scalar element";make Unit(Ir.Volatile_store(t,p,i,x)))else make Unit(Ir.Raw_store(t,p,i,x))
+    | Generic_call("ptr_from_addr",[t],args)->
+        if not bb then capability_error v.span Bb "ptr_from_addr requires #![bb]";
+        let t=canonical t in
+        if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");
+        args_exact "ptr_from_addr" 2 args;
+        let a=expression ~explc ~bb ~expected:I64 env(List.hd args)in
+        let n=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in
+        require a.span I64 a.typ;require n.span I64 n.typ;
+        make(Ptr t)(Ir.Ptr_from_addr(t,a,n))
+    | Generic_call("ptr_from_addr",_,_)->invalid v.span "ptr_from_addr requires one explicit type argument"
+    | Call("ptr_from_addr",_)->invalid v.span "ptr_from_addr requires one explicit type argument"
     | Generic_call(("raw_free" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 1 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));make Unit(Ir.Raw_free(t,p))
     | Generic_call(("ptr_addr" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 1 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));make I64(Ir.Ptr_addr(t,p))
     | Call(("raw_alloc" as n),_)->invalid v.span(n^" requires an explicit type argument")
-    | Call(("raw_load"|"raw_store"|"raw_free"|"ptr_addr" as n),args)->expression ~explc ~bb env {v with node=Generic_call(n,[],args)}
+    | Call(("raw_load"|"raw_store"|"raw_free"|"ptr_addr"|"volatile_load"|"volatile_store" as n),args)->expression ~explc ~bb env {v with node=Generic_call(n,[],args)}
     | Call(("syscall0"|"syscall1"|"syscall2"|"syscall3"|"syscall4"|"syscall5"|"syscall6" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");let arity=Char.code n.[7]-Char.code '0' in args_exact n(arity+1)args;let xs=List.map(fun x->let x=expression ~explc ~bb ~expected:I64 env x in require x.span I64 x.typ;x)args in make I64(Ir.Syscall xs)
     | Call(("raw_alloc_int" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 1 args;let count=expression ~explc ~bb ~expected:I64 env(List.hd args)in require count.span I64 count.typ;make(Ptr I64)(Ir.Raw_alloc(I64,count))
     | Call(("raw_load_int" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 2 args;let p=expression ~explc ~bb ~expected:(Ptr I64) env(List.nth args 0)and i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require p.span (Ptr I64) p.typ;require i.span I64 i.typ;make I64(Ir.Raw_load(I64,p,i))
@@ -772,7 +833,7 @@ let rec uses_range_expr (e:expr) = match e.node with
   | Struct_lit("Range",_) -> true
   | Unary(_,x)|Borrow(_,x)|Field(x,_)|Tuple_index(x,_)|Try x -> uses_range_expr x
   | Binary(_,a,b)|Index(a,b) -> uses_range_expr a||uses_range_expr b
-  | Call(_,xs)|Generic_call(_,_,xs)|Intrinsic(_,_,xs)|Vec_lit xs|Tuple_lit xs -> List.exists uses_range_expr xs
+  | Call(_,xs)|Generic_call(_,_,xs)|Intrinsic(_,_,xs)|Inline_asm(_,_,xs)|Vec_lit xs|Tuple_lit xs -> List.exists uses_range_expr xs
   | Method(x,_,xs)->uses_range_expr x||List.exists uses_range_expr xs
   | Struct_lit(_,fs)|Generic_struct_lit(_,_,fs)->List.exists(fun(_,x,_)->uses_range_expr x)fs
   | Variant_lit(_,_,_,x)->Option.fold ~none:false ~some:uses_range_expr x
@@ -829,7 +890,7 @@ let check_project ?(entry_function="main") ~(entry_module:string) (programs : As
   let builtins = ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";
     "panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";
     "read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";
-    "raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";
+    "raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";
     "syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6";
     "box";"i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"] in
   let module_name p = match p.module_decl with Some(n,_)->n | None->"$entry" in
@@ -875,6 +936,7 @@ let check_project ?(entry_function="main") ~(entry_module:string) (programs : As
     | Generic_call(n,ts,xs)->let n=call_name module_ imports e.span n in
         let ts=List.map(map_type module_ imports e.span)ts in
         (match Core_modules.intrinsic n with Some kind->Intrinsic(kind,ts,List.map m xs)|None->Generic_call(n,ts,List.map m xs))
+    | Inline_asm(spec,t,xs)->Inline_asm({spec with output_types=List.map(map_type module_ imports e.span)spec.output_types},map_type module_ imports e.span t,List.map m xs)
     | Intrinsic(kind,ts,xs)->Intrinsic(kind,List.map(map_type module_ imports e.span)ts,List.map m xs)
     | Vec_lit xs->Vec_lit(List.map m xs)|Index(a,b)->Index(m a,m b)
     | Tuple_lit xs->Tuple_lit(List.map m xs)

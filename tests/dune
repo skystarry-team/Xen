@@ -35,6 +35,11 @@
  (modules arm64_machine_test)
  (libraries xen_arm64))
 
+(test
+ (name inline_asm_test)
+ (modules inline_asm_test)
+ (libraries xen_common xen_x86_64 xen_arm64))
+
 (executable
  (name arm64_heap_fixture)
  (modules arm64_heap_fixture)

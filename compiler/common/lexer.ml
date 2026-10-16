@@ -3,7 +3,7 @@ open Ast
 
 type kind =
   | Ident of string | Int_lit of string | Float_lit of string | String_lit of string
-  | Fn | Let | Mut | If | Else | While | For | In | Break | Continue | Return | True | False | Match | Fat_arrow
+  | Fn | Let | Mut | If | Else | While | For | In | Break | Continue | Return | True | False | Match | Asm | Fat_arrow
   | Arrow | Eq | Plus | Minus | Star | Slash | Percent | Eq_eq | Bang_eq | Bang | Amp
   | And_and | Or_or | Lt | Lt_eq | Gt | Gt_eq
   | Lparen | Rparen | Lbrace | Rbrace | Colon | Comma | Semi | Eof
@@ -102,6 +102,7 @@ let lex ~file source =
         let next = take offset in
         let word = String.sub source offset (next - offset) in
         let kind = match word with
+          | "asm" -> Asm
           | "fn" -> Fn | "let" -> Let | "mut" -> Mut | "if" -> If | "else" -> Else
           | "while" -> While | "for" -> For | "in" -> In | "break" -> Break | "continue" -> Continue
           | "return" -> Return | "true" -> True | "false" -> False | "match" -> Match | _ -> Ident word

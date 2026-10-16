@@ -40,6 +40,7 @@ let start m =
 let alloc m =
   M.mov m 1 0;M.int m 0 0;M.int m 2 3;M.int m 3 4098;
   M.imm m 4 (-1L);M.int m 5 0;syscall m 197
+let foreign_start _ ~main:_ = Error "extern_call currently requires Linux ELF"
 let unmap m = syscall m 73
 let emit m =
   Xen_arm64.Output_runtime.emit m ~write:(fun m->syscall m 4) ~exit;

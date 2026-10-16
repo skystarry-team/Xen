@@ -135,6 +135,14 @@ let lower (program:A.program) =
       |A.Ptr_len x->unary(fun x->Ptr_len x)x
       |A.Raw_load(t,a,b)->binary(fun a b->Raw_load(t,a,b))a b
       |A.Raw_store(t,a,b,c)->let a=ex a in let b=ex b in let c=ex c in ev(Raw_store(t,a,b,c))
+      |A.Volatile_load(t,a,b)->binary(fun a b->Volatile_load(t,a,b))a b
+      |A.Volatile_store(t,a,b,c)->let a=ex a in let b=ex b in let c=ex c in ev(Volatile_store(t,a,b,c))
+      |A.Ptr_from_addr(t,a,b)->binary(fun a b->Ptr_from_addr(t,a,b))a b
+      |A.Inline_asm(spec,xs)->ev(Inline_asm(spec,List.map ex xs))
+      |A.Cpu_relax->ev Cpu_relax
+      |A.Memory_fence->ev Memory_fence
+      |A.Foreign_call(symbol,xs)->ev(Foreign_call(symbol,List.map ex xs))
+      |A.Atomic(kind,t,success,failure,xs)->ev(Atomic(kind,t,success,failure,List.map ex xs))
       |A.Syscall xs->ev(Syscall(List.map ex xs))
       |A.Index(a,b)->binary(fun a b->Index(a,b))a b
       |A.Vec_get(a,b)->binary(fun a b->Vec_get(a,b))a b

@@ -4,9 +4,9 @@
 include (struct
   let description : Backend_intf.description = {
     target = { architecture = Target.X86_64; operating_system = Target.Linux };
-    calling_convention = "Xen internal x86-64 calling convention (not a C FFI ABI)";
-    runtime = "Embedded Xen static runtime; Linux x86-64 syscalls";
-    executable_format = "Static non-PIE ELF64, little-endian, EM_X86_64";
+    calling_convention = "Xen internal x86-64; extern_call uses System V scalar C ABI";
+    runtime = "Embedded Xen runtime; Linux syscalls; optional glibc C startup and shared libraries";
+    executable_format = "Non-PIE ELF64, EM_X86_64; static or dynamic for extern_call";
   }
 
   type executable = bytes

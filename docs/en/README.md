@@ -19,6 +19,8 @@ Start at chapter 1 for a guided introduction. While writing a program, jump to a
 13. [Command-line tools](cli.md)
 14. [Syntax and common problems](reference.md)
 
+For systems code, see [Low-level operations in bb](low-level.md).
+
 Each page includes complete example code and its output. The [example collection](../../examples/README.md) provides files you can run.
 
 This guide describes the syntax and APIs available in Xen today. Xen is an early release, so syntax and APIs may change. Programs run on Linux x86-64 or AArch64. See the separate [installation and build guide](../compiler-build/en/build.md) to obtain Xen.

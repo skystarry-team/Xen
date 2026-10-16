@@ -302,6 +302,36 @@ and primary state =
   | String_lit bytes -> expression token.span (String_lit bytes)
   | True -> expression token.span (Bool_lit true)
   | False -> expression token.span (Bool_lit false)
+  | Asm ->
+      let output_types=parse_type_arguments state in
+      let result=match output_types with []->Unit|[t]->t|ts->Tuple ts in
+      expect state Lparen "(";
+      let literal ()=match bump state with {kind=String_lit s;_}->s
+        |t->raise(Error(t.span,"asm requires a string literal"))in
+      let template=literal()in
+      let inputs=ref [] and registers=ref [] and outputs=ref [] and clobbers=ref [] in
+      let set_output r tied = outputs:=(r,tied)::!outputs in
+      let rec operands () =
+        if accept state Rparen then ()else begin
+          expect state Comma ",";
+          if accept state Rparen then ()else begin
+            let kind=match bump state with {kind=In;_}->"in"|{kind=Ident s;_}->s
+              |t->raise(Error(t.span,"expected asm in, out, inout or clobber"))in
+            expect state Lparen "(";let r=literal()in
+            (match kind with
+             |"in"|"inout"->expect state Comma ",";let value=parse_expr state in
+                 registers:=r::!registers;inputs:=value::!inputs;
+                 if kind="inout"then set_output r true
+             |"out"->set_output r false
+             |"clobber"->clobbers:=r::!clobbers
+             |_->fail state "expected asm in, out, inout or clobber");
+            expect state Rparen ")";operands()
+          end
+        end in
+      operands();
+      let output_types=if !outputs=[] && output_types=[Unit]then []else output_types in
+      expression token.span(Inline_asm({template;input_registers=List.rev !registers;
+        output_registers=List.rev !outputs;output_types;clobbers=List.rev !clobbers;volatile=true;memory=Unknown_memory},result,List.rev !inputs))
   | Ident name ->
       (* A dotted sequence followed by '(' or '{' is retained as a qualified
          declaration reference. Other dotted sequences remain ordinary field
@@ -608,7 +638,7 @@ let parse ~file source =
   let roots=["std";"core"] @ List.map(fun i->root i.import_name)imports @
     (match module_decl with None->[]|Some(n,_)->[root n]) in
   let reserved=["Int";"Float";"I8";"U8";"I16";"U16";"I32";"U32";"I64";"U64";
-    "F32";"F64";"Bool";"String";"File";"Unit";"Vec";"Slice";"Ptr";"Box";"Option";"Result";"Range";"_"] in
+    "F32";"F64";"Bool";"String";"File";"Unit";"Vec";"Slice";"Ptr";"Box";"Option";"Result";"Range";"asm";"_"] in
   let top=List.map(fun d->d.struct_name)structs @ List.map(fun d->d.enum_name)enums @ List.map(fun f->f.name)functions in
   let seen=Hashtbl.create 8 in
   List.iter(fun(n,span)->
@@ -626,7 +656,7 @@ let parse ~file source =
     |Match(x,arms)->expr x;List.iter(fun a->pattern a.pattern;List.iter stmt a.body;Option.iter expr a.tail)arms
     |Unary(_,x)|Borrow(_,x)|Field(x,_)|Tuple_index(x,_)|Try x->expr x
     |Binary(_,a,b)|Index(a,b)->expr a;expr b
-    |Call(_,xs)|Generic_call(_,_,xs)|Intrinsic(_,_,xs)|Vec_lit xs|Tuple_lit xs->List.iter expr xs
+    |Call(_,xs)|Generic_call(_,_,xs)|Intrinsic(_,_,xs)|Inline_asm(_,_,xs)|Vec_lit xs|Tuple_lit xs->List.iter expr xs
     |Method(r,_,xs)->expr r;List.iter expr xs
     |Struct_lit(_,fs)|Generic_struct_lit(_,_,fs)->List.iter(fun(_,x,_)->expr x)fs
     |Variant_lit(_,_,_,x)->Option.iter expr x

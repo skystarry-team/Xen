@@ -7,13 +7,14 @@ type t = {
   rodata : Buffer.t; data : Buffer.t;
   rodata_labels : (string, int) Hashtbl.t; data_labels : (string, int) Hashtbl.t;
   mutable rip_fixups : rip_fixup list;
+  mutable imports : (string * string * string) list;
 }
 
 exception Missing_label of string
 
 let create () = {buffer = Buffer.create 4096; labels = Hashtbl.create 64; fixups = [];
   rodata = Buffer.create 1024; data = Buffer.create 64;
-  rodata_labels = Hashtbl.create 32; data_labels = Hashtbl.create 8; rip_fixups = [] }
+  rodata_labels = Hashtbl.create 32; data_labels = Hashtbl.create 8; rip_fixups = []; imports=[] }
 let position output = Buffer.length output.buffer
 let u8 output value = Buffer.add_char output.buffer (Char.chr (value land 0xff))
 let u32 output value =
@@ -40,6 +41,13 @@ let add_data_u64 output name value =
 let rip_rel32 output section target =
   let offset = position output in u32 output 0L;
   output.rip_fixups <- { offset; target; section } :: output.rip_fixups
+
+let import output library symbol =
+  match List.find_opt(fun(_,s,_)->s=symbol)output.imports with
+  |Some(_,_,label)->label
+  |None->let label="__xen_import_"^string_of_int(List.length output.imports)in
+      add_data_u64 output label 0L;
+      output.imports<-output.imports@[library,symbol,label];label
 
 let encode ?(code_address=0L) ?(rodata_address=0L) ?(data_address=0L) output =
   let encoded = Bytes.of_string (Buffer.contents output.buffer) in

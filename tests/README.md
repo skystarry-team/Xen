@@ -22,9 +22,17 @@ the generated/metamorphic checks. It does not run benchmarks.
 | `scoped_opt_test.ml` | Scoped AOT, LICM, effects and storage lifetimes |
 | `aot_fusion_test.ml` | Counted scalar loop fusion, prefix invalidation and fresh backward liveness |
 | `integration/` | CLI, relocation/archive, stdlib, native test, scoped optimization regressions |
+| `inline_asm_test.ml`, `integration/low_level_test.py` | bb pointer/volatile/asm/hint/fence contracts, independent encodings, widths, immediate and displacement limits, effect order, both targets and optimizer levels |
+| `integration/low_level_extended_test.py`, `fixtures/ffi/` | asm aliases/partial initialization/multiple outputs/flags, integer atomic widths/order/bounds/wrap, C ABI and ELF loading/lifecycle, actual thread contention and release/acquire in both targets and optimizer levels |
 | `property/` | Whole-program generation, independent oracles and source metamorphisms |
 
 Focused commands:
+
+The extended low-level suite builds a native C fixture with gcc and an AArch64
+fixture with GNU cross binutils. Cross dynamic execution uses qemu-aarch64 and
+the installed AArch64 glibc loader/libraries (`/usr/lib/aarch64-linux-gnu`).
+Missing fixture/execution prerequisites are reported as skips; Xen compilation
+itself has no dependency on these tools or target libraries.
 
 ```sh
 dune exec tests/native_core_test.exe
