@@ -232,11 +232,11 @@ checks; the caller is responsible for their validity and alignment.
 
 | Target | Registers | Instructions |
 | --- | --- | --- |
-| x86-64 | `rax rcx rdx rsi rdi r8..r11` and their 32/16/8-bit aliases | `mov movzx movsx movsxd`, `add sub xor and or imul`, `shl shr sar`, `neg not bswap`, `cmp test setcc`, `rdtsc`, `nop pause mfence lfence sfence` |
-| AArch64 | `x0..x14`, `w0..w14` | `mov`, `add sub adds subs mul and orr eor`, `lsl lsr asr`, `neg mvn rev`, `sxtb sxth sxtw uxtb uxth`, `cmp tst cset`, `ldr str ldur stur` and byte/halfword forms, `nop yield`, `dmb sy/ish` |
+| x86-64 | `rax rbx rcx rdx rsi rdi r8..r15` and their 32/16/8-bit aliases; restricted `rsp` | `mov movzx movsx movsxd lea`, `push pop`, `add sub xor and or imul`, `shl shr sar`, `neg not bswap`, `cmp test setcc`, `rdtsc cpuid`, `nop pause mfence lfence sfence` |
+| AArch64 | `x0..x14`, `x17`, `x19..x28` and their `w` aliases; restricted `sp` | `mov`, `add sub adds subs mul and orr eor`, `lsl lsr asr`, `neg mvn rev`, `sxtb sxth sxtw uxtb uxth`, `cmp tst cset`, `ldr str ldur stur` and byte/halfword forms, restricted `mrs`, `nop yield`, `dmb sy/ish` |
 
-x86 register aliases include `eax/ax/al`, `ecx/cx/cl`, `edx/dx/dl`, `esi/si/sil`,
-`edi/di/dil` and `r8d/r8w/r8b` through `r11d/r11w/r11b`. Register operands must
+x86 register aliases include `eax/ax/al`, `ebx/bx/bl`, `ecx/cx/cl`, `edx/dx/dl`, `esi/si/sil`,
+`edi/di/dil` and `r8d/r8w/r8b` through `r15d/r15w/r15b`. Register operands must
 have matching widths except explicit extension instructions. `mov` memory access
 width follows the register. Optional `byte/word/dword/qword [base+offset]` (also
 `byte ptr ...`) must agree with it. `movzx/movsx` memory sources require an explicit
@@ -279,7 +279,69 @@ The AArch64 equivalent is
 `rdtsc` writes both `rax` and `rdx`;
 declare one as the output and the other as a clobber, or declare both clobbers.
 
-Stack/frame registers, callee-saved registers, SIMD operands, labels, directives,
+### Temporary stack storage and preserved registers
+
+Within one template, x86 `sub rsp, N` reserves temporary stack storage and
+`add rsp, N` releases it. `N` must be a nonnegative signed32 immediate.
+`push` and `pop` accept 64-bit registers; `push rsp` stores its value before the
+push, while `pop rsp` is rejected. `mov rax, rsp` reads the current stack pointer;
+`lea rax, [rsp+8]` computes an address without accessing memory. `lea` requires a
+64-bit destination and an unqualified `[base+offset]` source.
+
+ARM uses `sub sp, sp, #N` and `add sp, sp, #N`, where `N` is `0..4095` and a
+multiple of 16. `mov xN, sp` copies SP. Both targets accept SP as a memory base
+with the same access widths and offsets as ordinary bases. ARM `sp` is not a
+general arithmetic/data register; use a copied `x` register for address arithmetic.
+
+The compiler tracks every adjustment: releasing more than allocated or leaving
+storage allocated at template end is an error. Separate asm expressions cannot
+share a stack allocation. `rsp/sp` are implicit operands, never `in/out/inout`
+or `clobber` constraints. Arbitrary SP writes and partial aliases `esp/spl/wsp`
+are rejected. Stack-pointer restoration does not bounds-check raw memory access;
+use only valid storage, initialize it before reading, and do not retain addresses
+to temporary storage after releasing it. The SP seen by a template is after any
+compiler register saves, and its absolute value/layout is not a stable ABI.
+
+For example, on x86-64:
+
+```xen
+fn main() {
+    #scope[bb] {
+        println(asm<Int>(
+            "sub rsp,16; mov [rsp],r12; mov rax,[rsp]; add rsp,16",
+            in("r12",42), out("rax")));
+    }
+}
+```
+
+The ARM template is `sub sp,sp,#16; str x19,[sp]; ldr x0,[sp]; add sp,sp,#16`,
+with `in("x19",42)` and `out("x0")`.
+
+x86 `rbx/r12..r15` and ARM `x19..x28` are available with the normal alias,
+initialization and constraint rules. The compiler saves their incoming values
+before staging inputs and restores them after capturing all outputs. This also
+applies to input-only constraints and partial-width aliases. Frame registers
+`rbp/x29`, ARM link register `x30`, platform register `x18` and compiler scratch
+`x15/x16` remain reserved.
+
+### CPU information
+
+x86 `cpuid` reads `eax` (leaf) and `ecx` (subleaf), and writes `eax/ebx/ecx/edx`.
+Declare all four writes, using `inout` for its two inputs:
+
+```xen
+let (leaf,b,c,d) = asm<U32,U32,U32,U32>("cpuid",
+    inout("eax",u32(0)), out("ebx"),
+    inout("ecx",u32(0)), out("edx"));
+```
+
+ARM `mrs xN, cntvct_el0`, `mrs xN, cntfrq_el0` and `mrs xN, tpidr_el0` read the
+virtual counter, its frequency and the thread pointer. The destination needs an
+output/clobber constraint. Other system registers and privileged instructions
+are unsupported. Counter availability and access depend on the execution
+environment; counter reads alone do not establish memory ordering.
+
+SIMD operands, labels, directives,
 branches, calls and arbitrary instruction text are rejected. `asm` is a reserved
 keyword. Common contracts are checked by `xen check`; target-specific instruction
 and register validation runs during code generation (`build`, `run`, `test`).

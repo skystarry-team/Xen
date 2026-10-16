@@ -511,6 +511,12 @@ let rvalue e (v:value) node =
       address e 15 v.id;M.store m 0 15 0;M.store m 1 15 8
   |Inline_asm(spec,inputs)->
       let code=try Inline_asm.assemble ~input_types:(List.map(fun(v:value)->v.typ)inputs)spec with Asm_contract.Error message->unsupported ~span:v.span message in
+      let preserved=Inline_asm.preserved_registers spec in
+      let saved_bytes=16*List.length preserved in
+      if saved_bytes>0 then begin
+        M.offset m 31 31 (-saved_bytes);
+        List.iteri(fun i r->M.store m r 31(i*16))preserved
+      end;
       List.iter2(fun name value->load e (Inline_asm.register name)value)spec.input_registers inputs;
       Buffer.add_string m.code code;
       let count=List.length spec.output_registers in
@@ -523,6 +529,10 @@ let rvalue e (v:value) node =
                M.offset m 15 15 field.offset;M.store m ~bytes:(size e.program field.typ)0 15 0)l.fields
          |_->M.load m 0 31 0;store e v 0);
         M.offset m 31 31(16*count)
+      end;
+      if saved_bytes>0 then begin
+        List.iteri(fun i r->M.load m r 31(i*16))preserved;
+        M.offset m 31 31 saved_bytes
       end
   |Cpu_relax->M.word m 0xd503203f
   |Memory_fence->M.word m 0xd5033bbf

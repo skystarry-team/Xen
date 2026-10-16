@@ -3,11 +3,15 @@ open Ast
 module M = Machine_ir
 let descriptor name =
   let found=List.find_map(fun r->if name="x"^string_of_int r then Some(r,64)
-    else if name="w"^string_of_int r then Some(r,32)else None)(List.init 15 Fun.id)in
+    else if name="w"^string_of_int r then Some(r,32)else None)
+    (List.init 15 Fun.id @ [17] @ List.init 10(fun i->i+19))in
   match found with Some d->d|None->Asm_contract.fail("unsupported AArch64 register '"^name^"'")
 let register name=fst(descriptor name)
 let width name=snd(descriptor name)
 let canonical name="x"^string_of_int(register name)
+let preserved_registers spec =
+  List.map register(spec.input_registers @ List.map fst spec.output_registers @ spec.clobbers)
+  |> List.filter(fun r->r>=19) |> List.sort_uniq Int.compare
 let immediate text =
   if String.length text<2 || text.[0]<>'#'then Asm_contract.fail "expected #integer immediate";
   match Int64.of_string_opt(String.sub text 1(String.length text-1))with
@@ -27,12 +31,21 @@ let memory_ops=["ldr",true,None,false;"str",false,None,false;"ldur",true,None,tr
 let assemble ?(input_types=[]) spec =
   let m=M.create()in
   let read,write,finish=Asm_contract.registers ~input_types spec ~canonical ~width ~written_bits:(fun _->64) register in
+  let reserve,release,finish_stack=Asm_contract.stack()in
   let flags=ref false in
   let sized bits base=if bits=64 then base else base land 0x7fffffff in
   let same registers=let bits=width(List.hd registers)in
     if List.exists(fun r->width r<>bits)registers then Asm_contract.fail "register operand widths differ";bits in
   let rr base dst a b=let bits=same[dst;a;b]in M.rr m(sized bits base)(register dst)(register a)(register b)in
   List.iter(function
+    |("add"|"sub" as op),["sp";"sp";amount]->
+        let n=bounded_immediate amount 0 4095 "stack adjustment must be 0..4095"in
+        if n mod 16<>0 then Asm_contract.fail "stack adjustment must be a multiple of 16";
+        (if op="sub"then reserve else release)(Int64.of_int n);
+        M.word m((if op="sub"then 0xd10003ff else 0x910003ff)lor(n lsl 10))
+    |"mov",[dst;"sp"]->
+        if width dst<>64 then Asm_contract.fail "stack pointer copy requires an x register";
+        write dst;M.word m(0x910003e0 lor(register dst))
     |"mov",[dst;src]->
         if String.starts_with ~prefix:"#" src then begin
           let n=immediate src in write dst;
@@ -95,16 +108,24 @@ let assemble ?(input_types=[]) spec =
         let bytes=match bytes with Some bytes->if width reg<>32 then Asm_contract.fail "byte/halfword memory operands require a w register";bytes
           |None->width reg/8 in
         let base,offset=memory address in
-        if width base<>64 then Asm_contract.fail "memory base must be an x register";
+        let base_reg=if base="sp"then 31 else begin
+          if width base<>64 then Asm_contract.fail "memory base must be an x register";
+          read base;register base end in
         let n=if unscaled then bounded_immediate offset (-256)255 "unscaled memory offset must be -256..255"
           else bounded_immediate offset 0(bytes*4095)(if bytes=8 then "scaled memory offset must be 0..32760"else "scaled memory offset exceeds element range")in
         if not unscaled && n mod bytes<>0 then Asm_contract.fail(if bytes=8 then "scaled memory offset must be a multiple of 8"else "scaled memory offset must be a multiple of access width");
-        read base;if load then write reg else read reg;
+        if load then write reg else read reg;
         if unscaled then M.word m((List.assoc bytes[1,0x38000000;2,0x78000000;4,0xb8000000;8,0xf8000000])lor
-          (if load then 0x00400000 else 0)lor((n land 511)lsl 12)lor(register base lsl 5)lor(register reg))
-        else if load then M.load m ~bytes(register reg)(register base)n else M.store m ~bytes(register reg)(register base)n
+          (if load then 0x00400000 else 0)lor((n land 511)lsl 12)lor(base_reg lsl 5)lor(register reg))
+        else if load then M.load m ~bytes(register reg)base_reg n else M.store m ~bytes(register reg)base_reg n
+    |"mrs",[dst;system]->
+        if width dst<>64 then Asm_contract.fail "mrs requires an x register";
+        let base=match system with
+          |"cntvct_el0"->0xd53be040|"cntfrq_el0"->0xd53be000|"tpidr_el0"->0xd53bd040
+          |_->Asm_contract.fail "unsupported system register"in
+        write dst;M.word m(base lor(register dst))
     |"nop",[]->M.word m 0xd503201f|"yield",[]->M.word m 0xd503203f
     |"dmb",["sy"]->M.word m 0xd5033fbf|"dmb",["ish"]->M.word m 0xd5033bbf
     |name,_->Asm_contract.fail("unsupported AArch64 instruction or operands '"^name^"'"))
     (Asm_contract.instructions spec.template);
-  finish();Buffer.contents m.code
+  finish_stack();finish();Buffer.contents m.code

@@ -123,7 +123,11 @@ optimization, loop motion and fusion. The latter two have dedicated Unit-valued
 IR nodes: x86-64 emits `pause`/`mfence`, AArch64 emits `yield`/`dmb ish`.
 CPU-local `inline_asm.ml` modules validate a closed instruction/register subset,
 check reads and writes (including implicit clobbers), and encode without external
-tools. Stack/frame and callee-saved registers and control flow are rejected.
+tools. Per-template stack tracking permits balanced immediate SP adjustments,
+x86 push/pop and stack addresses. Expanded GP constraints include callee-saved
+registers, saved before input staging and restored after all output capture.
+Frame registers and control flow remain reserved; CPU information uses x86
+cpuid or a closed set of ARM user-readable mrs registers.
 Operands live in Semantic IR storage before backend register staging; ARM64's
 x15/x16 address scratch registers cannot be used by assembly.
 

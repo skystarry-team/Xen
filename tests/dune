@@ -51,6 +51,11 @@
  (libraries xen_common xen_x86_64 xen_arm64))
 
 (executable
+ (name asm_abi_fixture)
+ (modules asm_abi_fixture)
+ (libraries unix xen_common xen_x86_64 xen_arm64 xen_linux_x86_64 xen_linux_arm64))
+
+(executable
  (name arm64_heap_fixture)
  (modules arm64_heap_fixture)
  (libraries xen_arm64 xen_linux_arm64))

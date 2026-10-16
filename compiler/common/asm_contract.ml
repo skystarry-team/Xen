@@ -57,6 +57,19 @@ let instructions template =
       operands(String.sub line(i+1)(String.length line-i-1))in
     Some(name,args))(String.split_on_char ';' text)
 
+(* Stack storage belongs to one template. Never release the compiler's frame,
+   and restore SP before backend output capture uses it again. *)
+let stack () =
+  let depth=ref 0L in
+  let reserve n =
+    if n<0L || !depth>Int64.sub Int64.max_int n then fail "stack depth overflow";
+    depth:=Int64.add !depth n in
+  let release n =
+    if n<0L || n> !depth then fail "stack adjustment exceeds allocated stack space";
+    depth:=Int64.sub !depth n in
+  let finish ()=if !depth<>0L then fail "stack pointer must be restored before asm ends"in
+  reserve,release,finish
+
 (* Aliases share physical ownership, but initialization tracks valid low bits.
    A 32-bit write may define 64 bits; 8/16-bit writes preserve undefined high bits. *)
 let registers ?(input_types=[]) spec ~canonical ~width ~written_bits register =

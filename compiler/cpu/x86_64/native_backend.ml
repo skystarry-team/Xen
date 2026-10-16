@@ -755,6 +755,9 @@ let rec emit_rvalue env (expression:value) node =
   | Inline_asm(spec,inputs)->
       let module A=Inline_asm in
       let code=try A.assemble ~input_types:(List.map(fun(v:value)->v.typ)inputs)spec with Asm_contract.Error message->unsupported ~span:expression.span message in
+      let preserved=A.preserved_registers spec in
+      List.iter(fun r->if r>=8 then M.u8 output 0x41;
+        M.u8 output(0x50 lor(r land 7));env.stack_depth<-env.stack_depth+8)preserved;
       List.iter(fun v->emit_value env v;push_rax env)inputs;
       let n=List.length inputs in
       List.iteri(fun i name->let r=A.register name in
@@ -772,7 +775,9 @@ let rec emit_rvalue env (expression:value) node =
            List.iter(fun(field:struct_field)->pop_reg env [];
              store_scalar_disp output field.typ (-(env.scratch+aggregate_bias layout.size-field.offset)))(List.rev layout.fields);
            M.bytes output[0x48;0x8d;0x85];M.u32 output(Int64.of_int(-(env.scratch+aggregate_bias layout.size)))
-       |_->assert false)
+       |_->assert false);
+      List.iter(fun r->if r>=8 then M.u8 output 0x41;
+        M.u8 output(0x58 lor(r land 7));env.stack_depth<-env.stack_depth-8)(List.rev preserved)
   | Cpu_relax->M.bytes output[0xf3;0x90];mov_rax_imm output 0L
   | Memory_fence->M.bytes output[0x0f;0xae;0xf0];mov_rax_imm output 0L
   | Atomic(kind,typ,_,_,pointer::index::values)->

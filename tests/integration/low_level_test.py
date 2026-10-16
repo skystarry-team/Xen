@@ -17,6 +17,113 @@ REGS = {"x86_64-linux": ("rax", "rcx", "r8", "r11"),
 
 
 class LowLevelTests(unittest.TestCase):
+    def test_asm_stack_and_extended_registers(self):
+        subprocess.run(["dune", "build", "tests/asm_abi_fixture.exe"], cwd=ROOT, check=True,
+                       capture_output=True, text=True)
+        for target in TARGETS:
+            if target.startswith("x86"):
+                calculate = ('let (a,b,c)=asm<Int,Int,Int>('
+                             '"sub rsp,32;mov [rsp],rbx;mov [rsp+8],r12;'
+                             'lea r13,[rsp+8];mov r14,[r13];mov r15,[rsp];'
+                             'add r15,r14;mov rax,rsp;sub rax,r13;'
+                             'push r15;pop rbx;add rsp,32",'
+                             'inout("rbx",x),in("r12",x+1),out("r15"),out("rax"),'
+                             'clobber("r13"),clobber("r14"));')
+                registers = ("rbx", "r12", "r13", "r14", "r15")
+                reg_cases = ''.join(f'assert(asm<Int>("add {r},1",inout("{r}",x))==x+1);' for r in registers)
+                for r, aliases in (("rbx", ("bl", "bx", "ebx")),
+                                   *((f"r{i}", (f"r{i}b", f"r{i}w", f"r{i}d")) for i in range(12, 16))):
+                    for alias, typ, cast in zip(aliases, ("U8", "U16", "U32"), ("u8", "u16", "u32")):
+                        reg_cases += f'assert(asm<{typ}>("add {alias},1",inout("{alias}",{cast}(41)))=={cast}(42));'
+                reg_cases += 'asm("' + ';'.join(f'mov {r},0' for r in registers) + '",' + ','.join(
+                    f'clobber("{r}")' for r in registers) + ');'
+                memory = ('let p=raw_alloc<Int>(1);raw_store(p,0,x);' + ''.join(
+                    f'assert(asm<Int>("mov rax,[{r}]",in("{r}",ptr_addr(p)),out("rax"))==x);'
+                    for r in registers) + 'raw_free(p);')
+            else:
+                calculate = ('let (a,b,c)=asm<Int,Int,Int>('
+                             '"sub sp,sp,#32;str x19,[sp];str x20,[sp,#8];'
+                             'mov x17,sp;ldr x21,[x17];ldr x22,[sp,#8];'
+                             'add x19,x21,x22;mov x23,sp;sub x23,x23,x17;'
+                             'sub x23,x23,#8;mov x24,x19;add sp,sp,#32",'
+                             'inout("x19",x),in("x20",x+1),out("x24"),out("x23"),'
+                             'clobber("x17"),clobber("x21"),clobber("x22"));')
+                registers = ("x17", *(f"x{i}" for i in range(19, 29)))
+                reg_cases = ''.join(f'assert(asm<Int>("add {r},{r},#1",inout("{r}",x))==x+1);' for r in registers)
+                reg_cases += ''.join(f'assert(asm<U32>("mov w{i},#42",out("w{i}"))==u32(42));' for i in range(19, 29))
+                reg_cases += 'asm("' + ';'.join(f'mov {r},#0' for r in registers) + '",' + ','.join(
+                    f'clobber("{r}")' for r in registers) + ');'
+                memory = ''
+            source = ('fn id<T>(x:T)->T{return x;}fn after(x:Int)->Int{return x+3;}'
+                      'fn calc(x:Int)->Int{#scope[bb,opt]{let live="alive";' + calculate +
+                      'assert(a==x+x+1 && b==a && c == -8);assert(live=="alive");' +
+                      reg_cases + memory + 'return after(id(a));}}'
+                      'fn main(){let mut i=0;while i<40{assert(calc(i)==i+i+4);i=i+1;}println(42);}')
+            for opt in ("off", "basic"):
+                with self.subTest(target=target, opt=opt):
+                    self.success(source, target, opt=opt)
+                    # Independent entry/exit probe seeds full-width ABI registers.
+                    # Missing saves/restores fail even if IR values all live in memory.
+                    # Xen's integer printing uses r15 as a private formatting flag.
+                    # Keep that unrelated runtime convention outside this ABI probe.
+                    (self.root / "probe.xen").write_text(source.replace('println(42);', ''))
+                    built = subprocess.run([str(ROOT / "_build/default/tests/asm_abi_fixture.exe"),
+                                            target, str(self.root / "probe.xen"),
+                                            str(self.root / "probe"), opt],
+                                           capture_output=True, text=True, timeout=30)
+                    self.assertEqual(built.returncode, 0, built.stderr)
+                    actual = self.run_binary(self.root / "probe", target)
+                    self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, "", ""))
+
+    def test_asm_cpu_information(self):
+        for target in TARGETS:
+            if target.startswith("x86"):
+                body = ('let (leaf,b,c,d)=asm<U32,U32,U32,U32>("cpuid",'
+                        'inout("eax",u32(0)),out("ebx"),inout("ecx",u32(0)),out("edx"));'
+                        'assert(leaf>=u32(1));assert((b|c|d)!=u32(0));'
+                        'let (lo,hi)=asm<U32,U32>("rdtsc",out("eax"),out("edx"));'
+                        'assert((lo|hi)!=u32(0));')
+            else:
+                body = ('let (counter,freq,tls)=asm<U64,U64,U64>('
+                        '"mrs x19,cntvct_el0;mrs x20,cntfrq_el0;mrs x17,tpidr_el0",'
+                        'out("x19"),out("x20"),out("x17"));assert(counter>u64(0) && freq>u64(0));')
+            for opt in ("off", "basic"):
+                with self.subTest(target=target, opt=opt):
+                    self.success('fn main(){#scope[bb,opt]{' + body + 'println(42);}}', target, opt=opt)
+
+    def test_rejected_stack_operations(self):
+        cases = {
+            "x86_64-linux": [
+                ('asm("sub rsp,16");', "must be restored"),
+                ('asm("add rsp,16;sub rsp,16");', "exceeds allocated"),
+                ('asm("sub rsp,8;add rsp,16");', "exceeds allocated"),
+                ('asm("push r12",in("r12",1));', "must be restored"),
+                ('asm<Int>("pop r12",out("r12"));', "exceeds allocated"),
+                ('asm("mov rsp,rax",in("rax",1));', "stack pointer write"),
+                ('asm("and rsp,-16");', "stack pointer write"),
+                ('asm<Int>("lea rax,[rsp]",in("rsp",1),out("rax"));', "stack pointer constraint"),
+                ('asm("nop",clobber("rsp"));', "stack pointer constraint"),
+                ('asm<Int>("mov rax,rsp",out("rsp"));', "stack pointer constraint"),
+                ('asm("cpuid",in("eax",u32(0)),in("ecx",u32(0)));', "undeclared"),
+            ],
+            "aarch64-linux": [
+                ('asm("sub sp,sp,#16");', "must be restored"),
+                ('asm("add sp,sp,#16;sub sp,sp,#16");', "exceeds allocated"),
+                ('asm("sub sp,sp,#8;add sp,sp,#8");', "multiple of 16"),
+                ('asm("sub sp,sp,#16;add sp,sp,#32");', "exceeds allocated"),
+                ('asm("mov sp,x0",in("x0",1));', "unsupported"),
+                ('asm("nop",clobber("sp"));', "unsupported"),
+                ('asm<Int>("mrs x19,sctlr_el1",out("x19"));', "unsupported system register"),
+            ],
+        }
+        for target, target_cases in cases.items():
+            for body, message in target_cases:
+                with self.subTest(target=target, body=body):
+                    built, _ = self.build('fn main(){#scope[bb]{' + body + '}}', target)
+                    self.assertNotEqual(built.returncode, 0)
+                    self.assertIn(message, built.stderr)
+                    self.assertIn("app.xen:", built.stderr)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="xen-low-level-")
         self.addCleanup(self.temp.cleanup)
@@ -329,7 +436,7 @@ class LowLevelTests(unittest.TestCase):
                 ('asm<Int>("add r8, 1",in("r8",1));', "must return Unit"),
                 ('asm<Int>("mov r8, [r8 + 2147483648]",inout("r8",1));', "signed 32-bit"),
                 ('asm<Int>("mov r8, [r8 - 2147483649]",inout("r8",1));', "signed 32-bit"),
-                ('asm<Int>("mov r8, [rsp + 8]",out("r8"));', "unsupported"),
+                ('asm<Int>("mov r8, [esp + 8]",out("r8"));', "unsupported"),
                 ('asm<Int>("mov r8, [r8 + rcx]",inout("r8",1));', "displacement"),
             ],
             "aarch64-linux": [
