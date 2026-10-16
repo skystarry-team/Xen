@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Compiler buffers and shared counters. All compiler passes receive Context by value.
+
+// Immutable buffer addresses travel by value; mutable counters live in state.
+// Shared state indexes (8 bytes each; gaps preserve bootstrap compatibility):
+//  1 source byte count     3 token count          4 current token
+//  6 output byte count    8 function count      10 active variable count
+// 11 lexical depth       12 frame slots used   13 current return type
+// 15 relocation count    16 bb capability      17 println code offset
+// 19 record count        21 hidden return destination slot
+struct Context {
+    state: Int,
+    source: Int,
+    tokens: Int,
+    output: Int,
+    functions: Int,
+    variables: Int,
+    relocations: Int,
+    records: Int,
+}
+
+fn make_context() -> Context {
+    return Context {
+        state: allocate(4096),
+        source: allocate(1048576),
+        tokens: allocate(8388608),
+        output: allocate(4194304),
+        functions: allocate(65536),
+        variables: allocate(24576),
+        relocations: allocate(1048576),
+        records: allocate(262144),
+    };
+}
+
+fn state_get(c: Context, field: Int) -> Int { return load(c.state + field * 8); }
+
+fn state_set(c: Context, field: Int, value: Int) { store(c.state + field * 8, value); }

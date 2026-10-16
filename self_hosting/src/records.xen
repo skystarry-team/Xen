@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// POD record declarations, exact Xen layouts, fields and cycle checking.
+
+fn type_is(c: Context, actual: Int, wanted: Int) { if actual != wanted { fail(c, 301); } }
+
+fn parse_type(c: Context) -> Int {
+    let w = word(c);
+    let record = find_record(c, address(c), length(c));
+    expect(c, 256);
+    if w == 7630409 { return 1; } // Int
+    if w == 1819242306 { return 2; } // Bool
+    if w == 1953066581 { return 0; } // Unit
+    if record >= 0 { return record + 3; }
+    fail(c, 302);
+    return 0;
+}
+
+// Record header: name, length, field count, byte size, alignment, DFS state,
+// body token position. Fields (40 bytes): name, length, type, offset, source token.
+fn record_at(c: Context, t: Int) -> Int { return c.records + (t - 3) * 2048; }
+
+fn field_at(c: Context, t: Int, index: Int) -> Int { return record_at(c, t) + 64 + index * 40; }
+
+fn find_record(c: Context, name: Int, size: Int) -> Int {
+    let mut i = 0;
+    while i < state_get(c, 19) {
+        let r = record_at(c, i + 3);
+        if same(name, size, load(r), load(r + 8)) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn find_field(c: Context, t: Int, name: Int, size: Int) -> Int {
+    if t < 3 { fail(c, 503); }
+    let mut i = 0;
+    while i < load(record_at(c, t) + 16) {
+        let f = field_at(c, t, i);
+        if same(name, size, load(f), load(f + 8)) { return i; }
+        i = i + 1;
+    }
+    fail(c, 503);
+    return 0;
+}
+
+fn type_size(c: Context, t: Int) -> Int {
+    if t == 0 { return 0; }
+    if t == 1 { return 8; }
+    if t == 2 { return 1; }
+    resolve_record(c, t);
+    return load(record_at(c, t) + 24);
+}
+
+fn type_alignment(c: Context, t: Int) -> Int {
+    if t == 1 { return 8; }
+    if t <= 2 { return 1; }
+    resolve_record(c, t);
+    return load(record_at(c, t) + 32);
+}
+
+fn align(value: Int, alignment: Int) -> Int { return ((value + alignment - 1) / alignment) * alignment; }
+
+fn resolve_record(c: Context, t: Int) {
+    let r = record_at(c, t);
+    if load(r + 40) == 2 { return; }
+    if load(r + 40) == 1 { fail(c, 505); }
+    store(r + 40, 1);
+    let mut size = 0;
+    let mut alignment = 1;
+    let mut i = 0;
+    while i < load(r + 16) {
+        let f = field_at(c, t, i);
+        let ft = load(f + 16);
+        let a = type_alignment(c, ft);
+        let n = type_size(c, ft);
+        if a > alignment { alignment = a; }
+        size = align(size, a);
+        store(f + 24, size);
+        // Each child has already passed the same cap, preventing overflow.
+        size = size + n;
+        if size > 32768 { fail(c, 506); }
+        i = i + 1;
+    }
+    store(r + 24, align(size, alignment)); store(r + 32, alignment); store(r + 40, 2);
+}
+
+fn skip_body(c: Context) {
+    expect(c, 123);
+    let mut depth = 1;
+    while depth > 0 {
+        if kind(c) == 0 { fail(c, 101); }
+        if kind(c) == 123 { depth = depth + 1; }
+        if kind(c) == 125 { depth = depth - 1; }
+        next(c);
+    }
+}
+
+fn capability(c: Context) {
+    if take(c, 35) {
+        need_word(c, 119165519096935); expect(c, 91); need_word(c, 25186);
+        let end = position(c) + 1;
+        expect(c, 93);
+        let mut i = end;
+        let mut newline = false;
+        while i < position(c) {
+            if byte(c.source + i) == 10 { newline = true; }
+            i = i + 1;
+        }
+        if !newline { fail(c, 404); }
+        state_set(c, 16, 1);
+    }
+}
+
+fn collect_records(c: Context) {
+    capability(c);
+    // Register every record name before reading field types or signatures.
+    while kind(c) != 0 {
+        if is_word(c, 127970521019507) {
+            next(c);
+            if reserved(word(c)) || builtin_type(c) { fail(c, 303); }
+            if find_record(c, address(c), length(c)) >= 0 { fail(c, 501); }
+            let n = state_get(c, 19);
+            if n >= 128 { fail(c, 506); }
+            let r = record_at(c, n + 3);
+            store(r, address(c)); store(r + 8, length(c)); expect(c, 256);
+            store(r + 48, state_get(c, 4)); state_set(c, 19, n + 1);
+        } else {
+            need_word(c, 28262);
+            while kind(c) != 123 {
+                if kind(c) == 0 { fail(c, 101); }
+                next(c);
+            }
+        }
+        skip_body(c);
+    }
+    let mut i = 0;
+    while i < state_get(c, 19) {
+        let r = record_at(c, i + 3);
+        state_set(c, 4, load(r + 48)); expect(c, 123);
+        let mut n = 0;
+        while kind(c) != 125 {
+            if n >= 32 { fail(c, 506); }
+            let name = address(c);
+            let size = length(c);
+            if reserved(word(c)) { fail(c, 303); }
+            let mut j = 0;
+            while j < n {
+                let previous = field_at(c, i + 3, j);
+                if same(name, size, load(previous), load(previous + 8)) { fail(c, 502); }
+                j = j + 1;
+            }
+            let f = field_at(c, i + 3, n);
+            store(f, name); store(f + 8, size); store(f + 32, state_get(c, 4));
+            expect(c, 256); expect(c, 58);
+            let t = parse_type(c);
+            if t == 0 { fail(c, 302); }
+            store(f + 16, t); n = n + 1;
+            if kind(c) != 125 { expect(c, 44); }
+        }
+        if n == 0 { fail(c, 502); }
+        store(r + 16, n); expect(c, 125);
+        i = i + 1;
+    }
+    i = 0;
+    while i < state_get(c, 19) { resolve_record(c, i + 3); i = i + 1; }
+    state_set(c, 4, 0);
+}

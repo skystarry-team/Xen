@@ -1,0 +1,211 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Expression parsing, calls, constructors, postfix fields and precedence.
+
+fn invocation(c: Context, name: Int, size: Int, w: Int) -> Int {
+    let arity = syscall_arity(w);
+    let output = w == 31081494762582640;
+    let assertion = w == 128034677158753;
+    let mut f = 0;
+    let mut target = -1;
+    let mut n = arity;
+    let mut result = 1;
+    if arity > 0 {
+        if state_get(c, 16) == 0 { fail(c, 403); }
+    } else if output || assertion { n = 1; result = 0; }
+    else {
+        if lookup_variable(c, name, size) != 0 { fail(c, 313); }
+        target = find_function(c, name, size);
+        if target < 0 { fail(c, 308); }
+        f = function_at(c, target); n = load(f + 24); result = load(f + 32);
+    }
+    expect(c, 40);
+    let mut i = 0;
+    while i < n {
+        if i > 0 { expect(c, 44); }
+        let mut t = 1;
+        if assertion { t = 2; }
+        if target >= 0 { t = load(f + 48 + i * 24 + 16); }
+        type_is(c, expression(c, 1), t);
+        push(c);
+        i = i + 1;
+    }
+    expect(c, 41);
+    while i > 0 {
+        i = i - 1;
+        let mut reg = argument_register(i);
+        if arity > 0 {
+            if i == 0 { reg = 0; }
+            else if i == 4 { reg = 10; }
+            else { reg = argument_register(i - 1); }
+        }
+        if assertion { reg = 0; }
+        pop(c, reg);
+    }
+    if arity > 0 { emit(c, 15); emit(c, 5); }
+    else if output {
+        emit(c, 232);
+        let offset = state_get(c, 6);
+        bytes(c, state_get(c, 17) - offset - 4, 4);
+    } else if assertion {
+        test(c);
+        let ok = jump(c, 133);
+        runtime_exit(c, 101);
+        land(c, ok); immediate(c, 0);
+    } else {
+        let mut result_slot = 0;
+        if result >= 3 {
+            result_slot = reserve(c, result);
+            emit(c, 76); emit(c, 141); emit(c, 149); bytes(c, -8 * (result_slot + 1), 4);
+        }
+        call(c, target);
+        if result >= 3 { local_address(c, result_slot); }
+    }
+    return result;
+}
+
+// Collect initializer token ranges, then compile in declaration order, matching
+// the original Xen checker even when literal fields are written out of order.
+fn skip_initializer(c: Context) {
+    let mut parentheses = 0;
+    let mut braces = 0;
+    let mut scanning = true;
+    while scanning {
+        let k = kind(c);
+        if k == 0 { fail(c, 101); }
+        if parentheses == 0 && braces == 0 && (k == 44 || k == 125) { scanning = false; }
+        else {
+            if k == 40 { parentheses = parentheses + 1; }
+            if k == 41 { parentheses = parentheses - 1; }
+            if k == 123 { braces = braces + 1; }
+            if k == 125 { braces = braces - 1; }
+            if parentheses < 0 || braces < 0 { fail(c, 101); }
+            next(c);
+        }
+    }
+}
+
+fn constructor(c: Context, t: Int) -> Int {
+    let initializers = allocate(4096);
+    expect(c, 123);
+    while kind(c) != 125 {
+        let index = find_field(c, t, address(c), length(c));
+        let entry = initializers + index * 16;
+        if load(entry) != 0 { fail(c, 504); }
+        expect(c, 256); expect(c, 58);
+        store(entry, state_get(c, 4)); skip_initializer(c); store(entry + 8, state_get(c, 4));
+        if kind(c) != 125 { expect(c, 44); }
+    }
+    expect(c, 125);
+    let end = state_get(c, 4);
+    let slot = reserve(c, t);
+    let mut i = 0;
+    while i < load(record_at(c, t) + 16) {
+        let entry = initializers + i * 16;
+        if load(entry) == 0 { fail(c, 504); }
+        let f = field_at(c, t, i);
+        state_set(c, 4, load(entry));
+        let ft = expression(c, 1);
+        type_is(c, ft, load(f + 16));
+        if state_get(c, 4) != load(entry + 8) { fail(c, 101); }
+        save_value(c, slot, load(f + 24), ft);
+        i = i + 1;
+    }
+    state_set(c, 4, end); syscall2(11, initializers, 4096);
+    local_address(c, slot); return t;
+}
+
+fn atom(c: Context) -> Int {
+    if kind(c) == 257 {
+        let value = load(token(c) + 24);
+        if value == -9223372036854775808 { fail(c, 202); }
+        immediate(c, -value); next(c); return 1;
+    }
+    if take(c, 40) { let t = expression(c, 1); expect(c, 41); return t; }
+    if is_word(c, 7172961) { return assembly(c); }
+    if kind(c) != 256 { fail(c, 103); }
+    let w = word(c);
+    if w == 1702195828 || w == 435728179558 {
+        let mut value = 0;
+        if w == 1702195828 { value = 1; }
+        immediate(c, value); next(c); return 2;
+    }
+    let name = address(c);
+    let size = length(c);
+    next(c);
+    if kind(c) == 40 { return invocation(c, name, size, w); }
+    let r = find_record(c, name, size);
+    if r >= 0 && kind(c) == 123 { return constructor(c, r + 3); }
+    let v = find_variable(c, name, size);
+    read_value(c, load(v + 16), load(v + 24));
+    return load(v + 24);
+}
+
+fn primary(c: Context) -> Int {
+    let mut t = atom(c);
+    while take(c, 46) {
+        let index = find_field(c, t, address(c), length(c));
+        let f = field_at(c, t, index);
+        expect(c, 256);
+        t = load(f + 16);
+        read_field(c, load(f + 24), t);
+    }
+    return t;
+}
+
+fn unary(c: Context) -> Int {
+    let op = kind(c);
+    if op == 45 || op == 43 || op == 33 || op == 126 {
+        next(c);
+        // Decimal tokens accumulate negatively, including Int.min.
+        if op == 45 && kind(c) == 257 {
+            immediate(c, load(token(c) + 24)); next(c); return 1;
+        }
+        let t = unary(c);
+        if op == 33 {
+            type_is(c, t, 2); test(c); emit(c, 15); emit(c, 148); emit(c, 192);
+            emit(c, 72); emit(c, 15); emit(c, 182); emit(c, 192); return 2;
+        }
+        type_is(c, t, 1);
+        if op == 45 { emit(c, 72); emit(c, 247); emit(c, 216); }
+        if op == 126 { emit(c, 72); emit(c, 247); emit(c, 208); }
+        return 1;
+    }
+    return primary(c);
+}
+
+fn precedence(op: Int) -> Int {
+    if op == 265 { return 1; }
+    if op == 264 { return 2; }
+    if op == 260 || op == 261 { return 3; }
+    if op == 60 || op == 62 || op == 262 || op == 263 { return 4; }
+    if op == 124 { return 5; }
+    if op == 94 { return 6; }
+    if op == 38 { return 7; }
+    if op == 266 || op == 267 { return 8; }
+    if op == 43 || op == 45 { return 9; }
+    if op == 42 || op == 47 || op == 37 { return 10; }
+    return 0;
+}
+
+fn expression(c: Context, minimum: Int) -> Int {
+    let mut t = unary(c);
+    let mut p = precedence(kind(c));
+    while p >= minimum {
+        let op = kind(c);
+        next(c);
+        if op == 264 || op == 265 {
+            type_is(c, t, 2); test(c);
+            let mut condition = 132;
+            if op == 265 { condition = 133; }
+            let end = jump(c, condition);
+            type_is(c, expression(c, p + 1), 2);
+            land(c, end); t = 2;
+        } else {
+            push(c);
+            let right = expression(c, p + 1);
+            t = binary(c, op, t, right);
+        }
+        p = precedence(kind(c));
+    }
+    return t;
+}

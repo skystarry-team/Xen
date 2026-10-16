@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Shared pipeline for the CLI and the stdin-only bootstrap driver.
+
+fn read_source(c: Context, fd: Int) {
+    let mut size = 0;
+    let mut done = false;
+    while !done {
+        if size == 1048576 { fail(c, 209); }
+        let count = syscall3(0, fd, c.source + size, 1048576 - size);
+        if count == 0 { done = true; }
+        else if count != -4 {
+            if count < 0 { fail(c, 210); }
+            size = size + count;
+        }
+    }
+    state_set(c, 1, size);
+}
+
+fn compile(c: Context) {
+    lex(c); declarations(c);
+    let mut entry = -1;
+    let mut i = 0;
+    while i < state_get(c, 8) {
+        let f = function_at(c, i);
+        if load(f + 8) == 4 && packed(load(f), 4) == 1852399981 { entry = i; }
+        i = i + 1;
+    }
+    if entry < 0 { fail(c, 311); }
+    let main_function = function_at(c, entry);
+    if load(main_function + 24) != 0 || load(main_function + 32) != 0 { fail(c, 312); }
+    startup(c, entry);
+    print_runtime(c);
+    i = 0;
+    while i < state_get(c, 8) { compile_function(c, i); i = i + 1; }
+    i = 0;
+    while i < state_get(c, 15) {
+        let r = c.relocations + i * 16;
+        let offset = load(r);
+        let target = function_at(c, load(r + 8));
+        patch(c, offset, load(target + 40) - offset - 4, 4);
+        i = i + 1;
+    }
+    patch(c, 96, state_get(c, 6), 8); patch(c, 104, state_get(c, 6), 8);
+}

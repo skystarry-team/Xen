@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Token records, exact spelling, token navigation, and lexing.
+
+fn token(c: Context) -> Int { return c.tokens + state_get(c, 4) * 32; }
+
+fn kind(c: Context) -> Int { return load(token(c)); }
+
+fn position(c: Context) -> Int { return load(token(c) + 8); }
+
+fn length(c: Context) -> Int { return load(token(c) + 16); }
+
+fn address(c: Context) -> Int { return c.source + position(c); }
+
+fn next(c: Context) { state_set(c, 4, state_get(c, 4) + 1); }
+
+fn expect(c: Context, wanted: Int) {
+    if kind(c) != wanted { fail(c, 101); }
+    next(c);
+}
+
+fn take(c: Context, wanted: Int) -> Bool {
+    if kind(c) == wanted { next(c); return true; }
+    return false;
+}
+
+fn packed(p: Int, size: Int) -> Int {
+    let mut value = 0;
+    let mut index = size;
+    while index > 0 { index = index - 1; value = value * 256 + byte(p + index); }
+    return value;
+}
+
+fn word(c: Context) -> Int {
+    if length(c) > 8 { return 0; }
+    return packed(address(c), length(c));
+}
+
+fn is_word(c: Context, value: Int) -> Bool { return kind(c) == 256 && word(c) == value; }
+
+fn need_word(c: Context, value: Int) {
+    if !is_word(c, value) { fail(c, 102); }
+    next(c);
+}
+
+fn same(a: Int, n: Int, b: Int, m: Int) -> Bool {
+    if n != m { return false; }
+    let mut i = 0;
+    while i < n { if byte(a + i) != byte(b + i) { return false; } i = i + 1; }
+    return true;
+}
+
+fn letter(ch: Int) -> Bool {
+    return ch >= 97 && ch <= 122 || ch >= 65 && ch <= 90 || ch == 95;
+}
+
+fn digit(ch: Int) -> Bool { return ch >= 48 && ch <= 57; }
+
+fn add_token(c: Context, tag: Int, start: Int, size: Int, value: Int) {
+    let count = state_get(c, 3);
+    if count >= 262143 { fail(c, 201); }
+    let t = c.tokens + count * 32;
+    store(t, tag); store(t + 8, start); store(t + 16, size); store(t + 24, value);
+    state_set(c, 3, count + 1);
+}
+
+fn lex(c: Context) {
+    let source = c.source;
+    let size = state_get(c, 1);
+    let mut i = 0;
+    while i < size {
+        let ch = byte(source + i);
+        // The next free record is a diagnostic sentinel during lexing.
+        state_set(c, 4, state_get(c, 3));
+        store(token(c) + 8, i);
+        if ch == 32 || ch == 9 || ch == 10 || ch == 13 { i = i + 1; }
+        else if ch == 47 && i + 1 < size && byte(source + i + 1) == 47 {
+            while i < size && byte(source + i) != 10 { i = i + 1; }
+        } else if letter(ch) {
+            let start = i;
+            i = i + 1;
+            while i < size && (letter(byte(source + i)) || digit(byte(source + i))) { i = i + 1; }
+            add_token(c, 256, start, i - start, 0);
+        } else if digit(ch) {
+            let start = i;
+            let mut value = 0;
+            while i < size && digit(byte(source + i)) {
+                let d = byte(source + i) - 48;
+                if value < -922337203685477580 || value == -922337203685477580 && d > 8 { fail(c, 202); }
+                value = value * 10 - d;
+                i = i + 1;
+            }
+            add_token(c, 257, start, i - start, value);
+        } else if ch == 34 {
+            i = i + 1;
+            let start = i;
+            while i < size && byte(source + i) != 34 {
+                // Only literal asm templates/registers are in this subset.
+                if byte(source + i) == 92 || byte(source + i) < 32 { fail(c, 203); }
+                i = i + 1;
+            }
+            if i == size { fail(c, 203); }
+            add_token(c, 258, start, i - start, 0);
+            i = i + 1;
+        } else {
+            let mut tag = ch;
+            let mut width = 1;
+            let mut following = 0;
+            if i + 1 < size { following = byte(source + i + 1); }
+            if ch == 45 && following == 62 { tag = 259; width = 2; }
+            else if ch == 61 && following == 61 { tag = 260; width = 2; }
+            else if ch == 33 && following == 61 { tag = 261; width = 2; }
+            else if ch == 60 && following == 61 { tag = 262; width = 2; }
+            else if ch == 62 && following == 61 { tag = 263; width = 2; }
+            else if ch == 38 && following == 38 { tag = 264; width = 2; }
+            else if ch == 124 && following == 124 { tag = 265; width = 2; }
+            else if ch == 60 && following == 60 { tag = 266; width = 2; }
+            else if ch == 62 && following == 62 { tag = 267; width = 2; }
+            else if !(ch == 40 || ch == 41 || ch == 123 || ch == 125 || ch == 58 || ch == 44 || ch == 59 || ch == 61 || ch == 43 || ch == 45 || ch == 42 || ch == 47 || ch == 37 || ch == 33 || ch == 60 || ch == 62 || ch == 38 || ch == 124 || ch == 94 || ch == 126 || ch == 35 || ch == 91 || ch == 93 || ch == 46) { fail(c, 204); }
+            add_token(c, tag, i, width, 0);
+            i = i + width;
+        }
+    }
+    add_token(c, 0, size, 0, 0);
+    state_set(c, 4, 0);
+}

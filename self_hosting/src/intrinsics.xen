@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// The supported bb assembly templates and Linux syscall signatures.
+
+// Four exact asm templates, with full constraint/type validation.
+fn template(c: Context) -> Int {
+    expect(c, 258);
+    let t = c.tokens + (state_get(c, 4) - 1) * 32;
+    let p = c.source + load(t + 8);
+    let n = load(t + 16);
+    if n == 14 {
+        let a = packed(p, 8);
+        let b = packed(p + 8, 6);
+        if a == 3204418277672906605 && b == 102707238165280 { return 1; }
+        if a == 7594320607365721965 && b == 115944556866653 { return 2; }
+        if a == 7594320607365721965 && b == 119200158854237 { return 4; }
+    }
+    if n == 21 && packed(p, 8) == 7021710470846771053 && packed(p + 8, 8) == 2334400046547610744 && packed(p + 16, 5) == 401200149083 { return 3; }
+    fail(c, 401);
+    return 0;
+}
+
+fn register_name(c: Context, wanted: Int) {
+    if kind(c) != 258 || word(c) != wanted { fail(c, 402); }
+    next(c);
+}
+
+fn assembly(c: Context) -> Int {
+    if state_get(c, 16) == 0 { fail(c, 403); }
+    next(c);
+    let mut result = 0;
+    if take(c, 60) { result = parse_type(c); expect(c, 62); }
+    expect(c, 40);
+    let op = template(c);
+    let mut wanted = 0;
+    if op == 1 || op == 3 { wanted = 1; }
+    type_is(c, result, wanted);
+    expect(c, 44); need_word(c, 28265); expect(c, 40); register_name(c, 6906994); expect(c, 44);
+    type_is(c, expression(c, 1), 1); push(c); expect(c, 41); expect(c, 44);
+    if wanted == 1 {
+        need_word(c, 7632239); expect(c, 40); register_name(c, 7889266); expect(c, 41);
+    } else {
+        need_word(c, 28265); expect(c, 40); register_name(c, 6910834); expect(c, 44);
+        type_is(c, expression(c, 1), 1); push(c); expect(c, 41);
+    }
+    expect(c, 41);
+    if wanted == 0 { pop(c, 6); }
+    pop(c, 7);
+    if op == 1 { emit(c, 72); emit(c, 139); emit(c, 7); }
+    if op == 2 { emit(c, 72); emit(c, 137); emit(c, 55); }
+    if op == 3 { emit(c, 72); emit(c, 15); emit(c, 182); emit(c, 7); }
+    if op == 4 { emit(c, 64); emit(c, 136); emit(c, 55); }
+    if wanted == 0 { immediate(c, 0); }
+    return wanted;
+}
+
+fn syscall_arity(w: Int) -> Int {
+    if w == 3489282976841431411 { return 1; }
+    if w == 3561340570879359347 { return 2; }
+    if w == 3633398164917287283 { return 3; }
+    if w == 3705455758955215219 { return 4; }
+    if w == 3777513352993143155 { return 5; }
+    if w == 3849570947031071091 { return 6; }
+    if w == 3921628541068999027 { return 7; }
+    return 0;
+}

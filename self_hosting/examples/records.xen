@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Forward type references and nested, naturally aligned POD values.
+struct Envelope { tag: Bool, pair: Pair, tail: Bool }
+struct Pair { enabled: Bool, value: Int, last: Bool }
+struct Flags { first: Bool, second: Bool, third: Bool }
+struct One { flag: Bool }
+struct Tiny { a: One, b: Flags, c: One }
+
+fn main() {
+    // Xen evaluates constructor fields in declaration order: 1, 2, 3.
+    let pair = Pair { last: mark_bool(3), value: mark(2), enabled: mark_bool(1) };
+    let mut original = Envelope { tail: false, pair: pair, tag: true };
+    let copy = original;
+    original.pair.value = 77;
+    original.pair.enabled = false;
+    original.tail = true;
+    assert(copy.pair.value == 2 && copy.pair.enabled && !copy.tail);
+    assert(original.pair.value == 77 && !original.pair.enabled && original.tail);
+    let changed = change(copy);
+    assert(changed.pair.value == 99 && copy.pair.value == 2);
+    let a = identity(make(10));
+    let b = make(20);
+    assert(a.value == 10 && b.value == 20 && make(30).value == 30);
+    assert(recurse(4).value == 100);
+    println(mixed(copy, 10, a, 20, b, 30));
+    let mut assigned = b;
+    assigned = a;
+    assigned.last = false;
+    assert(assigned.value == 10 && a.last);
+    original.pair = assigned;
+    assert(original.pair.value == 10 && !original.pair.last && assigned.value == 10);
+    let mut flags = Flags { first: true, second: true, third: true };
+    let before = flags;
+    flags.first = false;
+    flags.third = false;
+    assert(!flags.first && flags.second && !flags.third);
+    assert(before.first && before.second && before.third);
+    let mut tiny = Tiny { a: One { flag: true }, b: flags, c: One { flag: true } };
+    let tiny_copy = tiny;
+    tiny.b.second = false;
+    assert(tiny.a.flag && !tiny.b.second && tiny.c.flag && tiny_copy.b.second);
+    let returned = pass_tiny(tiny_copy);
+    assert(returned.a.flag && returned.b.second && returned.c.flag);
+    println(1234);
+}
+fn mark(n: Int) -> Int { println(n); return n; }
+fn mark_bool(n: Int) -> Bool { println(n); return true; }
+fn change(p: Envelope) -> Envelope {
+    let mut result = p;
+    result.pair.value = 99;
+    return result;
+}
+fn make(n: Int) -> Pair { return Pair { enabled: true, value: n, last: true }; }
+fn identity(p: Pair) -> Pair { return p; }
+fn recurse(n: Int) -> Pair {
+    if n == 0 { return make(100); }
+    return recurse(n - 1);
+}
+fn mixed(a: Envelope, b: Int, c: Pair, d: Int, e: Pair, f: Int) -> Int {
+    return a.pair.value + b + c.value + d + e.value + f;
+}
+fn pass_tiny(t: Tiny) -> Tiny { return t; }

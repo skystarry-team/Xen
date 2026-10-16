@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+#global[bb]
+fn main() {
+    let address = syscall6(9, 0, 4096, 3, 34, -1, 0);
+    assert(address > 0);
+    asm("mov [rdi], rsi", in("rdi", address), in("rsi", 123456789));
+    let value = asm<Int>("mov rax, [rdi]", in("rdi", address), out("rax"));
+    assert(value == 123456789);
+    println(value);
+    asm("mov [rdi], sil", in("rdi", address), in("rsi", 65));
+    let first = asm<Int>("movzx rax, byte [rdi]", in("rdi", address), out("rax"));
+    assert(first == 65);
+    println(first);
+    assert(syscall0(39) > 0);
+    assert(syscall2(11, address, 4096) == 0);
+}

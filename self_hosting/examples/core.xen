@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+fn main() {
+    println(fibonacci(10));
+    println(factorial(6));
+    println(-17 / 5);
+    println(-17 % 5);
+    println(-9223372036854775808);
+    println(9223372036854775807 + 1);
+    println((7 & 3) | (8 ^ 2));
+    println(-16 >> 2);
+    println(3 << 4);
+    let skipped_and = false && visible(999);
+    let skipped_or = true || visible(999);
+    assert(!skipped_and && skipped_or);
+    assert(visible(42) && visible(43));
+    assert(1 + 2 * 3 == 7 && 4 <= 4 && 5 >= 4 && 6 != 5);
+    assert((~0) == -1 && +7 == 7);
+    assert(-(-9223372036854775808) == -9223372036854775808);
+    let mut sum: Int = 0;
+    let mut i = 0;
+    while i < 10 { sum = sum + i; i = i + 1; }
+    { let sum = 100; println(sum); }
+    println(sum);
+    // Left-to-right, single evaluation, nested calls, six register arguments.
+    println(six(mark(1), mark(2), mark(3), mark(4), mark(5), mark(6)));
+    println(choose(false, true));
+    { let inferred: Bool = true; assert(inferred); }
+    // Builtin names are allowed as scalar bindings and parameters.
+    let len = 7;
+    println(identity(len));
+    nothing();
+}
+fn fibonacci(n: Int) -> Int {
+    if n < 2 { return n; }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+fn factorial(n: Int) -> Int {
+    if n == 0 { return 1; } else { return n * factorial(n - 1); }
+}
+fn visible(n: Int) -> Bool { println(n); return true; }
+fn mark(n: Int) -> Int { println(n); return n; }
+fn six(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Int {
+    return a + 10 * b + 100 * c + 1000 * d + 10000 * e + 100000 * f;
+}
+fn choose(a: Bool, b: Bool) -> Int {
+    if a { return 1; } else if b { return 2; } else { return 3; }
+}
+fn nothing() -> Unit { return; }
+fn identity(println: Int) -> Int { return println; }

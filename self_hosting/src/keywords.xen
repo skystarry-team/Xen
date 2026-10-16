@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Xen keyword and reserved builtin spelling. Decimal constants pack ASCII bytes.
+
+fn reserved(w: Int) -> Bool {
+    return w == 28262 || w == 7628140 || w == 7632237 || w == 26217 || w == 1702063205 || w == 435610544247 || w == 121437875889522 || w == 1702195828 || w == 435728179558 || w == 7172961 || w == 7499622 || w == 28265 || w == 461195539042 || w == 7310870969309884259 || w == 448345170285;
+}
+
+// Match exact ASCII spelling without introducing String values into the subset.
+fn spelling(c: Context, size: Int, head: Int, middle: Int, tail: Int) -> Bool {
+    if length(c) != size { return false; }
+    let p = address(c);
+    let mut n = size;
+    if n > 8 { n = 8; }
+    if packed(p, n) != head { return false; }
+    if size > 8 {
+        n = size - 8;
+        if n > 8 { n = 8; }
+        if packed(p + 8, n) != middle { return false; }
+    }
+    if size > 16 && packed(p + 16, size - 16) != tail { return false; }
+    return true;
+}
+
+// Keep this list in sync with compiler/common/checker.ml's function builtins.
+fn builtin_name(c: Context) -> Bool {
+    if spelling(c, 2, 14441, 0, 0) { return true; } // i8
+    if spelling(c, 2, 14453, 0, 0) { return true; } // u8
+    if spelling(c, 3, 3551593, 0, 0) { return true; } // i16
+    if spelling(c, 3, 3551605, 0, 0) { return true; } // u16
+    if spelling(c, 3, 3289961, 0, 0) { return true; } // i32
+    if spelling(c, 3, 3289973, 0, 0) { return true; } // u32
+    if spelling(c, 3, 3421801, 0, 0) { return true; } // i64
+    if spelling(c, 3, 3421813, 0, 0) { return true; } // u64
+    if spelling(c, 3, 3289958, 0, 0) { return true; } // f32
+    if spelling(c, 3, 3421798, 0, 0) { return true; } // f64
+    if spelling(c, 5, 500068610672, 0, 0) { return true; } // print
+    if spelling(c, 7, 31081494762582640, 0, 0) { return true; } // println
+    if spelling(c, 3, 7234924, 0, 0) { return true; } // len
+    if spelling(c, 3, 6779489, 0, 0) { return true; } // arg
+    if spelling(c, 9, 7959390389040280161, 116, 0) { return true; } // arg_count
+    if spelling(c, 6, 128034677158753, 0, 0) { return true; } // assert
+    if spelling(c, 10, 7881145907598816097, 26483, 0) { return true; } // assert_msg
+    if spelling(c, 5, 426970603888, 0, 0) { return true; } // panic
+    if spelling(c, 5, 499850898534, 0, 0) { return true; } // float
+    if spelling(c, 3, 7630441, 0, 0) { return true; } // int
+    if spelling(c, 10, 8313485982757580393, 29300, 0) { return true; } // int_to_str
+    if spelling(c, 5, 495791007098, 0, 0) { return true; } // zeros
+    if spelling(c, 6, 127961662514546, 0, 0) { return true; } // repeat
+    if spelling(c, 9, 8675468210253948274, 116, 0) { return true; } // read_text
+    if spelling(c, 9, 8389759014264726898, 115, 0) { return true; } // read_ints
+    if spelling(c, 11, 8028904795586782578, 7566433, 0) { return true; } // read_floats
+    if spelling(c, 9, 7018141348526387311, 100, 0) { return true; } // open_read
+    if spelling(c, 10, 7598266773085188207, 25972, 0) { return true; } // open_write
+    if spelling(c, 13, 8028911401164038514, 500068605795, 0) { return true; } // raw_alloc_int
+    if spelling(c, 12, 7233184987782537586, 1953392991, 0) { return true; } // raw_load_int
+    if spelling(c, 13, 8245937481610387826, 500068605797, 0) { return true; } // raw_store_int
+    if spelling(c, 12, 7306371754492387698, 1953392991, 0) { return true; } // raw_free_int
+    if spelling(c, 9, 8028911401164038514, 99, 0) { return true; } // raw_alloc
+    if spelling(c, 8, 7233184987782537586, 0, 0) { return true; } // raw_load
+    if spelling(c, 9, 8245937481610387826, 101, 0) { return true; } // raw_store
+    if spelling(c, 8, 7306371754492387698, 0, 0) { return true; } // raw_free
+    if spelling(c, 8, 8242823587370792048, 0, 0) { return true; } // ptr_addr
+    if spelling(c, 13, 7885647256562594928, 491310571871, 0) { return true; } // ptr_from_addr
+    if spelling(c, 13, 7308332243887091574, 431131421791, 0) { return true; } // volatile_load
+    if spelling(c, 14, 7308332243887091574, 111542170579807, 0) { return true; } // volatile_store
+    if spelling(c, 9, 7020097461065969763, 120, 0) { return true; } // cpu_relax
+    if spelling(c, 12, 7376748247058834797, 1701015141, 0) { return true; } // memory_fence
+    if spelling(c, 11, 7160563370149836901, 7105633, 0) { return true; } // extern_call
+    if spelling(c, 11, 7809069583342466145, 6578543, 0) { return true; } // atomic_load
+    if spelling(c, 12, 8313472741607961697, 1701998452, 0) { return true; } // atomic_store
+    if spelling(c, 15, 7304666425076970593, 28542696426070904, 0) { return true; } // atomic_exchange
+    if spelling(c, 23, 7160551237001114721, 7304668662553668975, 28542696426070904) { return true; } // atomic_compare_exchange
+    if spelling(c, 16, 7376724019114898529, 7234013963864994917, 0) { return true; } // atomic_fetch_add
+    if spelling(c, 16, 7376724019114898529, 7094703641602520165, 0) { return true; } // atomic_fetch_sub
+    if spelling(c, 16, 7376724019114898529, 7236828713632101477, 0) { return true; } // atomic_fetch_and
+    if spelling(c, 15, 7376724019114898529, 32210602908939365, 0) { return true; } // atomic_fetch_or
+    if spelling(c, 16, 7376724019114898529, 8245941793907242085, 0) { return true; } // atomic_fetch_xor
+    if spelling(c, 8, 3489282976841431411, 0, 0) { return true; } // syscall0
+    if spelling(c, 8, 3561340570879359347, 0, 0) { return true; } // syscall1
+    if spelling(c, 8, 3633398164917287283, 0, 0) { return true; } // syscall2
+    if spelling(c, 8, 3705455758955215219, 0, 0) { return true; } // syscall3
+    if spelling(c, 8, 3777513352993143155, 0, 0) { return true; } // syscall4
+    if spelling(c, 8, 3849570947031071091, 0, 0) { return true; } // syscall5
+    if spelling(c, 8, 3921628541068999027, 0, 0) { return true; } // syscall6
+    return false;
+}
+
+fn builtin_type(c: Context) -> Bool {
+    if spelling(c, 3, 7630409, 0, 0) { return true; } // Int
+    if spelling(c, 5, 499850898502, 0, 0) { return true; } // Float
+    if spelling(c, 2, 14409, 0, 0) { return true; } // I8
+    if spelling(c, 2, 14421, 0, 0) { return true; } // U8
+    if spelling(c, 3, 3551561, 0, 0) { return true; } // I16
+    if spelling(c, 3, 3551573, 0, 0) { return true; } // U16
+    if spelling(c, 3, 3289929, 0, 0) { return true; } // I32
+    if spelling(c, 3, 3289941, 0, 0) { return true; } // U32
+    if spelling(c, 3, 3421769, 0, 0) { return true; } // I64
+    if spelling(c, 3, 3421781, 0, 0) { return true; } // U64
+    if spelling(c, 3, 3289926, 0, 0) { return true; } // F32
+    if spelling(c, 3, 3421766, 0, 0) { return true; } // F64
+    if spelling(c, 4, 1819242306, 0, 0) { return true; } // Bool
+    if spelling(c, 6, 113723913172051, 0, 0) { return true; } // String
+    if spelling(c, 4, 1701603654, 0, 0) { return true; } // File
+    if spelling(c, 3, 6514006, 0, 0) { return true; } // Vec
+    if spelling(c, 5, 435459550291, 0, 0) { return true; } // Slice
+    if spelling(c, 3, 7500880, 0, 0) { return true; } // Ptr
+    if spelling(c, 4, 1953066581, 0, 0) { return true; } // Unit
+    if spelling(c, 6, 121424789663823, 0, 0) { return true; } // Option
+    if spelling(c, 6, 128009175786834, 0, 0) { return true; } // Result
+    if spelling(c, 5, 435526984018, 0, 0) { return true; } // Range
+    return false;
+}

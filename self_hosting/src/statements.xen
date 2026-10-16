@@ -1,0 +1,145 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Blocks, mutable places, control flow, function entry and return lowering.
+
+fn block(c: Context) -> Bool {
+    expect(c, 123);
+    let depth = state_get(c, 11) + 1;
+    state_set(c, 11, depth);
+    let mut returns = false;
+    while kind(c) != 125 {
+        if kind(c) == 0 { fail(c, 101); }
+        if returns { fail(c, 314); }
+        let returned = statement(c);
+        returns = returns || returned;
+    }
+    expect(c, 125);
+    let mut count = state_get(c, 10);
+    while count > 0 && load(variable(c, count - 1) + 40) == depth { count = count - 1; }
+    state_set(c, 10, count); state_set(c, 11, depth - 1);
+    return returns;
+}
+
+fn assignment_ahead(c: Context) -> Bool {
+    if kind(c) != 256 { return false; }
+    let tokens = c.tokens;
+    let mut i = state_get(c, 4) + 1;
+    while i + 1 < state_get(c, 3) && load(tokens + i * 32) == 46 && load(tokens + (i + 1) * 32) == 256 {
+        i = i + 2;
+    }
+    return i < state_get(c, 3) && load(tokens + i * 32) == 61;
+}
+
+fn statement(c: Context) -> Bool {
+    if is_word(c, 7628140) {
+        next(c);
+        let mut mutable = 0;
+        if is_word(c, 7632237) { mutable = 1; next(c); }
+        let name = address(c);
+        let size = length(c);
+        if reserved(word(c)) { fail(c, 303); }
+        expect(c, 256);
+        let mut annotation = -1;
+        if take(c, 58) { annotation = parse_type(c); }
+        expect(c, 61);
+        let t = expression(c, 1);
+        if t == 0 { fail(c, 301); }
+        if annotation >= 0 { type_is(c, t, annotation); }
+        expect(c, 59);
+        save_value(c, declare(c, name, size, t, mutable), 0, t);
+        return false;
+    }
+    if is_word(c, 121437875889522) {
+        next(c);
+        let mut t = 0;
+        if kind(c) != 59 { t = expression(c, 1); }
+        else { immediate(c, 0); }
+        type_is(c, t, state_get(c, 13)); expect(c, 59);
+        if t >= 3 {
+            emit(c, 72); emit(c, 139); emit(c, 149); bytes(c, -8 * (state_get(c, 21) + 1), 4);
+            copy_memory(c, type_size(c, t), 2, 0);
+        }
+        epilogue(c); return true;
+    }
+    if is_word(c, 26217) {
+        next(c); type_is(c, expression(c, 1), 2); test(c);
+        let no = jump(c, 132);
+        let yes_returns = block(c);
+        let end = jump(c, 0);
+        land(c, no);
+        let mut no_returns = false;
+        if is_word(c, 1702063205) {
+            next(c);
+            if is_word(c, 26217) { no_returns = statement(c); }
+            else { no_returns = block(c); }
+        }
+        land(c, end);
+        return yes_returns && no_returns;
+    }
+    if is_word(c, 435610544247) {
+        next(c);
+        let start = state_get(c, 6);
+        type_is(c, expression(c, 1), 2); test(c);
+        let end = jump(c, 132);
+        block(c);
+        let back = jump(c, 0);
+        patch(c, back, start - back - 4, 4); land(c, end); return false;
+    }
+    if kind(c) == 123 { return block(c); }
+    if assignment_ahead(c) {
+        let v = find_variable(c, address(c), length(c));
+        if load(v + 32) == 0 { fail(c, 309); }
+        let mut t = load(v + 24);
+        let mut offset = 0;
+        next(c);
+        while take(c, 46) {
+            let index = find_field(c, t, address(c), length(c));
+            let f = field_at(c, t, index);
+            expect(c, 256); offset = offset + load(f + 24); t = load(f + 16);
+        }
+        expect(c, 61);
+        type_is(c, expression(c, 1), t); expect(c, 59);
+        save_value(c, load(v + 16), offset, t); return false;
+    }
+    expression(c, 1); expect(c, 59); return false;
+}
+
+fn compile_function(c: Context, index: Int) {
+    let f = function_at(c, index);
+    store(f + 40, state_get(c, 6));
+    state_set(c, 4, load(f + 16)); state_set(c, 10, 0); state_set(c, 11, 0); state_set(c, 12, 0);
+    state_set(c, 13, load(f + 32));
+    emit(c, 85); emit(c, 72); emit(c, 137); emit(c, 229);
+    emit(c, 72); emit(c, 129); emit(c, 236);
+    let frame = state_get(c, 6); bytes(c, 0, 4);
+    if load(f + 32) >= 3 {
+        let destination = reserve(c, 1);
+        state_set(c, 21, destination);
+        emit(c, 76); emit(c, 137); emit(c, 208); save_local(c, destination);
+    }
+    // Save all raw argument registers before aggregate copies use rcx.
+    let staging = state_get(c, 12);
+    let mut i = 0;
+    while i < load(f + 24) {
+        let slot = reserve(c, 1);
+        let reg = argument_register(i);
+        let mut prefix = 72;
+        if reg >= 8 { prefix = 76; }
+        emit(c, prefix); emit(c, 137); emit(c, 192 + (reg % 8) * 8);
+        save_local(c, slot); i = i + 1;
+    }
+    i = 0;
+    while i < load(f + 24) {
+        let p = f + 48 + i * 24;
+        let t = load(p + 16);
+        let slot = declare(c, load(p), load(p + 8), t, 0);
+        read_local(c, staging + i); save_value(c, slot, 0, t);
+        i = i + 1;
+    }
+    // Parameters share the outer body scope; duplicate let bindings are errors.
+    state_set(c, 11, -1);
+    let returns = block(c);
+    if load(f + 32) != 0 && !returns { fail(c, 310); }
+    immediate(c, 0); epilogue(c);
+    let slots = state_get(c, 12);
+    patch(c, frame, ((slots * 8 + 15) / 16) * 16, 4);
+}

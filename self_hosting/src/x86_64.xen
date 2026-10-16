@@ -1,0 +1,186 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// x86-64 byte encoding, frame storage, value copies, branches and integer lowering.
+
+// Byte emitter, relative fixups, x86 register operations.
+fn emit(c: Context, value: Int) {
+    let size = state_get(c, 6);
+    if size >= 4194304 { fail(c, 205); }
+    put(c.output + size, value);
+    state_set(c, 6, size + 1);
+}
+
+fn bytes(c: Context, value: Int, count: Int) {
+    let mut v = value;
+    let mut i = 0;
+    while i < count { emit(c, v & 255); v = v >> 8; i = i + 1; }
+}
+
+fn patch(c: Context, offset: Int, value: Int, size: Int) {
+    let mut v = value;
+    let mut i = 0;
+    while i < size { put(c.output + offset + i, v & 255); v = v >> 8; i = i + 1; }
+}
+
+fn immediate(c: Context, value: Int) { emit(c, 72); emit(c, 184); bytes(c, value, 8); }
+
+fn push(c: Context) { emit(c, 80); }
+
+fn pop(c: Context, reg: Int) {
+    if reg >= 8 { emit(c, 65); emit(c, 88 + reg - 8); }
+    else { emit(c, 88 + reg); }
+}
+
+fn argument_register(index: Int) -> Int {
+    if index == 0 { return 7; }
+    if index == 1 { return 6; }
+    if index == 2 { return 2; }
+    if index == 3 { return 1; }
+    return index + 4;
+}
+
+fn save_local(c: Context, slot: Int) {
+    emit(c, 72); emit(c, 137); emit(c, 133); bytes(c, -8 * (slot + 1), 4);
+}
+
+fn read_local(c: Context, slot: Int) {
+    emit(c, 72); emit(c, 139); emit(c, 133); bytes(c, -8 * (slot + 1), 4);
+}
+
+fn local_address(c: Context, slot: Int) {
+    emit(c, 72); emit(c, 141); emit(c, 133); bytes(c, -8 * (slot + 1), 4);
+}
+
+// Every frame region is independently reserved. A region's slot denotes its
+// lowest address; packed Bool fields retain their one-byte Xen layout.
+fn reserve(c: Context, t: Int) -> Int {
+    let words = (type_size(c, t) + 7) / 8;
+    let end = state_get(c, 12) + words;
+    if end > 8192 { fail(c, 207); }
+    state_set(c, 12, end);
+    return end - 1;
+}
+
+// rax = source address; destination is [rbp+offset] or [rdx+offset].
+// Only rcx is scratch; argument registers must be staged before copying.
+fn copy_memory(c: Context, size: Int, base: Int, offset: Int) {
+    let mut i = 0;
+    while i + 8 <= size {
+        emit(c, 72); emit(c, 139); emit(c, 136); bytes(c, i, 4);
+        emit(c, 72); emit(c, 137); emit(c, 136 + base); bytes(c, offset + i, 4);
+        i = i + 8;
+    }
+    while i < size {
+        emit(c, 15); emit(c, 182); emit(c, 136); bytes(c, i, 4);
+        emit(c, 136); emit(c, 136 + base); bytes(c, offset + i, 4);
+        i = i + 1;
+    }
+}
+
+fn save_value(c: Context, slot: Int, offset: Int, t: Int) {
+    let displacement = -8 * (slot + 1) + offset;
+    if t >= 3 { copy_memory(c, type_size(c, t), 5, displacement); }
+    else {
+        if t == 1 { emit(c, 72); emit(c, 137); }
+        else { emit(c, 136); }
+        emit(c, 133); bytes(c, displacement, 4);
+    }
+}
+
+fn read_value(c: Context, slot: Int, t: Int) {
+    if t >= 3 {
+        local_address(c, slot);
+        let snapshot = reserve(c, t);
+        save_value(c, snapshot, 0, t); local_address(c, snapshot);
+    } else if t == 2 {
+        emit(c, 15); emit(c, 182); emit(c, 133); bytes(c, -8 * (slot + 1), 4);
+    } else { read_local(c, slot); }
+}
+
+fn read_field(c: Context, offset: Int, t: Int) {
+    if t >= 3 { emit(c, 72); emit(c, 141); }
+    else if t == 1 { emit(c, 72); emit(c, 139); }
+    else { emit(c, 15); emit(c, 182); }
+    emit(c, 128); bytes(c, offset, 4);
+}
+
+fn jump(c: Context, condition: Int) -> Int {
+    if condition == 0 { emit(c, 233); }
+    else { emit(c, 15); emit(c, condition); }
+    let offset = state_get(c, 6);
+    bytes(c, 0, 4);
+    return offset;
+}
+
+fn land(c: Context, offset: Int) { patch(c, offset, state_get(c, 6) - offset - 4, 4); }
+
+fn test(c: Context) { emit(c, 72); emit(c, 133); emit(c, 192); }
+
+fn epilogue(c: Context) { emit(c, 201); emit(c, 195); }
+
+fn runtime_exit(c: Context, status: Int) {
+    immediate(c, 60); emit(c, 191); bytes(c, status, 4); emit(c, 15); emit(c, 5);
+}
+
+fn call(c: Context, target: Int) {
+    let n = state_get(c, 15);
+    if n >= 65536 { fail(c, 208); }
+    emit(c, 232);
+    let offset = state_get(c, 6);
+    bytes(c, 0, 4);
+    store(c.relocations + n * 16, offset); store(c.relocations + n * 16 + 8, target);
+    state_set(c, 15, n + 1);
+}
+
+fn binary(c: Context, op: Int, left: Int, right: Int) -> Int {
+    type_is(c, right, left);
+    if op == 260 || op == 261 {
+        if left != 1 && left != 2 { fail(c, 301); }
+    } else { type_is(c, left, 1); }
+    // right in rax, left in rcx.
+    pop(c, 1);
+    if op == 43 { emit(c, 72); emit(c, 1); emit(c, 200); }
+    else if op == 45 { emit(c, 72); emit(c, 41); emit(c, 193); emit(c, 72); emit(c, 137); emit(c, 200); }
+    else if op == 42 { emit(c, 72); emit(c, 15); emit(c, 175); emit(c, 193); }
+    else if op == 47 || op == 37 {
+        test(c); let nonzero = jump(c, 133);
+        runtime_exit(c, 101); land(c, nonzero);
+        // Both division and remainder reject Int.min / -1 before idiv.
+        emit(c, 72); emit(c, 131); emit(c, 248); emit(c, 255); // cmp rax,-1
+        let ordinary_divisor = jump(c, 133);
+        emit(c, 72); emit(c, 186); bytes(c, -9223372036854775808, 8); // mov rdx,Int.min
+        emit(c, 72); emit(c, 57); emit(c, 209); // cmp rcx,rdx
+        let ordinary_dividend = jump(c, 133);
+        runtime_exit(c, 101);
+        land(c, ordinary_divisor); land(c, ordinary_dividend);
+        emit(c, 72); emit(c, 137); emit(c, 198); // mov rsi,rax
+        emit(c, 72); emit(c, 137); emit(c, 200); // mov rax,rcx
+        emit(c, 72); emit(c, 153); emit(c, 72); emit(c, 247); emit(c, 254);
+        if op == 37 { emit(c, 72); emit(c, 137); emit(c, 208); }
+    } else if op == 38 || op == 124 || op == 94 {
+        let mut instruction = 33;
+        if op == 124 { instruction = 9; }
+        if op == 94 { instruction = 49; }
+        emit(c, 72); emit(c, instruction); emit(c, 200);
+    } else if op == 266 || op == 267 {
+        // Unsigned comparison also rejects negative counts.
+        emit(c, 72); emit(c, 131); emit(c, 248); emit(c, 63);
+        let valid = jump(c, 134);
+        runtime_exit(c, 101);
+        land(c, valid);
+        emit(c, 72); emit(c, 145); // xchg rax,rcx
+        emit(c, 72); emit(c, 211);
+        if op == 266 { emit(c, 224); } else { emit(c, 248); }
+    } else {
+        emit(c, 72); emit(c, 57); emit(c, 193); // cmp rcx,rax
+        let mut cc = 148;
+        if op == 261 { cc = 149; }
+        if op == 60 { cc = 156; }
+        if op == 62 { cc = 159; }
+        if op == 262 { cc = 158; }
+        if op == 263 { cc = 157; }
+        emit(c, 15); emit(c, cc); emit(c, 192);
+        emit(c, 72); emit(c, 15); emit(c, 182); emit(c, 192);
+        return 2;
+    }
+    return 1;
+}

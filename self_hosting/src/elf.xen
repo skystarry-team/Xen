@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Standalone ELF64 construction and the signed-decimal println runtime.
+
+// A small signed-decimal println(Int) runtime. rdi is the input, all scratch
+// registers are caller-saved; unsigned division handles abs(Int.min).
+fn print_runtime(c: Context) {
+    state_set(c, 17, state_get(c, 6));
+    bytes(c, 3850979413, 4); // push rbp; mov rbp,rsp
+    bytes(c, 1089241928, 4); // sub rsp,64
+    bytes(c, 15108424, 3); // mov rsi,rsp
+    bytes(c, 1069974344, 4); // add rsi,63
+    bytes(c, 657094, 3); // mov byte [rsi],10
+    emit(c, 185); bytes(c, 1, 4); // mov ecx,1
+    bytes(c, 16288072, 3); // mov rax,rdi
+    bytes(c, 12618057, 3); // mov r8,rax
+    bytes(c, 1073267017, 4); // sar r8,63
+    test(c); let positive = jump(c, 137);
+    bytes(c, 14219080, 3); // neg rax
+    land(c, positive);
+    emit(c, 65); emit(c, 185); bytes(c, 10, 4); // mov r9d,10
+    let loop = state_get(c, 6);
+    bytes(c, 53809, 2); // xor edx,edx
+    bytes(c, 15857481, 3); // div r9
+    bytes(c, 3195520, 3); // add dl,48
+    bytes(c, 13565768, 3); // dec rsi
+    bytes(c, 5768, 2); // mov [rsi],dl
+    bytes(c, 12713800, 3); // inc rcx
+    test(c); let back = jump(c, 133); patch(c, back, loop - back - 4, 4);
+    bytes(c, 12617037, 3); // test r8,r8
+    let nonnegative = jump(c, 132);
+    bytes(c, 13565768, 3); bytes(c, 2950854, 3); // dec rsi; mov byte [rsi],45
+    bytes(c, 12713800, 3); land(c, nonnegative);
+    bytes(c, 13273416, 3); // mov rdx,rcx
+    let write = state_get(c, 6);
+    emit(c, 191); bytes(c, 1, 4); emit(c, 184); bytes(c, 1, 4);
+    emit(c, 15); emit(c, 5);
+    // Retry EINTR; otherwise require progress and finish partial writes.
+    emit(c, 72); emit(c, 131); emit(c, 248); emit(c, 252);
+    let retry = jump(c, 132); patch(c, retry, write - retry - 4, 4);
+    test(c); let progress = jump(c, 143);
+    runtime_exit(c, 74);
+    land(c, progress);
+    emit(c, 72); emit(c, 41); emit(c, 194); // sub rdx,rax
+    emit(c, 72); emit(c, 1); emit(c, 198); // add rsi,rax
+    emit(c, 72); emit(c, 133); emit(c, 210); // test rdx,rdx
+    let more = jump(c, 133); patch(c, more, write - more - 4, 4);
+    epilogue(c);
+}
+
+fn elf(c: Context) {
+    // ELF64 header + executable PT_LOAD + a separate writable startup page.
+    // The output limit is 4MiB at 0x400000, so 0x800000 cannot overlap code.
+    // This page holds the initial Linux stack pointer (argc/argv/envp).
+    bytes(c, 1179403647, 4); emit(c, 2); emit(c, 1); emit(c, 1);
+    bytes(c, 0, 9); bytes(c, 2, 2); bytes(c, 62, 2); bytes(c, 1, 4);
+    bytes(c, 4194480, 8); bytes(c, 64, 8); bytes(c, 0, 8); bytes(c, 0, 4);
+    bytes(c, 64, 2); bytes(c, 56, 2); bytes(c, 2, 2); bytes(c, 0, 6);
+    bytes(c, 1, 4); bytes(c, 5, 4); bytes(c, 0, 8);
+    bytes(c, 4194304, 8); bytes(c, 4194304, 8);
+    bytes(c, 0, 8); bytes(c, 0, 8); bytes(c, 4096, 8);
+    bytes(c, 1, 4); bytes(c, 6, 4); bytes(c, 0, 8);
+    bytes(c, 8388608, 8); bytes(c, 8388608, 8);
+    bytes(c, 0, 8); bytes(c, 8, 8); bytes(c, 4096, 8);
+}
+
+fn startup(c: Context, entry: Int) {
+    elf(c);
+    immediate(c, 8388608);
+    emit(c, 72); emit(c, 137); emit(c, 32); // mov [rax],rsp, before any call
+    call(c, entry);
+    immediate(c, 60); emit(c, 49); emit(c, 255); emit(c, 15); emit(c, 5);
+}

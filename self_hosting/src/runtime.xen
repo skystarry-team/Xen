@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Linux memory and I/O. These are ordinary compiled Xen functions.
+
+// The only memory primitives. These bodies are parsed and compiled normally.
+fn load(address: Int) -> Int {
+    return asm<Int>("mov rax, [rdi]", in("rdi", address), out("rax"));
+}
+
+fn store(address: Int, value: Int) {
+    asm("mov [rdi], rsi", in("rdi", address), in("rsi", value));
+}
+
+fn byte(address: Int) -> Int {
+    return asm<Int>("movzx rax, byte [rdi]", in("rdi", address), out("rax"));
+}
+
+fn put(address: Int, value: Int) {
+    asm("mov [rdi], sil", in("rdi", address), in("rsi", value));
+}
+
+fn allocate(size: Int) -> Int {
+    let address = syscall6(9, 0, size, 3, 34, -1, 0);
+    if address < 0 { syscall1(60, 70); }
+    return address;
+}
+
+fn write_all(fd: Int, address: Int, size: Int) {
+    let mut done = 0;
+    while done < size {
+        let count = syscall3(1, fd, address + done, size - done);
+        if count != -4 {
+            if count <= 0 { syscall1(60, 74); }
+            done = done + count;
+        }
+    }
+}
+
+fn character(fd: Int, value: Int) {
+    let buffer = allocate(4096);
+    put(buffer, value);
+    write_all(fd, buffer, 1);
+    syscall2(11, buffer, 4096);
+}
+
+fn number(fd: Int, value: Int) {
+    let buffer = allocate(4096);
+    let mut end = 64;
+    let mut remaining = value;
+    if remaining == 0 { end = end - 1; put(buffer + end, 48); }
+    while remaining > 0 {
+        end = end - 1;
+        put(buffer + end, 48 + remaining % 10);
+        remaining = remaining / 10;
+    }
+    write_all(fd, buffer + end, 64 - end);
+    syscall2(11, buffer, 4096);
+}

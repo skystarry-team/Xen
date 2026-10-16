@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Compile errors. No executable bytes are published until compilation succeeds.
+
+fn fail(c: Context, code: Int) {
+    character(2, 69);
+    number(2, code);
+    character(2, 32);
+    number(2, position(c));
+    character(2, 10);
+    syscall1(60, 1);
+}

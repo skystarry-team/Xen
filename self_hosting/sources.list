@@ -1,0 +1,16 @@
+compiler.xen
+src/compiler.xen
+src/cli.xen
+src/cli_text.xen
+src/runtime.xen
+src/context.xen
+src/lexer.xen
+src/diagnostics.xen
+src/x86_64.xen
+src/records.xen
+src/keywords.xen
+src/symbols.xen
+src/intrinsics.xen
+src/expressions.xen
+src/statements.xen
+src/elf.xen

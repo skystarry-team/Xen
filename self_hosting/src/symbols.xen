@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Function signatures and lexical variable bindings.
+
+fn function_at(c: Context, index: Int) -> Int { return c.functions + index * 256; }
+
+fn find_function(c: Context, name: Int, size: Int) -> Int {
+    let mut i = 0;
+    while i < state_get(c, 8) {
+        let f = function_at(c, i);
+        if same(name, size, load(f), load(f + 8)) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn declarations(c: Context) {
+    collect_records(c);
+    capability(c);
+    while kind(c) != 0 {
+        if is_word(c, 127970521019507) {
+            next(c); expect(c, 256); skip_body(c);
+        } else {
+            collect_function(c);
+        }
+    }
+}
+
+fn collect_function(c: Context) {
+    need_word(c, 28262);
+    let name = address(c);
+    let size = length(c);
+    if reserved(word(c)) || builtin_name(c) { fail(c, 303); }
+    expect(c, 256);
+    if find_function(c, name, size) >= 0 { fail(c, 304); }
+    let count = state_get(c, 8);
+    if count >= 256 { fail(c, 206); }
+    let f = function_at(c, count);
+    store(f, name); store(f + 8, size);
+    state_set(c, 8, count + 1);
+    expect(c, 40);
+    let mut n = 0;
+    if kind(c) != 41 {
+        let mut more = true;
+        while more {
+            if n >= 6 { fail(c, 305); }
+            let p = f + 48 + n * 24;
+            if reserved(word(c)) { fail(c, 303); }
+            store(p, address(c)); store(p + 8, length(c)); expect(c, 256); expect(c, 58);
+            let t = parse_type(c);
+            if t == 0 { fail(c, 302); }
+            store(p + 16, t);
+            n = n + 1;
+            more = take(c, 44);
+        }
+    }
+    store(f + 24, n);
+    expect(c, 41);
+    let mut result = 0;
+    if take(c, 259) { result = parse_type(c); }
+    store(f + 32, result);
+    store(f + 16, state_get(c, 4));
+    skip_body(c);
+}
+
+// Variable records: name address, name length, slot, type, mutable, depth.
+fn variable(c: Context, index: Int) -> Int { return c.variables + index * 48; }
+
+fn lookup_variable(c: Context, name: Int, size: Int) -> Int {
+    let mut i = state_get(c, 10);
+    while i > 0 {
+        i = i - 1;
+        let v = variable(c, i);
+        if same(name, size, load(v), load(v + 8)) { return v; }
+    }
+    return 0;
+}
+
+fn find_variable(c: Context, name: Int, size: Int) -> Int {
+    let v = lookup_variable(c, name, size);
+    if v == 0 { fail(c, 306); }
+    return v;
+}
+
+fn declare(c: Context, name: Int, size: Int, t: Int, mutable: Int) -> Int {
+    let count = state_get(c, 10);
+    let depth = state_get(c, 11);
+    let mut i = count;
+    while i > 0 {
+        i = i - 1;
+        let v = variable(c, i);
+        if load(v + 40) == depth && same(name, size, load(v), load(v + 8)) { fail(c, 307); }
+    }
+    if count >= 512 { fail(c, 207); }
+    let v = variable(c, count);
+    let slot = reserve(c, t);
+    store(v, name); store(v + 8, size); store(v + 16, slot); store(v + 24, t);
+    store(v + 32, mutable); store(v + 40, depth);
+    state_set(c, 10, count + 1);
+    return slot;
+}

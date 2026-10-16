@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Static CLI text until String values are supported. Each store packs <=8 ASCII
+// bytes little-endian; comments retain the readable text. No runtime generator.
+
+fn cli_message(fd: Int, message: Int) {
+    let buffer = allocate(4096);
+    let mut size = 0;
+    if message == 1 {
+        // "Usage:\n  xen-selfhost build <source.xen|-> [-o <output|->]\n  xen-selfhost check <source.xen|->\n  xen-selfhost --help\n\nbuild defaults to a.out; - selects stdin or stdout.\nUse -- before input paths starting with -.\nNo arguments: show this help.\nCompile a stream: xen-selfhost build - -o -.\nTarget: Linux x86-64. check also performs code generation.\n"
+        store(buffer + 0, 2308721966181348181);
+        store(buffer + 8, 7810775767706859552);
+        store(buffer + 16, 8458358734680189030);
+        store(buffer + 24, 8462108926931135593);
+        store(buffer + 32, 8966215474990113650);
+        store(buffer + 40, 4332585082123468333);
+        store(buffer + 48, 3277622676565554543);
+        store(buffer + 56, 7954896396191685950);
+        store(buffer + 64, 8317981825891136301);
+        store(buffer + 72, 2336070118915907700);
+        store(buffer + 80, 3343187641640121148);
+        store(buffer + 88, 2308726124062860664);
+        store(buffer + 96, 7810775767706859552);
+        store(buffer + 104, 3255293790183712870);
+        store(buffer + 112, 8458334090107315560);
+        store(buffer + 120, 7018408550018083945);
+        store(buffer + 128, 2337214414353362037);
+        store(buffer + 136, 3251664302333963873);
+        store(buffer + 144, 8319383698921583392);
+        store(buffer + 152, 8007521536400716576);
+        store(buffer + 160, 8391735957915902066);
+        store(buffer + 168, 3255293725757475374);
+        store(buffer + 176, 2334397804646326816);
+        store(buffer + 184, 7021147503629201001);
+        store(buffer + 192, 8241996830879213684);
+        store(buffer + 200, 8388366762012207476);
+        store(buffer + 208, 2337172537259925608);
+        store(buffer + 216, 8389754676633367137);
+        store(buffer + 224, 2339461025841035891);
+        store(buffer + 232, 7810763617328523380);
+        store(buffer + 240, 7597692896007564912);
+        store(buffer + 248, 8247343400527881580);
+        store(buffer + 256, 7954896396634382693);
+        store(buffer + 264, 8317981825891136301);
+        store(buffer + 272, 2334109707081490548);
+        store(buffer + 280, 733573406635401261);
+        store(buffer + 288, 2322296536738980180);
+        store(buffer + 296, 4069037965067577676);
+        store(buffer + 304, 7521891185455410486);
+        store(buffer + 312, 8030881724943262565);
+        store(buffer + 320, 7886488383275757600);
+        store(buffer + 328, 7431050867201220723);
+        store(buffer + 336, 8028075772644519525);
+        store(buffer + 344, 667246);
+        size = 347;
+    }
+    if message == 2 {
+        // "xen-selfhost: invalid arguments; use --help\n"
+        store(buffer + 0, 7380385434711254392);
+        store(buffer + 8, 7955925652160606056);
+        store(buffer + 16, 8241904408702247286);
+        store(buffer + 24, 4283895688056370535);
+        store(buffer + 32, 7506705771060753696);
+        store(buffer + 40, 175139941);
+        size = 44;
+    }
+    if message == 3 {
+        // "xen-selfhost: cannot open input: "
+        store(buffer + 0, 7380385434711254392);
+        store(buffer + 8, 7017488079807278952);
+        store(buffer + 16, 7309464380405411438);
+        store(buffer + 24, 4212120677247426670);
+        store(buffer + 32, 32);
+        size = 33;
+    }
+    if message == 4 {
+        // "xen-selfhost: cannot close input: "
+        store(buffer + 0, 7380385434711254392);
+        store(buffer + 8, 7017488079807278952);
+        store(buffer + 16, 8028901226738314862);
+        store(buffer + 24, 8391737100187231603);
+        store(buffer + 32, 8250);
+        size = 34;
+    }
+    if message == 5 {
+        // "xen-selfhost: cannot create output: "
+        store(buffer + 0, 7380385434711254392);
+        store(buffer + 8, 7017488079807278952);
+        store(buffer + 16, 7310014136219299438);
+        store(buffer + 24, 8103230749691704417);
+        store(buffer + 32, 540701813);
+        size = 36;
+    }
+    if message == 6 {
+        // "xen-selfhost: cannot write output: "
+        store(buffer + 0, 7380385434711254392);
+        store(buffer + 8, 7017488079807278952);
+        store(buffer + 16, 7598266502603566702);
+        store(buffer + 24, 8462391747553551732);
+        store(buffer + 32, 2112116);
+        size = 35;
+    }
+    if message == 7 {
+        // "xen-selfhost: cannot publish output: "
+        store(buffer + 0, 7380385434711254392);
+        store(buffer + 8, 7017488079807278952);
+        store(buffer + 16, 7094700072686808686);
+        store(buffer + 24, 8391735665656818028);
+        store(buffer + 32, 138419664240);
+        size = 37;
+    }
+    if message == 10 {
+        // " (errno "
+        store(buffer + 0, 2337208169453135904);
+        size = 8;
+    }
+    write_all(fd, buffer, size);
+    syscall2(11, buffer, 4096);
+}

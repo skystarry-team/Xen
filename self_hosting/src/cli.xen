@@ -1,0 +1,155 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Native Linux CLI. Paths are original NUL-terminated argv bytes, not String.
+
+struct CliOptions {
+    mode: Int,   // 0: build, 1: check
+    input: Int,  // input fd
+    source: Int, // input path (including - for stdin)
+    output: Int, // output path, or 0 for stdout
+}
+
+fn zero_length(p: Int) -> Int {
+    let mut n = 0;
+    while byte(p + n) != 0 { n = n + 1; }
+    return n;
+}
+
+fn write_zero(fd: Int, p: Int) { write_all(fd, p, zero_length(p)); }
+
+fn cli_is(p: Int, size: Int, value: Int) -> Bool {
+    return zero_length(p) == size && packed(p, size) == value;
+}
+
+fn cli_error(message: Int, path: Int, error: Int, status: Int) {
+    cli_message(2, message);
+    if path != 0 { write_zero(2, path); }
+    if error < 0 {
+        cli_message(2, 10); number(2, -error); character(2, 41);
+    }
+    character(2, 10);
+    syscall1(60, status);
+}
+
+fn cli_usage() {
+    cli_message(2, 2);
+    syscall1(60, 64);
+}
+
+fn cli_help() { cli_message(1, 1); syscall1(60, 0); }
+
+fn argument_at(stack: Int, index: Int) -> Int { return load(stack + 8 + index * 8); }
+
+fn cli_options() -> CliOptions {
+    // startup() stores the untouched Linux entry rsp in a separate RW page.
+    let stack = load(8388608);
+    let count = load(stack);
+    if count <= 1 { cli_help(); }
+    let command = argument_at(stack, 1);
+    if cli_is(command, 6, 123610860105005) || cli_is(command, 2, 26669) { cli_help(); }
+    let mut mode = 0;
+    if cli_is(command, 5, 461229090915) { mode = 1; } // check
+    else if !cli_is(command, 5, 431315580258) { cli_usage(); } // build
+    let mut input = 0;
+    let mut output = 0;
+    let mut options = true;
+    let mut i = 2;
+    while i < count {
+        let p = argument_at(stack, i);
+        if options && (cli_is(p, 6, 123610860105005) || cli_is(p, 2, 26669)) { cli_help(); }
+        else if options && cli_is(p, 2, 11565) { options = false; } // --
+        else if options && cli_is(p, 2, 28461) { // -o
+            if mode == 1 || output != 0 || i + 1 == count { cli_usage(); }
+            i = i + 1; output = argument_at(stack, i);
+        } else {
+            if input != 0 || options && byte(p) == 45 && !cli_is(p, 1, 45) { cli_usage(); }
+            input = p;
+        }
+        i = i + 1;
+    }
+    if input == 0 { cli_usage(); }
+    if mode == 0 && output == 0 {
+        output = allocate(4096);
+        store(output, 500186426977); // a.out followed by NUL
+    }
+    if output != 0 && cli_is(output, 1, 45) { output = 0; }
+    let mut fd = 0;
+    if !cli_is(input, 1, 45) {
+        fd = syscall3(2, input, 0, 0);
+        while fd == -4 { fd = syscall3(2, input, 0, 0); }
+        if fd < 0 { cli_error(3, input, fd, 66); }
+    }
+    return CliOptions { mode: mode, input: fd, source: input, output: output };
+}
+
+fn read_input(c: Context, options: CliOptions) {
+    read_source(c, options.input);
+    if options.source != 0 && !cli_is(options.source, 1, 45) {
+        let result = syscall1(3, options.input);
+        if result < 0 { cli_error(4, options.source, result, 74); }
+    }
+}
+
+// Build a unique sibling path. O_EXCL prevents following or replacing a stale
+// temporary file. The final rename publishes the complete executable atomically.
+fn temporary_path(path: Int) -> Int {
+    let size = zero_length(path);
+    let mut directory = 0;
+    let mut i = 0;
+    while i < size { if byte(path + i) == 47 { directory = i + 1; } i = i + 1; }
+    let result = allocate(directory + 64);
+    i = 0;
+    while i < directory { put(result + i, byte(path + i)); i = i + 1; }
+    store(result + directory, 195125671982); // .xen- (remaining bytes overwritten below)
+    i = directory + 5;
+    let digits = allocate(4096);
+    let mut end = 32;
+    let mut pid = syscall0(39);
+    while pid > 0 {
+        end = end - 1; put(digits + end, 48 + pid % 10); pid = pid / 10;
+    }
+    while end < 32 { put(result + i, byte(digits + end)); i = i + 1; end = end + 1; }
+    syscall2(11, digits, 4096);
+    put(result + i, 45); put(result + i + 1, 48); put(result + i + 2, 48);
+    return result;
+}
+
+fn output_failure(fd: Int, temporary: Int, path: Int, error: Int) {
+    syscall1(3, fd); syscall1(87, temporary);
+    cli_error(6, path, error, 74);
+}
+
+fn save_output(c: Context, path: Int) {
+    if path == 0 { write_all(1, c.output, state_get(c, 6)); return; }
+    let temporary = temporary_path(path);
+    let suffix = temporary + zero_length(temporary) - 2;
+    let mut fd = -17;
+    let mut attempt = 0;
+    while fd == -17 && attempt < 100 {
+        put(suffix, 48 + attempt / 10); put(suffix + 1, 48 + attempt % 10);
+        // A requested output may itself be named .xen-<pid>-<attempt>.
+        // Never open the final path as our temporary file.
+        if !same(temporary, zero_length(temporary), path, zero_length(path)) {
+            fd = syscall3(2, temporary, 193, 448); // O_WRONLY|O_CREAT|O_EXCL, 0700
+            while fd == -4 { fd = syscall3(2, temporary, 193, 448); }
+        }
+        attempt = attempt + 1;
+    }
+    if fd < 0 { cli_error(5, path, fd, 73); }
+    let mut done = 0;
+    let size = state_get(c, 6);
+    while done < size {
+        let written = syscall3(1, fd, c.output + done, size - done);
+        if written != -4 {
+            if written < 0 { output_failure(fd, temporary, path, written); }
+            if written == 0 { output_failure(fd, temporary, path, -5); }
+            done = done + written;
+        }
+    }
+    let mut result = syscall2(91, fd, 493); // fchmod 0755
+    while result == -4 { result = syscall2(91, fd, 493); }
+    if result < 0 { output_failure(fd, temporary, path, result); }
+    result = syscall1(3, fd); // Linux close must not be retried on EINTR.
+    if result < 0 { syscall1(87, temporary); cli_error(6, path, result, 74); }
+    result = syscall2(82, temporary, path);
+    if result < 0 { syscall1(87, temporary); cli_error(7, path, result, 73); }
+}
