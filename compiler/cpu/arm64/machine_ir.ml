@@ -7,10 +7,11 @@ type t = {
   labels : (string, section * int) Hashtbl.t;
   mutable fixups : (int * relocation * string) list;
   mutable serial : int;
+  mutable imports : (string * string * string) list;
 }
 exception Error of string
 let create () = {code=Buffer.create 4096;rodata=Buffer.create 256;
-  data=Buffer.create 32;labels=Hashtbl.create 64;fixups=[];serial=0}
+  data=Buffer.create 32;labels=Hashtbl.create 64;fixups=[];serial=0;imports=[]}
 let position m = Buffer.length m.code
 let fresh m prefix = m.serial <- m.serial+1; prefix ^ string_of_int m.serial
 let word m n = for i=0 to 3 do Buffer.add_char m.code
@@ -24,6 +25,11 @@ let constant m text =
   define m name Rodata (Buffer.length m.rodata);Buffer.add_string m.rodata text;name
 let global m name =
   define m name Data (Buffer.length m.data);Buffer.add_string m.data (String.make 8 '\000')
+let import m library symbol =
+  match List.find_opt(fun(_,s,_)->s=symbol)m.imports with
+  |Some(_,_,label)->label
+  |None->let label="__xen_import_"^string_of_int(List.length m.imports)in
+      global m label;m.imports<-m.imports@[library,symbol,label];label
 let reg r = if r<0 || r>31 then invalid_arg "A64 register"
 let imm m rd value =
   reg rd;

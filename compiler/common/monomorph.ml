@@ -30,7 +30,7 @@ let run ?(iterator_sources=[]) (program:program) =
         fail e.span ("enum representation field '"^name^"' is private")
     | Unary(_,x)|Borrow(_,x)|Field(x,_)|Tuple_index(x,_)|Try x->reject_private_expr x
     | Binary(_,a,b)|Index(a,b)->reject_private_expr a;reject_private_expr b
-    | Call(_,xs)|Generic_call(_,_,xs)|Intrinsic(_,_,xs)|Vec_lit xs|Tuple_lit xs->List.iter reject_private_expr xs
+    | Call(_,xs)|Generic_call(_,_,xs)|Intrinsic(_,_,xs)|Inline_asm(_,_,xs)|Vec_lit xs|Tuple_lit xs->List.iter reject_private_expr xs
     | Method(r,_,xs)->reject_private_expr r;List.iter reject_private_expr xs
     | Struct_lit(_,fs)|Generic_struct_lit(_,_,fs)->List.iter(fun(_,x,_)->reject_private_expr x)fs
     | Variant_lit(_,_,_,x)->Option.iter reject_private_expr x
@@ -63,7 +63,7 @@ let run ?(iterator_sources=[]) (program:program) =
   let builtin_call n = List.mem n ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";
     "panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";
     "open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";
-    "raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";
+    "raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";
     "syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6";
     "i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"]in
   let local_call env n =
@@ -153,6 +153,7 @@ let run ?(iterator_sources=[]) (program:program) =
     |Float_lit _->Some(match expected with Some t when Type_desc.is_float t->t|_->F64)
     |String_lit _->Some String|Bool_lit _->Some Bool
     |Intrinsic(Exchange,ts,xs)->(match ts,xs with [t],_->Some t|_,a::_->(match ty a with Some(Ref(_,t))->Some t|_->None)|_->None)
+    |Inline_asm(_,t,_)->Some t
     |Intrinsic _->Some I64
     |Unary("*",r)->(match ty r with Some(Ref(_,t))->Some t|Some t->box_element t|_->None)
     |Unary("!",_)->Some Bool|Unary(_,x)->generic_type ?expected env x
@@ -215,9 +216,17 @@ let run ?(iterator_sources=[]) (program:program) =
           (match xs with [x]->generic_type env x|_->None)in
       Option.map(fun t->[t],Box t)target
     else match n with
+    |n when Atomic_contract.kind n<>None->Option.map(fun t->
+        let kind=Option.get(Atomic_contract.kind n)in
+        let ps=Ptr t::I64::List.init(Atomic_contract.payloads kind)(fun _->t)in
+        ps @ List.init(max 0(List.length xs-List.length ps))(fun _->String),
+        (if kind=Atomic_store then Unit else t))element
+    |"extern_call"->(match explicit with [t]->Some([],t)|_->None)
+    |"cpu_relax"|"memory_fence"->Some([],Unit)
     |"raw_alloc"->Option.map(fun t->[I64],Ptr t)element
-    |"raw_load"->Option.map(fun t->[Ptr t;I64],t)element
-    |"raw_store"->Option.map(fun t->[Ptr t;I64;t],Unit)element
+    |"ptr_from_addr"->Option.map(fun t->[I64;I64],Ptr t)element
+    |"raw_load"|"volatile_load"->Option.map(fun t->[Ptr t;I64],t)element
+    |"raw_store"|"volatile_store"->Option.map(fun t->[Ptr t;I64;t],Unit)element
     |"raw_free"->Option.map(fun t->[Ptr t],Unit)element
     |"ptr_addr"->Option.map(fun t->[Ptr t],I64)element
     |"raw_alloc_int"->Some([I64],Ptr I64)
@@ -229,14 +238,16 @@ let run ?(iterator_sources=[]) (program:program) =
     if box_constructor env n then match explicit,xs with [t],_->Some(Box t)|_,[x]->Option.map(fun t->Box t)(generic_type env x)|_->None
     else match call_signature env n explicit xs with Some(_,r)->Some r|_->
     match n,explicit,xs with
-    |("raw_alloc"),[t],_->Some(Ptr t)
-    |"raw_load",_,p::_->(match generic_type env p with Some(Ptr t)->Some t|_->None)
+    |n,_,_ when Atomic_contract.kind n<>None->Option.map snd(builtin_signature env None n explicit xs)
+    |"extern_call",[t],_->Some t
+    |("raw_alloc"|"ptr_from_addr"),[t],_->Some(Ptr t)
+    |("raw_load"|"volatile_load"),_,p::_->(match generic_type env p with Some(Ptr t)->Some t|_->None)
     |("raw_alloc_int"),_,_->Some(Ptr I64)
     |("open_read"|"open_write"),_,_->Some File
     |("arg"|"read_text"|"int_to_str"),_,_->Some String
     |("zeros"|"read_ints"),_,_->Some(Vec I64)|"read_floats",_,_->Some(Vec F64)
     |"repeat",_,x::_->Option.map(fun t->Vec t)(generic_type env x)
-    |("print"|"println"|"assert"|"assert_msg"|"panic"|"raw_store"|"raw_free"|"raw_store_int"|"raw_free_int"),_,_->Some Unit
+    |("print"|"println"|"assert"|"assert_msg"|"panic"|"cpu_relax"|"memory_fence"|"raw_store"|"volatile_store"|"raw_free"|"raw_store_int"|"raw_free_int"),_,_->Some Unit
     |("i8"|"u8"|"i16"|"u16"|"i32"|"u32"|"i64"|"u64"|"f32"|"f64"|"int"|"float"),_,_->
         Some(match n with "i8"->I8|"u8"->U8|"i16"->I16|"u16"->U16|"i32"->I32|"u32"->U32|"u64"->U64|"f32"->F32|"f64"|"float"->F64|_->I64)
     |("len"|"arg_count"|"ptr_addr"|"raw_load_int"|"syscall0"|"syscall1"|"syscall2"|"syscall3"|"syscall4"|"syscall5"|"syscall6"),_,_->Some I64
@@ -339,6 +350,7 @@ let run ?(iterator_sources=[]) (program:program) =
     |Intrinsic(Exchange,ts,xs)->(match ts,xs with
         |[t],[a;b]->check ~expected:(Ref(true,t))a;check ~expected:t b
         |_->List.iter check xs)
+    |Inline_asm(_,_,xs)->List.iter(fun x->reject_abstract x;check x)xs
     |Intrinsic(_,_,xs)->List.iter check xs
     |Tuple_lit xs->let ts=match Option.map symbolic expected with Some(Tuple ts)when List.length ts=List.length xs->List.map Option.some ts|_->List.map(fun _->None)xs in
         List.iter2(fun t x->check ?expected:t x)ts xs
@@ -497,6 +509,7 @@ let run ?(iterator_sources=[]) (program:program) =
     let infer expected x=infer_expr ~bindings env expected x in
     match e.node with
     | Intrinsic(Exchange,ts,xs)->(match ts,xs with [t],_->Some(subst bindings t)|_,a::_->(match infer None a with Some(Ref(_,t))->Some t|_->expected)|_->expected)
+    | Inline_asm(_,t,_)->Some(subst bindings t)
     | Intrinsic _->Some I64
     | Int_lit _->(match expected with Some t when Type_desc.is_integer t->Some t|_->Some I64)
     | Float_lit _->(match expected with Some t when Type_desc.is_float t->Some t|_->Some F64)
@@ -556,14 +569,15 @@ let run ?(iterator_sources=[]) (program:program) =
     | Call("read_floats",_)->Some(Vec F64)
     | Call("repeat",x::_)->Option.map(fun t->Vec t)(infer None x)
     | Call("raw_alloc_int",_)->Some(Ptr I64)
-    | Generic_call("raw_alloc",[t],_)->Some(Ptr(concrete_type e.span(subst bindings t)))
+    | Generic_call("extern_call",[t],_)->Some(concrete_type e.span(subst bindings t))
+    | Generic_call(("raw_alloc"|"ptr_from_addr"),[t],_)->Some(Ptr(concrete_type e.span(subst bindings t)))
     | Call("raw_load_int",_)->Some I64
-    | Call("raw_load",p::_)|Generic_call("raw_load",_,p::_)->
+    | Call(("raw_load"|"volatile_load"),p::_)|Generic_call(("raw_load"|"volatile_load"),_,p::_)->
         (match infer None p with Some(Ptr t)->Some t|_->None)
     | Generic_call("ptr_addr",_,_)->Some I64
-    | Call(("raw_store"|"raw_free"|"raw_store_int"|"raw_free_int"),_)
-    | Generic_call(("raw_store"|"raw_free"),_,_)->Some Unit
-    | Call(("print"|"println"|"assert"|"assert_msg"|"panic"|"$unit"),_)->Some Unit
+    | Call(("raw_store"|"volatile_store"|"raw_free"|"raw_store_int"|"raw_free_int"),_)
+    | Generic_call(("raw_store"|"volatile_store"|"raw_free"),_,_)->Some Unit
+    | Call(("print"|"println"|"assert"|"assert_msg"|"panic"|"cpu_relax"|"memory_fence"|"$unit"),_)->Some Unit
     | Call(n,[x]) when box_constructor env n->
         let target=match expected with Some(Box t)->Some t|_->None in
         Option.map(fun t->Box t)(infer target x)
@@ -679,6 +693,9 @@ let run ?(iterator_sources=[]) (program:program) =
           let typ=match types with [t]->Some t|_->(match infer_expr ~bindings env None target with Some(Ref(true,t))->Some t|_->None)in
           Intrinsic(Exchange,types,[transform_expr env (Option.map(fun t->Ref(true,t))typ)bindings target;transform_expr env typ bindings value])
          |_->fail e.span "replace expects two value arguments")
+    | Inline_asm(spec,t,xs)->
+        let concrete t=concrete_type e.span(subst bindings t)in
+        Inline_asm({spec with output_types=List.map concrete spec.output_types},concrete t,List.map(fun x->tr x)xs)
     | Intrinsic(kind,types,xs)->Intrinsic(kind,List.map(fun t->concrete_type e.span(subst bindings t))types,List.map(fun x->tr x)xs)
     | Unary(op,x)->Unary(op,tr x)|Binary(op,a,b)->Binary(op,tr a,tr b)
     | Vec_lit xs->
@@ -800,7 +817,7 @@ let run ?(iterator_sources=[]) (program:program) =
     | Generic_call(n,args,xs) when box_constructor env n->
         if List.length args<>1 then fail e.span "box expects 1 type argument";
         Generic_call("$box_new",List.map(fun t->concrete_type e.span(subst bindings t))args,List.map tr xs)
-    | Generic_call(("$inactive_box"|"$inactive_function"|"raw_alloc"|"raw_load"|"raw_store"|"raw_free"|"ptr_addr" as n),args,xs)->
+    | Generic_call(("$inactive_box"|"$inactive_function"|"raw_alloc"|"raw_load"|"raw_store"|"raw_free"|"ptr_addr"|"ptr_from_addr"|"volatile_load"|"volatile_store"|"cpu_relax"|"memory_fence"|"extern_call"|"atomic_load"|"atomic_store"|"atomic_exchange"|"atomic_compare_exchange"|"atomic_fetch_add"|"atomic_fetch_sub"|"atomic_fetch_and"|"atomic_fetch_or"|"atomic_fetch_xor" as n),args,xs)->
         Generic_call(n,List.map(fun t->concrete_type e.span(subst bindings t))args,List.map tr xs)
     | Generic_call(n,args,xs)->
         let args=List.map(fun t->concrete_type e.span(subst bindings t))args in

@@ -4,16 +4,20 @@ Reserve this directory for operating-system services, executable formats and
 platform ABI support. CPU instruction encoders live in `../cpu/`.
 
 OS implementations live under `linux/` and `darwin/`; CPU-specific implementations
-sit below each OS. `linux/x86_64/` owns the legacy emitter, syscall runtime,
-ELF writer and backend. `linux/arm64/` owns the Linux runtime, ELF writer and a thin
-composition of `Xen_arm64.Native_backend.Make(Linux_runtime)`. CPU libraries have
+sit below each OS. Both `linux/x86_64/` and `linux/arm64/` own the Linux runtime,
+ELF writer and a thin composition of their CPU's `Native_backend.Make(Linux_runtime)`.
+CPU libraries have
 no OS-library dependencies or Linux default instances. Shared heap/file routines
 require explicit inline allocation/unmap/open/read/write/close hooks.
 
-ARM64 code generation uses `Native_backend.Make(Runtime)`:
+Both CPU lowerings use `Native_backend.Make(Runtime)`:
 platform entry, termination, output, file flags, raw syscall emission and executable
 construction are explicit hooks. Formatting, numeric parsing and ownership logic
-can reuse normalized services. Inline syscall hooks preserve leaf helpers' LR;
+can reuse normalized services. x86-64's inline service register/clobber/stack
+contract is in `cpu/x86_64/runtime_intf.ml`. Float formatting, file read builtins
+and token parsing are CPU algorithms with symbolic labels and relocations;
+the platform supplies their allocation/I/O services.
+ARM64's inline syscall hooks preserve leaf helpers' LR;
 the x86 writer's relocations never become another CPU backend's dependency.
 
 ## Target services

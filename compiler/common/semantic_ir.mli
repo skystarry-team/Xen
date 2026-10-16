@@ -58,6 +58,13 @@ type rvalue =
   | Raw_load of Ast.typ * value * value
   | Raw_store of Ast.typ * value * value * value
   | Raw_free of Ast.typ * value
+  | Volatile_load of Ast.typ * value * value
+  | Volatile_store of Ast.typ * value * value * value
+  | Ptr_from_addr of Ast.typ * value * value
+  | Inline_asm of Ast.asm_spec * value list
+  | Cpu_relax | Memory_fence
+  | Foreign_call of Ast.foreign_symbol * value list
+  | Atomic of Ast.atomic_kind * Ast.typ * Ast.memory_order * Ast.memory_order option * value list
   | Ptr_addr of Ast.typ * value
   | Ptr_len of value
   | Syscall of value list

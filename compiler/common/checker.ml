@@ -132,7 +132,7 @@ let rounded_float span typ value = match canonical typ with
 let normalize_modes modes = List.filter (fun mode -> List.mem mode modes) [Explc; Opt; Bb]
 let union_modes a b = normalize_modes (a @ b)
 
-let check_internal ~entry (program : Ast.program) =
+let check_internal ?(numeric_runtime=false) ~entry (program : Ast.program) =
  try
   Hashtbl.clear layout_table;
   let declarations=Hashtbl.create 16 in
@@ -207,7 +207,7 @@ let check_internal ~entry (program : Ast.program) =
       "global opt mode is not supported; use #scope[opt]";
   let signatures = Hashtbl.create 16 in
   let conversions=["i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"] in
-  let builtins = conversions @ ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";"panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6"] in
+  let builtins = conversions @ ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";"panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";"syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6"] in
   List.iter (fun (f:func) ->
     List.iter(fun(p:param)->validate_type p.span p.typ)f.params;validate_type f.span f.return_type;
     let effective_modes = union_modes program.global_mode_set f.mode_set in
@@ -243,6 +243,7 @@ let check_internal ~entry (program : Ast.program) =
     invalid ~notes:[!capability_boundary,"enclosing function or scope does not provide "^string_of_mode mode]
       ~help:("add "^string_of_mode mode^" only to the function or #scope that needs this operation") span message in
   let unique = ref 0 in
+  let foreign_signatures=Hashtbl.create 8 in
   let fresh_binding name = incr unique; Printf.sprintf "%s$%d" name !unique in
   let rec expression ~explc ~bb ?mode_set ?expected ?(transfer=Ir.Clone) env (v:expr) : Ir.expr =
     let mode_set = match mode_set with Some modes -> modes | None -> normalize_modes
@@ -287,6 +288,55 @@ let check_internal ~entry (program : Ast.program) =
     | Generic_call("$inactive_box",[t],[])->make(Box(canonical t))(Ir.Int_lit 0L)
     | Generic_call("$inactive_function",[(Function _ as t)],[])->make(canonical t)(Ir.Int_lit 0L)
     | Call("$unit",[])->make Unit(Ir.Int_lit 0L)
+    | Inline_asm(spec,result,args)->
+        if not bb then capability_error v.span Bb "asm requires #![bb]";
+        let result=canonical result in
+        let inputs=List.map(expression ~explc ~bb ~transfer:Ir.Direct env)args in
+        let spec={spec with output_types=List.map canonical spec.output_types}in
+        let tuple_fields=function Named n when String.starts_with ~prefix:"$Tuple<" n->
+          Option.map(fun(l:Ir.struct_layout)->List.map(fun(f:Ir.struct_field)->f.typ)l.fields)(Hashtbl.find_opt layout_table n)|_->None in
+        (match Asm_contract.validate ~tuple_fields spec result(List.map(fun(x:Ir.expr)->x.typ)inputs)with
+         |Ok()->()|Error message->invalid v.span message);
+        make result(Ir.Inline_asm(spec,inputs))
+    | Call(("cpu_relax"|"memory_fence" as n),args)->
+        if not bb then capability_error v.span Bb (n^" requires #![bb]");
+        args_exact n 0 args;
+        make Unit(if n="cpu_relax"then Ir.Cpu_relax else Ir.Memory_fence)
+    | Generic_call(("cpu_relax"|"memory_fence" as n),_,_)->
+        invalid v.span(n^" does not accept type arguments")
+    | Generic_call("extern_call",[result],library::symbol::args)->
+        if not bb then capability_error v.span Bb "extern_call requires #![bb]";
+        let literal (x:Ast.expr)=match x.node with String_lit s->s|_->invalid x.span "extern_call library and symbol must be string literals"in
+        let symbol={library=literal library;symbol=literal symbol}and result=canonical result in
+        let inputs=List.map(expression ~explc ~bb ~transfer:Ir.Direct env)args in
+        let types=List.map(fun(x:Ir.expr)->x.typ)inputs in
+        (match Foreign_contract.validate symbol result types with Ok()->()|Error message->invalid v.span message);
+        (match Foreign_contract.register foreign_signatures symbol result types with Ok()->()|Error message->invalid v.span message);
+        make result(Ir.Foreign_call(symbol,inputs))
+    | Generic_call("extern_call",_,_)|Call("extern_call",_)->
+        invalid v.span "extern_call requires one explicit result type, library, symbol and up to six C arguments"
+    | Call(n,args)when Atomic_contract.kind n<>None->
+        expression ~explc ~bb env {v with node=Generic_call(n,[],args)}
+    | Generic_call(n,types,args)when Atomic_contract.kind n<>None->
+        if not bb then capability_error v.span Bb (n^" requires #![bb]");
+        let kind=Option.get(Atomic_contract.kind n)in
+        let base=2+Atomic_contract.payloads kind in
+        let orders=if kind=Atomic_compare_exchange then 2 else 1 in
+        if List.length args<>base && List.length args<>base+orders then
+          invalid v.span(n^" expects pointer, index, values and optional literal memory order(s)");
+        let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in
+        let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in
+        (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));
+        let order i=if List.length args=base then Seq_cst else
+          let arg=List.nth args i in match arg.node with
+          |String_lit s->(match Atomic_contract.order s with Some order->order|None->invalid arg.span "unknown atomic memory order")
+          |_->invalid arg.span "atomic memory order must be a string literal"in
+        let success=order base and failure=if orders=2 then Some(order(base+1))else None in
+        (match Atomic_contract.validate kind t success failure with Ok()->()|Error message->invalid v.span message);
+        let index=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require index.span I64 index.typ;
+        let values=List.init(Atomic_contract.payloads kind)(fun i->
+          let x=expression ~explc ~bb ~expected:t env(List.nth args(i+2))in require x.span t x.typ;x)in
+        make(if kind=Atomic_store then Unit else t)(Ir.Atomic(kind,t,success,failure,p::index::values))
     | Intrinsic(Exchange,types,args)->
         if not explc then capability_error v.span Explc "replacement requires #![explc]";
         args_exact "replace" 2 args;
@@ -408,10 +458,14 @@ let check_internal ~entry (program : Ast.program) =
         let typ=match Option.map canonical expected with Some t when T.is_integer t->t|_->I64 in
         make typ(Ir.Int_lit(checked_integer_literal x.span typ ~negative:true digits))
     | Unary(op,x)->let x=expression ~explc ~bb ?expected env x in (match op with
+        | "+" when T.is_numeric x.typ->make x.typ(Ir.Unary(op,x))
+        | "~" when T.is_integer x.typ->make x.typ(Ir.Unary(op,x))
         | "-" when T.is_signed_int x.typ||T.is_float x.typ->make x.typ(Ir.Unary(op,x))
         | "!"->require x.span Bool x.typ;make Bool(Ir.Unary(op,x))
+        | "+"->invalid x.span "unary + expects a numeric type"
+        | "~"->invalid x.span "bitwise ~ expects an integer operand"
         | "-"->invalid x.span "unary - expects a signed integer or float"|_->invalid v.span("unknown unary operator '"^op^"'"))
-    | Binary(op,a,b)->let operand_expected=match expected with Some t when T.is_numeric(canonical t)&&List.mem op["+";"-";"*";"/";"%"]->Some(canonical t)|_->None in
+    | Binary(op,a,b)->let operand_expected=match expected with Some t when T.is_numeric(canonical t)&&List.mem op["+";"-";"*";"/";"%";"**";"&";"|";"^";"<<";">>"]->Some(canonical t)|_->None in
         let a=expression ~explc ~bb ?expected:operand_expected ~transfer:Ir.Direct env a in let b=expression ~explc ~bb ~expected:a.typ ~transfer:Ir.Direct env b in
         if (match a.typ with Ref _->true|_->false) then invalid a.span "reference equality and arithmetic are not supported";
         if a.typ=File then invalid a.span "File equality and arithmetic are not supported";
@@ -421,8 +475,8 @@ let check_internal ~entry (program : Ast.program) =
         if (match a.typ with Named _->true|_->false) then invalid a.span "struct equality and arithmetic are not supported";
         let typ=match op with
         | "+" when a.typ=String->require b.span String b.typ;String
-        | "+"|"-"|"*"|"/"->if not(T.is_numeric a.typ) then invalid a.span "arithmetic expects a numeric type";require b.span a.typ b.typ;a.typ
-        | "%"->if not(T.is_integer a.typ)then invalid a.span "expected Int integer operand";require b.span a.typ b.typ;a.typ
+        | "+"|"-"|"*"|"/"|"%"|"**"->if not(T.is_numeric a.typ) then invalid a.span "arithmetic expects a numeric type";require b.span a.typ b.typ;a.typ
+        | "&"|"|"|"^"|"<<"|">>"->if not(T.is_integer a.typ)then invalid a.span "bitwise and shift operators expect integer operands";require b.span a.typ b.typ;a.typ
         | "<"|"<="|">"|">="->if not(T.is_numeric a.typ) then invalid a.span "comparison expects a numeric type";require b.span a.typ b.typ;Bool
         | "=="|"!="->require b.span a.typ b.typ;Bool
         | "&&"|"||"->require a.span Bool a.typ;require b.span Bool b.typ;Bool|_->invalid v.span("unknown binary operator '"^op^"'") in make typ(Ir.Binary(op,a,b))
@@ -538,12 +592,23 @@ let check_internal ~entry (program : Ast.program) =
     | Generic_call(("raw_alloc" as n),[t],args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");let t=canonical t in if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");args_exact n 1 args;let c=expression ~explc ~bb ~expected:I64 env(List.hd args)in require c.span I64 c.typ;make(Ptr t)(Ir.Raw_alloc(t,c))
     | Generic_call("$inactive_ptr",[t],[])->make(Ptr(canonical t))(Ir.Call("$inactive_pair",[]))
     | Generic_call("$inactive_slice",[t],[])->make(Slice(canonical t))(Ir.Call("$inactive_pair",[]))
-    | Generic_call(("raw_load" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 2 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");let i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require i.span I64 i.typ;make t(Ir.Raw_load(t,p,i))
-    | Generic_call(("raw_store" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 3 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");let i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)and x=expression ~explc ~bb ~expected:t env(List.nth args 2)in require i.span I64 i.typ;require x.span t x.typ;make Unit(Ir.Raw_store(t,p,i,x))
+    | Generic_call((("raw_load"|"volatile_load") as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 2 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");let i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require i.span I64 i.typ;if n="volatile_load" then (if not(T.is_numeric t)then invalid v.span "volatile_load requires a numeric scalar element";make t(Ir.Volatile_load(t,p,i)))else make t(Ir.Raw_load(t,p,i))
+    | Generic_call((("raw_store"|"volatile_store") as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 3 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");let i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)and x=expression ~explc ~bb ~expected:t env(List.nth args 2)in require i.span I64 i.typ;require x.span t x.typ;if n="volatile_store" then (if not(T.is_numeric t)then invalid v.span "volatile_store requires a numeric scalar element";make Unit(Ir.Volatile_store(t,p,i,x)))else make Unit(Ir.Raw_store(t,p,i,x))
+    | Generic_call("ptr_from_addr",[t],args)->
+        if not bb then capability_error v.span Bb "ptr_from_addr requires #![bb]";
+        let t=canonical t in
+        if not(raw_safe t)then invalid v.span("raw memory element type "^string_of_typ t^" is not raw-safe POD");
+        args_exact "ptr_from_addr" 2 args;
+        let a=expression ~explc ~bb ~expected:I64 env(List.hd args)in
+        let n=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in
+        require a.span I64 a.typ;require n.span I64 n.typ;
+        make(Ptr t)(Ir.Ptr_from_addr(t,a,n))
+    | Generic_call("ptr_from_addr",_,_)->invalid v.span "ptr_from_addr requires one explicit type argument"
+    | Call("ptr_from_addr",_)->invalid v.span "ptr_from_addr requires one explicit type argument"
     | Generic_call(("raw_free" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 1 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));make Unit(Ir.Raw_free(t,p))
     | Generic_call(("ptr_addr" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 1 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));make I64(Ir.Ptr_addr(t,p))
     | Call(("raw_alloc" as n),_)->invalid v.span(n^" requires an explicit type argument")
-    | Call(("raw_load"|"raw_store"|"raw_free"|"ptr_addr" as n),args)->expression ~explc ~bb env {v with node=Generic_call(n,[],args)}
+    | Call(("raw_load"|"raw_store"|"raw_free"|"ptr_addr"|"volatile_load"|"volatile_store" as n),args)->expression ~explc ~bb env {v with node=Generic_call(n,[],args)}
     | Call(("syscall0"|"syscall1"|"syscall2"|"syscall3"|"syscall4"|"syscall5"|"syscall6" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");let arity=Char.code n.[7]-Char.code '0' in args_exact n(arity+1)args;let xs=List.map(fun x->let x=expression ~explc ~bb ~expected:I64 env x in require x.span I64 x.typ;x)args in make I64(Ir.Syscall xs)
     | Call(("raw_alloc_int" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 1 args;let count=expression ~explc ~bb ~expected:I64 env(List.hd args)in require count.span I64 count.typ;make(Ptr I64)(Ir.Raw_alloc(I64,count))
     | Call(("raw_load_int" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 2 args;let p=expression ~explc ~bb ~expected:(Ptr I64) env(List.nth args 0)and i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require p.span (Ptr I64) p.typ;require i.span I64 i.typ;make I64(Ir.Raw_load(I64,p,i))
@@ -556,6 +621,11 @@ let check_internal ~entry (program : Ast.program) =
         let count=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require count.span I64 count.typ;make(Vec value.typ)(Ir.Call(n,[value;count]))
     | Call(("read_text"|"read_ints"|"read_floats" as n),args)->args_exact n 1 args;let path=expression ~explc ~bb ~expected:String ~transfer:Ir.Direct env(List.hd args)in require path.span String path.typ;
         make (if n="read_text" then String else if n="read_ints" then Vec I64 else Vec F64) (Ir.Call(n,[path]))
+    | Call(name,args) when numeric_runtime && List.mem_assoc name Numeric_math.intrinsics ->
+        let input,result=List.assoc name Numeric_math.intrinsics in
+        args_exact name 1 args;
+        let x=expression ~explc ~bb ~expected:input ~transfer:Ir.Direct env(List.hd args)in
+        require x.span input x.typ;make result(Ir.Call(Numeric_math.private_name name,[x]))
     | Call(("print"|"println" as n),args)->args_exact n 1 args;let x=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in
         if not(T.is_numeric x.typ)&&x.typ<>Bool&&x.typ<>String&&(match x.typ with Vec(I64|F64)->false|_->true)then invalid x.span (n^" accepts Int/Float and all numeric scalars, Bool, String, or Vec");make Unit(Ir.Call(n,[x]))
     | Call("len",args)->args_exact"len" 1 args;let x=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in(match x.typ with String|Vec _->make I64(Ir.Call("len",[x]))|Slice _->make I64(Ir.Slice_len x)|Ref(_, (String|Vec _))->let d=make(match x.typ with Ref(_,t)->t|_->assert false)(Ir.Deref x)in make I64(Ir.Call("len",[d]))|_->invalid x.span "len expects String, Vec, or Slice")
@@ -569,17 +639,25 @@ let check_internal ~entry (program : Ast.program) =
     | Call(("i8"|"u8"|"i16"|"u16"|"i32"|"u32"|"i64"|"u64"|"f32"|"f64" as n),args)->
         args_exact n 1 args;
         let target=match n with "i8"->I8|"u8"->U8|"i16"->I16|"u16"->U16|"i32"->I32|"u32"->U32|"i64"->I64|"u64"->U64|"f32"->F32|_->F64 in
-        (match (List.hd args).node with
-         | Int_lit digits when T.is_integer target->ignore(checked_integer_literal (List.hd args).span target ~negative:false digits)
+        (* Unary + is transparent for literal conversion context too, including
+           U64 literals above I64.max_int. Leave nonliteral arithmetic's type
+           inference unchanged. *)
+        let original=List.hd args in
+        let rec positive_literal (x:Ast.expr)=match x.node with
+          |Unary("+",x)->positive_literal x
+          |Int_lit _|Float_lit _|Unary("-",{node=Int_lit _;_})->Some x
+          |_->None in
+        let raw=Option.value ~default:original (positive_literal original)in
+        (match raw.node with
+         | Int_lit digits when T.is_integer target->ignore(checked_integer_literal raw.span target ~negative:false digits)
          | Unary("-",{node=Int_lit digits;span;_})when T.is_integer target->ignore(checked_integer_literal span target ~negative:true digits)
          | Float_lit f when T.is_integer target->
              let lo,hi=match target with I8->(-128.,128.)|U8->(0.,256.)|I16->(-32768.,32768.)|U16->(0.,65536.)
                |I32->(-2147483648.,2147483648.)|U32->(0.,4294967296.)|I64->(-9223372036854775808.,9223372036854775808.)
                |U64->(0.,18446744073709551616.)|_->assert false in
-             if classify_float f=FP_nan||classify_float f=FP_infinite||f<lo||f>=hi then invalid (List.hd args).span(n^" conversion is outside target range")
-         | Float_lit f when target=F32->ignore(rounded_float (List.hd args).span F32 f)
+             if classify_float f=FP_nan||classify_float f=FP_infinite||f<lo||f>=hi then invalid raw.span(n^" conversion is outside target range")
+         | Float_lit f when target=F32->ignore(rounded_float raw.span F32 f)
          | _->());
-        let raw=List.hd args in
         let x=match raw.node with
           |Int_lit _->expression ~explc ~bb ~expected:(if T.is_integer target then target else U64) ~transfer:Ir.Direct env raw
           |Unary("-",{node=Int_lit _;_})->expression ~explc ~bb ~expected:(if T.is_signed_int target then target else I64) ~transfer:Ir.Direct env raw
@@ -772,7 +850,7 @@ let rec uses_range_expr (e:expr) = match e.node with
   | Struct_lit("Range",_) -> true
   | Unary(_,x)|Borrow(_,x)|Field(x,_)|Tuple_index(x,_)|Try x -> uses_range_expr x
   | Binary(_,a,b)|Index(a,b) -> uses_range_expr a||uses_range_expr b
-  | Call(_,xs)|Generic_call(_,_,xs)|Intrinsic(_,_,xs)|Vec_lit xs|Tuple_lit xs -> List.exists uses_range_expr xs
+  | Call(_,xs)|Generic_call(_,_,xs)|Intrinsic(_,_,xs)|Inline_asm(_,_,xs)|Vec_lit xs|Tuple_lit xs -> List.exists uses_range_expr xs
   | Method(x,_,xs)->uses_range_expr x||List.exists uses_range_expr xs
   | Struct_lit(_,fs)|Generic_struct_lit(_,_,fs)->List.exists(fun(_,x,_)->uses_range_expr x)fs
   | Variant_lit(_,_,_,x)->Option.fold ~none:false ~some:uses_range_expr x
@@ -806,9 +884,22 @@ let add_prelude program =
       enums=p.enums@program.enums;
       functions=(if range then p.functions@program.functions else program.functions)}
 
+let numeric_library = lazy(
+  let saved=Hashtbl.copy layout_table in
+  Fun.protect ~finally:(fun()->Hashtbl.clear layout_table;Hashtbl.iter(Hashtbl.add layout_table)saved)
+    (fun()->check_internal ~numeric_runtime:true ~entry:"xmath_entry"
+      (Parser.parse ~file:"<numeric runtime>" Numeric_math.source)))
+
 let finish = function
   | Error d->Error d
-  | Ok typed->try Ok(Semantic_analysis.check(Semantic_lower.lower typed))with Semantic_ir.Invalid(span,message)->Error{span;message;notes=[];help=None}
+  | Ok typed->try
+      let lowered=Semantic_lower.lower typed in
+      let lowered=if Numeric_math.roots lowered=[] then lowered else
+        match Lazy.force numeric_library with
+        |Error d->raise(Invalid d)
+        |Ok library->Numeric_math.link lowered (Semantic_lower.lower library)in
+      Ok(Semantic_analysis.check lowered)
+    with Semantic_ir.Invalid(span,message)->Error{span;message;notes=[];help=None}
     |Semantic_analysis.Diagnostic(span,message,notes)->Error{span;message;notes;help=None}
 
 let validate_tests program = List.iter(fun(f:func)->if f.is_test &&
@@ -829,7 +920,7 @@ let check_project ?(entry_function="main") ~(entry_module:string) (programs : As
   let builtins = ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";
     "panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";
     "read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";
-    "raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";
+    "raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";
     "syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6";
     "box";"i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"] in
   let module_name p = match p.module_decl with Some(n,_)->n | None->"$entry" in
@@ -875,6 +966,7 @@ let check_project ?(entry_function="main") ~(entry_module:string) (programs : As
     | Generic_call(n,ts,xs)->let n=call_name module_ imports e.span n in
         let ts=List.map(map_type module_ imports e.span)ts in
         (match Core_modules.intrinsic n with Some kind->Intrinsic(kind,ts,List.map m xs)|None->Generic_call(n,ts,List.map m xs))
+    | Inline_asm(spec,t,xs)->Inline_asm({spec with output_types=List.map(map_type module_ imports e.span)spec.output_types},map_type module_ imports e.span t,List.map m xs)
     | Intrinsic(kind,ts,xs)->Intrinsic(kind,List.map(map_type module_ imports e.span)ts,List.map m xs)
     | Vec_lit xs->Vec_lit(List.map m xs)|Index(a,b)->Index(m a,m b)
     | Tuple_lit xs->Tuple_lit(List.map m xs)

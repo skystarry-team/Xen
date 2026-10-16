@@ -118,5 +118,31 @@ let test_non_ssa () =
   scopes.(header.scope)<-{scopes.(header.scope)with declarations=scopes.(header.scope).declarations@[v.id]};
   let previous=check {f with blocks;locals;scopes}in let q,r=Semantic_opt.optimize previous in
   expect(r.loops=[] && execute previous=execute q)"use-before-definition temporary was hoisted"
-let ()=test_scopes();test_licm();test_boundaries();test_reentry();test_non_ssa();
+let test_low_level_effect_order () =
+  let source="#global[bb]\nfn main(){let p=raw_alloc<Int>(1);#scope[opt]{"^
+    "volatile_store(p,0,42);memory_fence();let seen=volatile_load(p,0);"^
+    "atomic_store(p,0,42);atomic_load(p,0);extern_call<I32>(\"libc.so.6\",\"abs\",i32(-42));"^
+    "let n=arg_count()+2;let mut i=0;let mut sum=0;while i<3{"^
+    "let w=n*n;cpu_relax();memory_fence();atomic_fetch_add(p,0,1);sum=sum+w;i=i+1;}"^
+    "assert(seen==42);println(sum);raw_free(p);}}"in
+  let p=compile source in
+  let check p =
+    let f=function_named p "main"in
+    let events (b:block)=List.filter_map(fun(op:operation)->match op.node with
+      |Eval(_,Volatile_store _)->Some "store"|Eval(_,Volatile_load _)->Some "load"
+      |Eval(_,Cpu_relax)->Some "hint"|Eval(_,Memory_fence)->Some "fence"
+      |Eval(_,Atomic(k,_,_,_,_))->Some(Atomic_contract.name k)
+      |Eval(_,Foreign_call _)->Some "extern"|_->None)b.operations in
+    let rec reaches seen target id = id=target ||
+      (not(List.mem id seen) && List.exists(reaches(id::seen)target)(successors f.blocks.(id).terminator))in
+    let cyclic (b:block)=List.exists(reaches[]b.id)(successors b.terminator)in
+    let outside=Array.to_list f.blocks |> List.filter(fun b->not(cyclic b)) |> List.concat_map events
+    and inside=Array.to_list f.blocks |> List.filter cyclic |> List.concat_map events in
+    expect(outside=["store";"fence";"load";"atomic_store";"atomic_load";"extern"])"memory effects crossed a fence or foreign call";
+    expect(inside=["hint";"fence";"atomic_fetch_add"])"CPU hint/fence/atomic removed, reordered or moved out of loop"in
+  check p;
+  List.iter(fun scope_only->let q,_=Semantic_opt.optimize ~scope_only p in
+    check q;expect(execute p=execute q)"low-level effects changed execution") [true;false]
+
+let ()=test_scopes();test_licm();test_boundaries();test_reentry();test_non_ssa();test_low_level_effect_order();
   print_endline "Scoped AOT, LICM, effects, lifetimes and CFG tests passed"

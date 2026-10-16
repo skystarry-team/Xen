@@ -395,7 +395,7 @@ let test_feedback_patch () =
     let diagnostic = check_error source in
     if not (contains diagnostic.message needle) then
       fail "new checker rejection differs for %S: %s" source diagnostic.message)
-    [ ("fn main(){println(1.0%1.0);}", "expected Int");
+    [ ("fn main(){println(1.0%true);}", "expected Float");
       ("fn main(){println(\"a\"-\"b\");}", "arithmetic expects");
       ("fn main(){println(\"a\"*\"b\");}", "arithmetic expects");
       ("fn main(){println(\"a\"/\"b\");}", "arithmetic expects");

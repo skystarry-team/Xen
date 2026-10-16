@@ -3,7 +3,7 @@ Version: {version}
 Section: devel
 Priority: optional
 Architecture: {architecture}
-Maintainer: Xen maintainers <skystarry-team@users.noreply.github.com>
+Maintainer: Xen maintainers <contact@xen.skystarry.xyz>
 Installed-Size: {installed_size}
 {depends}Homepage: https://github.com/skystarry-team/Xen
 Description: Xen programming language compiler for Linux

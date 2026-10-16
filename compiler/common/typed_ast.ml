@@ -13,6 +13,13 @@ and expr_node =
   | Box_new of expr | Box_take of expr | Box_borrow of bool * expr
   | Raw_alloc of typ * expr | Raw_load of typ * expr * expr
   | Raw_store of typ * expr * expr * expr | Raw_free of typ * expr
+  | Volatile_load of typ * expr * expr
+  | Volatile_store of typ * expr * expr * expr
+  | Ptr_from_addr of typ * expr * expr
+  | Inline_asm of asm_spec * expr list
+  | Cpu_relax | Memory_fence
+  | Foreign_call of foreign_symbol * expr list
+  | Atomic of atomic_kind * typ * memory_order * memory_order option * expr list
   | Ptr_addr of typ * expr | Ptr_len of expr | Syscall of expr list
   | Vec_lit of expr list | Index of expr * expr
   | Vec_len of expr | Vec_get of expr * expr

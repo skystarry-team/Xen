@@ -9,6 +9,22 @@ type typ =
   | Function of typ list * typ
 type mode = Explc | Opt | Bb
 type intrinsic = Size_of | Align_of | Exchange
+type foreign_symbol = { library : string; symbol : string }
+type memory_order = Relaxed | Acquire | Release | Acq_rel | Seq_cst
+type atomic_kind = Atomic_load | Atomic_store | Atomic_exchange | Atomic_compare_exchange
+  | Atomic_fetch_add | Atomic_fetch_sub | Atomic_fetch_and | Atomic_fetch_or | Atomic_fetch_xor
+
+type asm_memory = Unknown_memory
+type asm_spec = {
+  template : string;
+  input_registers : string list;
+  (* Declaration order is also the tuple result order. *)
+  output_registers : (string * bool) list;
+  output_types : typ list;
+  clobbers : string list;
+  volatile : bool;
+  memory : asm_memory;
+}
 
 type expr = { node : expr_node; span : span }
 and expr_node =
@@ -22,6 +38,7 @@ and expr_node =
   | Call of string * expr list
   | Generic_call of string * typ list * expr list
   | Intrinsic of intrinsic * typ list * expr list
+  | Inline_asm of asm_spec * typ * expr list
   | Vec_lit of expr list
   | Index of expr * expr
   | Method of expr * string * expr list

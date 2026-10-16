@@ -31,3 +31,9 @@ let static_linux ~entry image =
   pad rodata_offset;Buffer.add_buffer out image.M.rodata;
   pad data_offset;Buffer.add_buffer out image.M.data;
   Bytes.of_string(Buffer.contents out)
+
+let dynamic_linux ~entry image =
+  let imports=List.map(fun(library,symbol,label)->let _,offset=Hashtbl.find image.M.labels label in library,symbol,offset)image.M.imports in
+  Xen_linux_elf.Dynamic_elf.executable ~aarch64:true ~entry ~imports
+    ~code_size:(Buffer.length image.M.code)~rodata:image.M.rodata ~data:image.M.data
+    ~encode:(fun ~code_address ~rodata_address ~data_address->M.encode ~code_address ~rodata_address ~data_address image)

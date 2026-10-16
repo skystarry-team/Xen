@@ -28,7 +28,15 @@ let start m =
   M.load m 0 31 0;M.offset m 0 0 (-1);M.address m 15 "argc";M.store m 0 15 0;
   M.offset m 0 31 16;M.address m 15 "argv";M.store m 0 15 0;
   M.offset m 31 31 (-16);M.offset m 8 31 0
-let executable m = Elf_writer.static_linux ~entry:0 m
+let foreign_start m ~main =
+  (* The loader passes rtld_fini in x0. Preserve it before Xen's argc setup. *)
+  M.mov m 20 0;start m;
+  let startup=M.import m "libc.so.6" "__libc_start_main"in
+  M.mov m 5 20;M.address m 0 main;M.load m 1 31 16;M.offset m 2 31 24;
+  M.int m 3 0;M.int m 4 0;M.offset m 6 31 16;
+  M.address m 16 startup;M.load m 16 16 0;M.word m 0xd63f0200;M.word m 0xd4200000;
+  Ok()
+let executable m = if m.M.imports=[]then Elf_writer.static_linux ~entry:0 m else Elf_writer.dynamic_linux ~entry:0 m
 let emit m =
   Xen_arm64.Output_runtime.emit m ~write ~exit;
   Xen_arm64.Float_runtime.emit m;

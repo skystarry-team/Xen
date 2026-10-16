@@ -67,7 +67,7 @@ AArch64 호스트에서는 `x86_64` 항목을 설정합니다. prefix는 실행 
 
 ```sh
 make package
-make package VERSION=0.1.0-demo.2
+make package VERSION=0.1.0-demo.3
 make package-build
 make package PACKAGE_ARCHS=x86_64
 make package PACKAGE_ARCHS=aarch64
@@ -123,7 +123,7 @@ sudo apt remove xen-lang
 ```
 
 데비안 버전은 숫자로 시작해야 합니다. 접미사 구분자 `_`와 `-`를 `~`로 바꾸고
-패키징 리비전 `-1`을 붙입니다. `0.1.0-demo.2`는 `0.1.0~demo.2-1`이 되어
+패키징 리비전 `-1`을 붙입니다. `0.1.0-demo.3`는 `0.1.0~demo.3-1`이 되어
 정식 버전 `0.1.0-1`보다 앞에 정렬됩니다. 기존 `0.1.0_1-demo` 형식은
 `0.1.0~1~demo-1`로 변환합니다. 컴파일러 출력과 번들 `VERSION`은 원본을
 유지합니다. 라이브러리 의존성은 실제 ELF에서 `dpkg-shlibdeps`로 산출하므로,
@@ -180,7 +180,7 @@ git push origin "$XEN_RELEASE_TAG"
 ## 소스 배포
 
 ```sh
-make source-package VERSION=0.1.0-demo.2
+make source-package VERSION=0.1.0-demo.3
 ```
 
 `xen-<version>-source.tar.gz`에는 컴파일러·stdlib 소스, 빌드 파일, `packaging/`,

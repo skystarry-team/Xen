@@ -17,17 +17,35 @@ the generated/metamorphic checks. It does not run benchmarks.
 | Location | Purpose |
 | --- | --- |
 | `native_core_test.ml` | Language execution, ownership, cleanup and diagnostics |
+| `x86_64_runtime_test.ml` | CPU-only lowering with an injected runtime, service routing, static/C entry, relocation and compilation-state isolation |
+| `operators_test.ml`, `integration/operators_test.py` | Operator precedence and nested generic closers, IR contracts, integer-width bitwise folding, checked shifts, arithmetic, evaluation order and logical short circuit on both CPUs and optimizer levels |
+| `integration/power_remainder_test.py` | Real power and exact floating remainder, independent ULP/bit oracles, subnormal/overflow/IEEE cases, static linking and preserved user recursion depth on both CPUs and optimizer levels |
+| `integration/x86_64_runtime_test.py`, `x86_64_runtime_fixture.ml` | Relocatable float formatting/numeric parsing, long inline services, deterministic failures and complete mapping/fd cleanup |
 | `semantic_ir_test.ml` | Verifier mutations and CFG metamorphic checks |
 | `semantic_opt_test.ml` | Scalar optimization and bounded fusion |
 | `scoped_opt_test.ml` | Scoped AOT, LICM, effects and storage lifetimes |
 | `aot_fusion_test.ml` | Counted scalar loop fusion, prefix invalidation and fresh backward liveness |
 | `integration/` | CLI, relocation/archive, stdlib, native test, scoped optimization regressions |
+| `inline_asm_test.ml`, `integration/low_level_test.py` | bb pointer/volatile/asm/hint/fence contracts, independent encodings, widths, immediate and displacement limits, effect order, both targets and optimizer levels |
+| `integration/low_level_extended_test.py`, `fixtures/ffi/` | asm aliases/partial initialization/multiple outputs/flags, integer atomic widths/order/bounds/wrap, C ABI and ELF loading/lifecycle, actual thread contention and release/acquire in both targets and optimizer levels |
 | `property/` | Whole-program generation, independent oracles and source metamorphisms |
 
 Focused commands:
 
+The extended low-level suite builds a native C fixture with gcc and an AArch64
+fixture with GNU cross binutils. Cross dynamic execution uses qemu-aarch64 and
+the installed AArch64 glibc loader/libraries (`/usr/lib/aarch64-linux-gnu`).
+Missing fixture/execution prerequisites are reported as skips; Xen compilation
+itself has no dependency on these tools or target libraries.
+The x86-64 runtime suite uses qemu-x86_64 for mapping/fd traces and native
+x86-64 or QEMU for execution. Fault injection leaves allocation-error rdi
+nonzero and lengthens inline services to check the CPU's service ABI and
+relocations independently of Linux's incidental instruction layout.
+
 ```sh
 dune exec tests/native_core_test.exe
+dune exec tests/x86_64_runtime_test.exe
+python3 tests/integration/x86_64_runtime_test.py
 dune exec tests/semantic_ir_test.exe
 python3 tests/integration/toolchain_test.py
 python3 tests/integration/scoped_opt_test.py

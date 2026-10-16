@@ -165,6 +165,46 @@ let test_verifier () =
   let raw_operation=lower "#![bb]\nfn main(){let p=raw_alloc_int(1);raw_free_int(p);}"in
   check_invalid "raw operation without bb"(map_functions(fun f->{f with mode_set=[];
     scopes=Array.map(fun(s:scope)->{s with mode_set=[]})f.scopes}))raw_operation;
+  let low_level=lower "fn main(){#scope[bb]{let p=ptr_from_addr<Int>(0,0);volatile_load(p,0);volatile_store(p,0,7);asm<Int>(\"mov rax, 7\",out(\"rax\"));}}"in
+  check_invalid "low-level operation without bb"(map_functions(fun f->{f with
+    scopes=Array.map(fun(s:scope)->{s with mode_set=[]})f.scopes}))low_level;
+  check_invalid "volatile aggregate"(nodes(function Eval(v,Volatile_load(_,p,i))->
+    Eval(v,Volatile_load(Bool,p,i))|n->n))low_level;
+  check_invalid "non-volatile asm"(nodes(function Eval(v,Inline_asm(spec,xs))->
+    Eval(v,Inline_asm({spec with volatile=false},xs))|n->n))low_level;
+  check_invalid "asm input arity"(nodes(function Eval(v,Inline_asm(spec,xs))->
+    Eval(v,Inline_asm({spec with input_registers=["rax"]},xs))|n->n))low_level;
+  check_invalid "asm result contract"(nodes(function Eval(v,Inline_asm(spec,xs))->
+    Eval(v,Inline_asm({spec with output_registers=[]},xs))|n->n))low_level;
+  let tuple_asm=lower "fn main(){#scope[bb]{let pair=asm<U8,U32>(\"mov al,1;mov ecx,2\",out(\"al\"),out(\"ecx\"));}}"in
+  check_invalid "asm tuple output layout"(nodes(function Eval(v,Inline_asm(spec,xs))->
+    Eval(v,Inline_asm({spec with output_types=[U8;U64]},xs))|n->n))tuple_asm;
+  let atomic=lower "fn main(){#scope[bb]{let p=raw_alloc<Int>(1);atomic_store(p,0,1);atomic_load(p,0);}}"in
+  let atomic_only=lower "#![bb]\nfn fetch(p:Ptr<Int>){atomic_load(p,0);}fn main(){}"in
+  check_invalid "atomic without bb"(map_functions(fun f->{f with mode_set=[];
+    scopes=Array.map(fun(s:scope)->{s with mode_set=[]})f.scopes}))atomic_only;
+  check_invalid "atomic element type"(nodes(function Eval(v,Atomic(k,_,s,f,xs))->
+    Eval(v,Atomic(k,F32,s,f,xs))|n->n))atomic;
+  check_invalid "atomic arity"(nodes(function Eval(v,Atomic(k,t,s,f,_))->
+    Eval(v,Atomic(k,t,s,f,[]))|n->n))atomic;
+  check_invalid "atomic store order"(nodes(function Eval(v,Atomic(Atomic_store,t,_,f,xs))->
+    Eval(v,Atomic(Atomic_store,t,Acquire,f,xs))|n->n))atomic;
+  let foreign=lower "fn main(){#scope[bb]{extern_call<I32>(\"libc.so.6\",\"abs\",i32(-1));extern_call<Int>(\"libc.so.6\",\"labs\",-1);}}"in
+  check_invalid "foreign call without bb"(map_functions(fun f->{f with
+    scopes=Array.map(fun(s:scope)->{s with mode_set=[]})f.scopes}))foreign;
+  check_invalid "foreign library metadata"(nodes(function Eval(v,Foreign_call(symbol,xs))->
+    Eval(v,Foreign_call({symbol with library=""},xs))|n->n))foreign;
+  check_invalid "conflicting foreign signature"(nodes(function Eval(v,Foreign_call(symbol,xs))when symbol.symbol="labs"->
+    Eval(v,Foreign_call({symbol with symbol="abs"},xs))|n->n))foreign;
+  List.iter(fun(name,rvalue)->
+    let p=lower("fn main(){#scope[bb]{"^name^"();}}")in
+    check_invalid (name^" without bb")(map_functions(fun f->{f with
+      scopes=Array.map(fun(s:scope)->{s with mode_set=[]})f.scopes}))p;
+    (* Substitute into an I64-producing operation to forge a non-Unit result. *)
+    let scalar=lower "fn main(){#scope[bb]{let n=42;println(n);}}"in
+    check_invalid (name^" result contract")(nodes(function
+      Eval(v,Int_lit _)->Eval(v,rvalue)|n->n))scalar)
+    ["cpu_relax",Cpu_relax;"memory_fence",Memory_fence];
   let numeric=lower "fn main(){let xs=repeat(1,2);println(xs);}"in
   check_invalid "repeat arity"(nodes(function Eval(v,Call("repeat",xs))->Eval(v,Call("repeat",List.tl xs))|n->n))numeric;
   let strings=lower "fn main(){let text=\"x\";let n=1;let xs=[text];}"in

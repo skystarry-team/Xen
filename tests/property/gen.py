@@ -29,7 +29,7 @@ from oracle import (
 )
 
 INT_NAMES = [n for n in INTEGER_TYPES if n != "Int"]
-ARITH = ["+", "-", "*"]
+INTEGER_BINARY = ["+", "-", "*", "&", "|", "^"]
 
 
 class RNG:
@@ -150,10 +150,16 @@ def emit_numeric(ctx: Ctx) -> None:
     # Known runtime crash: narrow int `let r=a+0` + later empty Vec + named type.
     if b == 0 and ty not in ("I64", "U64", "Int") and ctx.has_named_type:
         b = 1 if limits(ty)[1] >= 1 else limits(ty)[0]
-    op = rng.choice(ARITH)
-    result = wrap_integer({"+": a + b, "-": a - b, "*": a * b}[op], ty)
+    op = rng.choice(INTEGER_BINARY)
+    result = wrap_integer({"+": a + b, "-": a - b, "*": a * b,
+                           "&": a & b, "|": a | b, "^": a ^ b}[op], ty)
     ctx.stmts.append(f"let a:{ty}={a};let b:{ty}={b};let r:{ty}=a{op}b;println(r);")
     ctx.expected.append(str(result))
+    if rng.boolean(0.35):
+        bits, _ = INTEGER_TYPES[ty]
+        count = rng.randint(0, bits - 1)
+        ctx.stmts.append(f"println(~a);println(+a);println(a<<{count});println(a>>{count});println(a**{count});")
+        ctx.expected.extend(str(wrap_integer(n, ty)) for n in (~a, a, a << count, a >> count, pow(a, count, 1 << bits)))
     if rng.boolean(0.55):
         div_b = b if b != 0 else (1 if limits(ty)[1] >= 1 else limits(ty)[0])
         lo, _ = limits(ty)
@@ -199,6 +205,9 @@ def emit_float(ctx: Ctx) -> None:
         f"let fa:{ty}={ctor}({lit(left)});let fb:{ty}={ctor}({lit(right)});println(fa{op}fb);"
     )
     ctx.expected.append(repr(result))
+    if rng.boolean(0.3):
+        ctx.stmts.append(f"println({ctor}(9.0)**{ctor}(0.5));println({ctor}(-5.5)%{ctor}(2.0));")
+        ctx.expected.extend(["3.0", "-1.5"])
 
 
 def emit_bool_logic(ctx: Ctx) -> None:
@@ -994,7 +1003,8 @@ TOKENS = [
     "Int", "String", "Bool", "Vec", "Option", "Result", "true", "false", "_",
     "x", "value", "0", "1", "-1", '"x"', "(", ")", "{", "}", "[", "]",
     "<", ">", ":", ";", ",", ".", "=", "=>", "+", "-", "*", "/", "%",
-    "&", "#![explc]", "#![bb]", "#global[bb]", "#global[explc]",
+    "&", "|", "^", "~", "<<", ">>", "!", "&&", "||", "**",
+    "#![explc]", "#![bb]", "#global[bb]", "#global[explc]",
     "raw_alloc", "open_read", "as_slice", "Option.Some", "Result.Ok",
 ]
 

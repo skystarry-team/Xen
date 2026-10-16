@@ -38,3 +38,9 @@ let static_x86_64 ~entry image =
   while M.position output < data_offset do M.u8 output 0 done;
   Buffer.add_buffer output.buffer image.M.data;
   Bytes.of_string (Buffer.contents output.buffer)
+
+let dynamic_x86_64 ~entry image =
+  let imports=List.map(fun(library,symbol,label)->library,symbol,Hashtbl.find image.M.data_labels label)image.M.imports in
+  Xen_linux_elf.Dynamic_elf.executable ~aarch64:false ~entry ~imports
+    ~code_size:(Buffer.length image.M.buffer)~rodata:image.M.rodata ~data:image.M.data
+    ~encode:(fun ~code_address ~rodata_address ~data_address->M.encode ~code_address ~rodata_address ~data_address image)

@@ -11,6 +11,11 @@
  (libraries unix xen_common))
 
 (test
+ (name operators_test)
+ (modules operators_test)
+ (libraries unix xen_common))
+
+(test
  (name semantic_opt_test)
  (modules semantic_opt_test)
  (libraries unix xen_compiler xen_linux_x86_64))
@@ -35,10 +40,25 @@
  (modules arm64_machine_test)
  (libraries xen_arm64))
 
+(test
+ (name x86_64_runtime_test)
+ (modules x86_64_runtime_test)
+ (libraries xen_x86_64))
+
+(test
+ (name inline_asm_test)
+ (modules inline_asm_test)
+ (libraries xen_common xen_x86_64 xen_arm64))
+
 (executable
  (name arm64_heap_fixture)
  (modules arm64_heap_fixture)
  (libraries xen_arm64 xen_linux_arm64))
+
+(executable
+ (name x86_64_runtime_fixture)
+ (modules x86_64_runtime_fixture)
+ (libraries xen_x86_64 xen_linux_x86_64))
 
 (test
  (name mach_o_test)

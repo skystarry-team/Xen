@@ -6,9 +6,10 @@ qemu-aarch64 ./app hello
 python3 scripts/test.py --suite arm64
 ```
 
-`arm64-linux` is an alias. The compiler emits AArch64 machine code and a static,
+`arm64-linux` is an alias. The compiler emits AArch64 machine code and a
 little-endian Linux ELF64 executable directly; no assembler, linker, libc, cross
-toolchain or emulator is required to **build** it. Execution requires Linux ARM64
+toolchain or emulator is required to **build** it. External C calls select dynamic
+glibc ELF; other programs remain static. Execution requires Linux ARM64
 or an emulator such as QEMU. `run` and `test` use the host kernel and never launch
 QEMU automatically. Their process-launch errors identify the selected target.
 The CLI defaults to the compiler's build architecture on Linux: `x86_64-linux`
@@ -50,7 +51,8 @@ validates language semantics; it does not certify support by this backend.
 
 ## Internal calling convention and storage
 
-This is a Xen-only convention, not a C FFI ABI. x0..x5 hold pointers to argument
+The internal Xen convention is separate from `extern_call`'s scalar AAPCS64 ABI.
+For internal calls, x0..x5 hold pointers to argument
 values. The callee copies arguments into its frame before evaluating its body.
 x8 points to caller-provided result storage for every return type. Aggregate and
 String returns therefore never point into a returned stack frame. x29/x30 form
@@ -71,6 +73,15 @@ follow the existing x86-64 range checks: float-to-integer checks the input in
 `[min, max+1)` before truncating toward zero; F64-to-F32 rejects NaN, infinities
 and magnitudes above the largest finite F32. F32-to-F64 and same-type
 conversions preserve nonfinite values; narrowing may underflow to signed zero.
+
+`**` supports integer and real exponents. Integer power uses wrapping
+exponentiation by squaring and rejects negative exponents. Floating power and
+`%` use the portable checked-IR routines in `common/numeric_math.ml`, also used
+by x86-64. Only bit reinterpretation, sqrt and final F32 rounding need CPU
+primitives. Helpers remain static, are linked on demand, and do not consume
+the user's logical call-depth budget. Floating remainder is exact, preserves
+the dividend's sign, and follows IEEE fmod cases. F32 power widens to binary64
+and rounds the binary64 result to F32.
 
 `float_runtime.ml` emits a libc-free decimal formatter. It computes an exact
 decimal digit array from the binary64 significand and exponent, rounds to 17
