@@ -1,0 +1,51 @@
+name: Windows foundation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.5.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Dune
+        run: opam install dune.3.24.2
+      - name: Record native compiler configuration
+        shell: pwsh
+        run: |
+          opam exec -- ocamlc -config | Tee-Object ocaml-config.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $config = Get-Content ocaml-config.txt -Raw
+          if ($config -notmatch '(?m)^system: (mingw64|win64)\s*$') { throw "Expected native Windows OCaml" }
+          if ($config -notmatch '(?m)^architecture: amd64\s*$') { throw "Expected x64 OCaml" }
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Build host and PE fixtures
+        run: opam exec -- dune build @release tests/windows_fixture.exe tests/windows_runner_fixture.exe
+      - name: Inspect native compiler imports
+        shell: pwsh
+        run: |
+          llvm-readobj --file-headers --coff-imports compiler/dist/xen.exe | Tee-Object xen-pe.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify host portability and execute PE fixtures
+        run: opam exec -- python scripts/test.py --suite windows
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-foundation-validation
+          path: |
+            ocaml-config.txt
+            xen-pe.txt
+          if-no-files-found: warn

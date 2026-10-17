@@ -40,6 +40,20 @@ let () =
   List.iter(fun (architecture,expected)->
     expect (Backend.host_target ~architecture ~system:"linux"=Ok (parsed expected)) "host target mismatch")
     ["amd64","x86_64-linux";"arm64","aarch64-linux"];
+  List.iter(fun system->
+    expect(Backend.host_target ~architecture:"amd64" ~system=Ok windows)
+      "native Windows host was not recognized") ["mingw64";"win64"];
+  List.iter(fun(windows,root,path,expected)->
+    expect(Project_loader.relative_entry ~windows ~root path=expected)"project root path mismatch") [
+    false,"/","/app.xen",Some "app.xen";
+    false,"/project","/project/lib/test.xen",Some "lib/test.xen";
+    false,"/project","/project-other/app.xen",None;
+    false,"/Project","/project/app.xen",None;
+    true,"C:\\","c:\\공백 경로\\app.xen",Some "공백 경로/app.xen";
+    true,"C:\\Project","c:/project/lib/app.xen",Some "lib/app.xen";
+    true,"C:\\Project","C:\\Project-other\\app.xen",None;
+    true,"C:\\Project","D:\\Project\\app.xen",None;
+    true,"\\\\server\\share\\","\\\\SERVER\\share\\lib\\app.xen",Some "lib/app.xen"];
   expect (Result.is_error(Backend.host_target ~architecture:"other" ~system:"linux")) "unknown host accepted";
   List.iter(fun(architecture,expected)->
     expect(Backend.host_target ~architecture ~system:"macosx"=Ok(parsed expected)) "macOS host target mismatch")

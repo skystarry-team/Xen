@@ -26,7 +26,7 @@ def prototype() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("all", "arm64", "host", "macos-prototype", "quickcheck", "semantic", "packaging"), default="all")
+    parser.add_argument("--suite", choices=("all", "arm64", "host", "windows", "macos-prototype", "quickcheck", "semantic", "packaging"), default="all")
     parser.add_argument("--mode", default="all")
     parser.add_argument("--depth", default="standard")
     parser.add_argument("--seed")
@@ -35,6 +35,11 @@ def main() -> None:
         run("dune", "build", "@release")
     if args.suite == "macos-prototype":
         prototype()
+    elif args.suite == "windows":
+        run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe")
+        run("dune", "exec", "tests/pe_writer_test.exe")
+        run("dune", "exec", "tests/backend_contract_test.exe")
+        integration("windows", *(["--require-native"] if os.name == "nt" else []))
     elif args.suite == "arm64":
         run("dune", "exec", "tests/arm64_machine_test.exe")
         integration("arm64", XEN_REQUIRE_ARM64="1")
@@ -48,6 +53,8 @@ def main() -> None:
     elif args.suite in ("all", "quickcheck", "semantic"):
         if args.suite == "all":
             run("dune", "runtest")
+            run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe")
+            integration("windows")
             run("dune", "build", "tests/mach_o_fixture.exe", "tests/darwin_fixture.exe", "tests/darwin_abi_fixture.exe")
             integration("mach_o")
             run("dune", "exec", "tests/native_core_test.exe", XEN_TEST_OPT="basic")

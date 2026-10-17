@@ -2,7 +2,9 @@
 open Ast
 
 let location span = Printf.sprintf "%s:%d:%d" span.file span.line span.column
-let fail message = prerr_endline message; exit 1
+exception Cli_error of string
+exception Cli_exit of int
+let fail message = raise(Cli_error message)
 
 let print_diagnostic (diagnostic:Checker.diagnostic) =
   prerr_endline (location diagnostic.span ^ ": error: " ^ diagnostic.message);
@@ -25,13 +27,13 @@ let compile ~target path =
   match checked with
   | Error diagnostic ->
       print_diagnostic diagnostic;
-      exit 1
+      raise(Cli_exit 1)
   | Ok program -> program
 
 let parent_directory path =
   let directory = Filename.dirname path in
   let rec create current =
-    if current <> "." && current <> "/" && not (Sys.file_exists current) then
+    if current <> Filename.dirname current && not (Sys.file_exists current) then
       (create (Filename.dirname current); Unix.mkdir current 0o755)
   in create directory
 
@@ -39,7 +41,7 @@ let optimize ?cache opt report checked =
   try Semantic_opt.apply ?cache ~report opt checked with
   | Semantic_ir.Invalid(span,message)->fail(location span ^ ": optimization error: " ^ message)
   | Semantic_analysis.Diagnostic(span,message,notes)->
-      print_diagnostic {span;message="optimization error: "^message;notes;help=None};exit 1
+      print_diagnostic {span;message="optimization error: "^message;notes;help=None};raise(Cli_exit 1)
 
 let build ?cache (module B : Backend_intf.S) opt report source output =
   match B.generate (optimize ?cache opt report (compile ~target:B.description.target source)) with
@@ -50,7 +52,7 @@ let build ?cache (module B : Backend_intf.S) opt report source output =
 
 let run ?cache backend opt report source arguments =
   let temporary = Filename.temp_file "xen-run-" ".exe" in
-  Fun.protect ~finally:(fun () -> try Sys.remove temporary with Sys_error _ -> ()) (fun () ->
+  let status=Fun.protect ~finally:(fun () -> try Sys.remove temporary with Sys_error _ -> ()) (fun () ->
     build ?cache backend opt report source temporary;
     let argv = Array.of_list (temporary :: arguments) in
     let pid = try Unix.create_process temporary argv Unix.stdin Unix.stdout Unix.stderr with
@@ -58,10 +60,11 @@ let run ?cache backend opt report source arguments =
           let module B = (val backend : Backend_intf.S) in
           fail ("cannot execute target '" ^ Target.to_string B.description.target ^
             "' on this host: " ^ Unix.error_message error) in
-    match snd (Unix.waitpid [] pid) with
+    snd (Unix.waitpid [] pid))in
+    match status with
     | Unix.WEXITED status -> exit status
     | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-        Printf.eprintf "program terminated by signal %d\n" signal; exit (128 + signal))
+        Printf.eprintf "program terminated by signal %d\n" signal; exit (128 + signal)
 
 let usage () =
   prerr_endline "Usage:\n  xen version | --version\n  xen check <file.xen> [--target=<architecture>-<os>]\n  xen build <file.xen> [-o output] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>]\n  xen run <file.xen> [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>] [-- program-args...]\n  xen test [file.xen | directory | std.module] [--filter substring] [--target=<architecture>-<os>] [--opt=off|basic] [--opt-report] [--opt-cache=<directory>]";
@@ -121,7 +124,7 @@ let prefix_cache directory (module B:Backend_intf.S) = Option.map(fun directory-
   Semantic_prefix_cache.create ~directory
     ~identity:(Semantic_prefix_cache.compiler_identity()^":"^Target.to_string B.description.target)())directory
 
-let () =
+let main () =
   match Array.to_list Sys.argv with
   | [_; ("version" | "--version")] -> Printf.printf "xen %s\n" Build_version.current
   | _ :: "check" :: options ->
@@ -160,3 +163,7 @@ let () =
       Printf.printf "%d passed; %d failed\n" !passed !failed;
       exit(if !failed=0 then 0 else 1)
   | _ -> usage ()
+
+let () = try main () with
+  |Cli_error message->prerr_endline message;exit 1
+  |Cli_exit status->exit status

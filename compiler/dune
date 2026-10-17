@@ -24,9 +24,18 @@
 (rule
  (alias release)
  (targets xen)
+ (enabled_if (<> %{os_type} Win32))
  (deps main.exe)
  (mode (promote (into dist) (until-clean)))
  (action (copy main.exe xen)))
+
+(rule
+ (alias release)
+ (targets xen.exe)
+ (enabled_if (= %{os_type} Win32))
+ (deps main.exe)
+ (mode (promote (into dist) (until-clean)))
+ (action (copy main.exe xen.exe)))
 
 (rule
  (targets host_config.ml)

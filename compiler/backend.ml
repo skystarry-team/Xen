@@ -25,6 +25,7 @@ let host_target ~architecture ~system =
     |"amd64"|"x86_64"->Some Target.X86_64|_->None in
   let operating_system=match system with
     |"linux"->Some Target.Linux|"macosx"|"macos"|"darwin"->Some Target.MacOS
+    |"mingw64"|"win64"->Some Target.Windows
     |_->None in
   match cpu, operating_system with
   | Some architecture, Some operating_system -> Ok {Target.architecture;operating_system}

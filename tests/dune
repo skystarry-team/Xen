@@ -36,6 +36,21 @@
  (libraries unix xen_compiler))
 
 (test
+ (name pe_writer_test)
+ (modules pe_writer_test)
+ (libraries xen_windows))
+
+(executable
+ (name windows_fixture)
+ (modules windows_fixture)
+ (libraries xen_windows xen_x86_64))
+
+(executable
+ (name windows_runner_fixture)
+ (modules windows_runner_fixture)
+ (libraries unix xen_compiler))
+
+(test
  (name arm64_machine_test)
  (modules arm64_machine_test)
  (libraries xen_arm64))

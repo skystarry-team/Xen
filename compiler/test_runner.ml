@@ -66,16 +66,17 @@ let execute ?target ~write executable =
   Fun.protect ~finally:(fun()->List.iter(fun path->try Sys.remove path with Sys_error _->())
       [binary;stdout_path;stderr_path])(fun()->
     write binary executable;
-    let output=Unix.openfile stdout_path[Unix.O_WRONLY;Unix.O_TRUNC]0o600
-    and errors=Unix.openfile stderr_path[Unix.O_WRONLY;Unix.O_TRUNC]0o600
-    and input=Unix.openfile "/dev/null"[Unix.O_RDONLY]0 in
-    let pid=Fun.protect ~finally:(fun()->List.iter Unix.close[input;output;errors])(fun()->
+    let with_fd path flags f=let fd=Unix.openfile path flags 0o600 in
+      Fun.protect ~finally:(fun()->Unix.close fd)(fun()->f fd)in
+    let pid=with_fd stdout_path [Unix.O_WRONLY;Unix.O_TRUNC](fun output->
+      with_fd stderr_path [Unix.O_WRONLY;Unix.O_TRUNC](fun errors->
+      with_fd (if Sys.win32 then "NUL" else "/dev/null") [Unix.O_RDONLY](fun input->
       try Unix.create_process binary[|binary|]input output errors with
       |Unix.Unix_error(error,operation,path)->
           match target with
           |None->raise(Unix.Unix_error(error,operation,path))
           |Some target->raise(Sys_error("cannot execute target '"^Target.to_string target^
-              "' on this host: "^Unix.error_message error)))in
+              "' on this host: "^Unix.error_message error)))))in
     let status=snd(Unix.waitpid[]pid)in
     status,Project_loader.read_file stdout_path,Project_loader.read_file stderr_path)
 
