@@ -1,6 +1,6 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
 (* Generated runtime carries the additional MIT OR Apache-2.0 permission in LICENSE.
-   Internal Darwin AArch64 prototype, not a registered CLI execution target.
+   Darwin AArch64 runtime.
    BSD syscall number in x16, arguments x0..x5, svc #0x80, positive errno with
    carry on failure. Normalize to a negative errno for shared runtime services.
    Preserve x1..x5: Darwin returns a second result in x1, while the shared reader

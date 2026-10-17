@@ -1,0 +1,40 @@
+name: Apple Silicon native validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.5.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Dune
+        run: opam install dune.3.24.2
+      - name: Record native compiler configuration
+        run: |
+          opam exec -- ocamlc -config | tee ocaml-config.txt
+          grep -Eq '^system: macosx$' ocaml-config.txt
+          grep -Eq '^architecture: arm64$' ocaml-config.txt
+      - name: Build and validate Apple Silicon compiler, programs and package
+        run: opam exec -- python3 scripts/test.py --suite macos
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-aarch64-validation
+          path: |
+            ocaml-config.txt
+            dist/xen-*-macos-aarch64.tar.gz
+          if-no-files-found: warn

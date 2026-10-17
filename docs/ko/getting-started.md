@@ -4,7 +4,7 @@
 
 ## Xen 준비하기
 
-Linux 또는 Windows x86-64용 Xen이 필요합니다. [설치 안내](../compiler-build/ko/installation.md)를 따라 준비하세요. 배포본의 `bin` 디렉터리를 `PATH`에 추가하면 어디서든 `xen` 명령을 쓸 수 있습니다. 이 문서의 명령은 `xen`을 찾을 수 있다는 전제로 작성했습니다.
+Linux, Windows x86-64 또는 Apple Silicon macOS용 Xen이 필요합니다. [설치 안내](../compiler-build/ko/installation.md)를 따라 준비하세요. 배포본의 `bin` 디렉터리를 `PATH`에 추가하면 어디서든 `xen` 명령을 쓸 수 있습니다. 이 문서의 명령은 `xen`을 찾을 수 있다는 전제로 작성했습니다.
 
 배포본을 풀어 놓은 디렉터리에서는 `xen` 대신 `./bin/xen`을, 저장소 루트에서는 `compiler/dist/xen`을 사용해도 됩니다. 배포본을 옮길 때는 `bin`과 `stdlib`을 함께 옮기세요.
 
@@ -41,7 +41,7 @@ xen build hello.xen -o hello
 
 `check`는 실행하지 않고 코드의 오류를 찾습니다. 오류가 없으면 아무것도 출력하지 않습니다. `build`는 실행 파일을 만듭니다. `./hello`도 `Hello, Xen!`을 출력하며, 이 파일을 실행할 때는 Xen이 필요하지 않습니다.
 
-파일을 찾을 수 없다는 오류가 나오면 현재 디렉터리와 파일 이름을 확인하세요. 실행 파일은 호환되는 OS와 CPU에서 실행해야 합니다. Windows x86-64는 실험적 지원입니다. Windows Server 2022 네이티브 CI는 통과했으며 Windows 데스크톱 실 하드웨어 검증이 추가로 필요합니다. PowerShell에서는 `xen build hello.xen -o hello.exe`와 `.\hello.exe`를 사용합니다. Windows ARM64와 macOS는 미지원입니다.
+파일을 찾을 수 없다는 오류가 나오면 현재 디렉터리와 파일 이름을 확인하세요. 실행 파일은 호환되는 OS와 CPU에서 실행해야 합니다. Windows x86-64는 실험적 지원입니다. Windows Server 2022 네이티브 CI는 통과했으며 Windows 데스크톱 실 하드웨어 검증이 추가로 필요합니다. PowerShell에서는 `xen build hello.xen -o hello.exe`와 `.\hello.exe`를 사용합니다. Apple Silicon macOS는 실험적 지원이며 네이티브 CI 검증을 기다리고 있습니다. Windows ARM64와 Intel macOS는 미지원입니다.
 
 ## 바꿔 보기
 

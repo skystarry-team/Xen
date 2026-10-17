@@ -3,7 +3,7 @@
 [GitHub Releases](https://github.com/skystarry-team/Xen/releases)에서 호스트 CPU에
 맞는 컴파일러 패키지와 `SHA256SUMS`를 내려받습니다. 릴리스마다 새 다운로드
 디렉터리를 사용하고 컴파일러를 실행할 OS와 CPU를 선택합니다. 각 컴파일러에서
-Linux x86_64·AArch64와 Windows x86_64 프로그램을 생성할 수 있습니다. AArch64는
+Linux x86_64·AArch64, Windows x86_64, Apple Silicon macOS 프로그램을 생성할 수 있습니다. AArch64는
 [프로젝트 지원 범위](../../../README.md)에 명시한 실험적 지원 대상입니다.
 
 Linux 컴파일러 패키지:
@@ -44,6 +44,22 @@ Windows x86-64는 실험적 지원입니다. 컴파일러·PE 실행·표준 라
 Windows Server 2022 네이티브 CI를 통과했으며, Windows 데스크톱 실 하드웨어 검증은
 추가로 필요합니다. Windows ARM64는 미지원입니다.
 ZIP CI는 재배치와 PATH 격리를 검사하며 깨끗한 OS 설치 검증을 대신하지 않습니다.
+
+## Apple Silicon macOS (실험적 지원)
+
+릴리스에 `xen-<version>-macos-aarch64.tar.gz`가 포함되면 같은 릴리스의
+`SHA256SUMS`와 함께 내려받아 SHA-256 값을 확인합니다. Apple Silicon에서 실행합니다.
+
+```sh
+tar -xzf xen-<version>-macos-aarch64.tar.gz
+cd xen-<version>-macos-aarch64
+./bin/xen version
+./bin/xen run examples/demo.xen
+./bin/xen test std.fs --filter null
+```
+
+`bin/`과 `stdlib/`을 함께 유지하세요. 기본 타깃은 `aarch64-macos`입니다.
+네이티브 CI 검증은 대기 중이며 Intel macOS는 미지원입니다.
 
 ## Debian과 Ubuntu
 

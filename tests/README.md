@@ -103,7 +103,7 @@ symlink metadata, malformed and multi-batch directory records, removed cwd, low 
 limits and bounded guest VA. For a custom compiler/runner, use `XEN_BIN`, JSON
 `XEN_HOST_RUNNER`, `XEN_STDLIB_TARGET`, JSON `XEN_STDLIB_RUNNER` and `XEN_STDLIB_OPT`.
 Toolchain tests prove missing platform profiles cannot fall back to common/project
-files, and macOS Intel/Apple Silicon targets fail before source/output access.
+files, and the unimplemented Intel macOS target fails before source/output access.
 
 `python3 scripts/test.py --suite host` checks compiler version, import/check, default-target build/run/test,
 both cross-build targets, relocated stdlib discovery and binary packaging. It
@@ -126,15 +126,17 @@ metadata/directory/cwd/process calls for both CPU targets, independently of the
 compiler's own architecture.
 See [AArch64 compiler builds and validation](../docs/compiler-build/en/aarch64.md).
 
-`python3 scripts/test.py --suite macos-prototype` validates the internal Mach-O writer for both CPUs,
+`python3 scripts/test.py --suite macos-prototype` validates the Mach-O writer for both CPUs,
 independent SHA-256 page signatures and ARM64 PIE relocations. It also generates
-Darwin prototype images from checked Xen IR and confirms Darwin traps rather than
-Linux traps. It does not boot macOS or certify runtime/loader/packaging support;
+Darwin images from checked Xen IR and confirms Darwin traps rather than
+Linux traps. It does not boot macOS or certify runtime/loader/packaging support.
 The Darwin syscall adapter also executes under Linux ARM64/QEMU with simulated
 kernel returns, checking carry/errno normalization, x1 restoration, stack balance
 and leaf LR preservation. This does not certify Darwin kernel behavior.
-macOS is unsupported and has no planned support. These tests
-preserve the CPU/Mach-O prototypes without enabling macOS support.
+`python3 scripts/test.py --suite macos` requires a native Apple Silicon host.
+It checks compiler and generated executable signatures, dyld execution,
+platform services, CLI run/test and relocated tar.gz packaging. The new CI gate
+must pass before claiming native validation. Intel macOS remains unsupported.
 See [Darwin/Mach-O validation scope](../compiler/platform/darwin/MACOS_VALIDATION.md).
 
 `python3 scripts/test.py --suite packaging` checks the default two-architecture

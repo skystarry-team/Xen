@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 from packaging.archive.package import package as archive_package
-from packaging.common import ROOT, binary_architecture, parse_runner
+from packaging.common import ROOT, binary_architecture, macos_architecture, parse_runner
 from packaging.debian.package import package as deb_package
 from packaging.windows.package import package as windows_package
 from packaging.windows.pe import inspect as inspect_pe
@@ -36,6 +36,8 @@ def main() -> None:
                 print("x86_64")
             elif args.platform == "linux":
                 print(binary_architecture(args.binary))
+            elif args.platform == "macos":
+                print(macos_architecture(args.binary))
             else:
                 raise ValueError("unsupported compiler package platform")
             return
@@ -46,9 +48,9 @@ def main() -> None:
                 raise ValueError("source exports support tar.gz only")
             archive_package(args.name, args.output, source=True, version=args.version, output_dir=args.output_dir)
             return
-        allowed = {"linux": {"tar.gz", "deb"}, "windows": {"zip"}}.get(args.platform)
+        allowed = {"linux": {"tar.gz", "deb"}, "windows": {"zip"}, "macos": {"tar.gz"}}.get(args.platform)
         if allowed is None or set(args.formats) - allowed:
-            raise ValueError("supported platform/formats: linux with tar.gz/deb; windows with zip")
+            raise ValueError("supported platform/formats: linux with tar.gz/deb; windows with zip; macos with tar.gz")
         if len(args.formats) > 1 and (args.output or args.name):
             raise ValueError("custom output/name requires a single package format")
         runner = parse_runner(args.runner)

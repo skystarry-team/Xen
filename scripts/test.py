@@ -26,7 +26,7 @@ def prototype() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("all", "arm64", "host", "windows", "macos-prototype", "quickcheck", "semantic", "packaging"), default="all")
+    parser.add_argument("--suite", choices=("all", "arm64", "host", "windows", "macos", "macos-prototype", "quickcheck", "semantic", "packaging"), default="all")
     parser.add_argument("--mode", default="all")
     parser.add_argument("--depth", default="standard")
     parser.add_argument("--seed")
@@ -35,6 +35,12 @@ def main() -> None:
         run("dune", "build", "@release")
     if args.suite == "macos-prototype":
         prototype()
+    elif args.suite == "macos":
+        run("dune", "exec", "tests/backend_contract_test.exe")
+        run("dune", "exec", "tests/mach_o_test.exe")
+        run("dune", "build", "tests/mach_o_fixture.exe", "tests/darwin_fixture.exe")
+        integration("mach_o")
+        integration("macos")
     elif args.suite == "windows":
         run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe", "tests/windows_abi_fixture.exe", "tests/windows_runtime_fixture.exe")
         run("dune", "exec", "tests/pe_writer_test.exe")

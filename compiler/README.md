@@ -104,11 +104,10 @@ Host filesystem/process utilities are distinct from target
 runtime operations.
 
 Intel/Apple Silicon macOS targets are recognized as x86_64-macos/aarch64-macos;
-arm64 and darwin aliases normalize to these names. macOS is unsupported and has
-no planned support. CPU encoders, the Mach-O writer and internal Darwin
-prototypes are retained for implementation testing. Recognition of
-an unsupported host cannot crash module initialization or prevent `version` from
-running. See the [platform support policy](platform/README.md).
+arm64 and darwin aliases normalize to these names. Apple Silicon has an
+experimental Darwin backend; Intel macOS remains unsupported. The native CI
+gate checks generated execution and packaging. See the
+[platform support policy](platform/README.md).
 
 ## bb-scoped low-level operations
 

@@ -121,7 +121,8 @@ class DistributionTests(unittest.TestCase):
 
     def test_release_requires_exact_assets_and_matching_tag(self):
         version = "0.1.0_1-demo"
-        names = {f"xen-{version}-source.tar.gz", f"xen-{version}-windows-x86_64.zip"}
+        names = {f"xen-{version}-source.tar.gz", f"xen-{version}-windows-x86_64.zip",
+                 f"xen-{version}-macos-aarch64.tar.gz"}
         for architecture in ("x86_64", "aarch64"):
             names.add(f"xen-{version}-linux-{architecture}.tar.gz")
             names.add(debian.filename(version, architecture))
@@ -130,7 +131,7 @@ class DistributionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tag must equal"):
             prepare(self.root, version, "vwrong")
         artifacts = prepare(self.root, version, f"v{version}")
-        self.assertEqual(len(artifacts), 7)
+        self.assertEqual(len(artifacts), 8)
         manifest = (self.root / "SHA256SUMS").read_text()
         for name in names:
             self.assertIn(f"{hashlib.sha256(name.encode()).hexdigest()}  {name}\n", manifest)

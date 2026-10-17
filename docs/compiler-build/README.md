@@ -23,11 +23,12 @@ the packaging guide. Distribution tooling lives in
 배포물 생성과 GitHub 릴리스는 패키징 안내를 따릅니다. 배포 도구는
 [`packaging/`](../../packaging/README.md)에서 패키징 형식별로 관리합니다.
 
-Linux x86_64, Linux AArch64 and Windows x86_64 are compiler hosts. AArch64 and
-Windows support are experimental; physical hardware validation is pending.
+Linux x86_64, Linux AArch64, Windows x86_64 and Apple Silicon macOS are compiler hosts.
+AArch64, Windows and macOS support are experimental; Apple Silicon native CI validation is pending.
 Windows native CI runs on Windows Server 2022; desktop hardware validation is
-still required. Windows ARM64 and macOS are unsupported.
+still required. Windows ARM64 and Intel macOS are unsupported.
 
-Windows x86_64는 실험적 지원 대상입니다. Windows Server 2022 네이티브 CI는 통과했으며,
-Windows 데스크톱 실 하드웨어 검증은 추가로 필요합니다. Windows ARM64와 macOS는 미지원입니다.
+Windows x86_64와 Apple Silicon macOS는 실험적 지원 대상입니다. Windows Server 2022 네이티브 CI는 통과했으며,
+Windows 데스크톱 실 하드웨어 검증은 추가로 필요합니다. Apple Silicon 네이티브 CI 검증은 대기 중입니다.
+Windows ARM64와 Intel macOS는 미지원입니다.
 Contributor test commands are documented in [tests/README.md](../../tests/README.md).

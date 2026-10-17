@@ -3,7 +3,7 @@
 Download a matching compiler package and `SHA256SUMS` from
 [GitHub Releases](https://github.com/skystarry-team/Xen/releases).
 Use a new download directory for each release and select the compiler host OS and CPU.
-Each compiler can generate Linux x86_64/AArch64 and Windows x86_64 programs.
+Each compiler can generate Linux x86_64/AArch64, Windows x86_64 and Apple Silicon macOS programs.
 AArch64 remains experimental as described in the
 [project support scope](../../../README.md).
 
@@ -45,6 +45,22 @@ are unsupported. Windows x86-64 remains experimental: compiler, PE execution and
 standard library tests pass on Windows Server 2022 native CI. Windows desktop
 validation on physical hardware is still required; Windows ARM64 is unsupported.
 The ZIP CI checks relocation and an isolated PATH, not installation on a clean OS.
+
+## Apple Silicon macOS (experimental)
+
+Once a release includes `xen-<version>-macos-aarch64.tar.gz`, download it with
+`SHA256SUMS` and compare its SHA-256 entry before extraction. On Apple Silicon:
+
+```sh
+tar -xzf xen-<version>-macos-aarch64.tar.gz
+cd xen-<version>-macos-aarch64
+./bin/xen version
+./bin/xen run examples/demo.xen
+./bin/xen test std.fs --filter null
+```
+
+Keep `bin/` and `stdlib/` together. The default target is `aarch64-macos`.
+The native CI validation for this package is pending; Intel macOS is unsupported.
 
 ## Debian and Ubuntu
 

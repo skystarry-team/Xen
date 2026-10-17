@@ -10,7 +10,7 @@ Commands assume `xen` is on `PATH`. From a distribution directory, substitute `.
 | `xen build file.xen -o app` | Make a standalone executable |
 | `xen test [file.xen or directory or std.module]` | Run tests |
 
-Successful `check` and `build` commands produce no output. Without `-o`, `build` writes `a.out` for a Linux target or `a.exe` for a Windows target in the working directory, regardless of the compiler's host OS. An existing output file is overwritten. `run` uses the current working directory and standard input/output, removing its temporary executable when the program exits.
+Successful `check` and `build` commands produce no output. Without `-o`, `build` writes `a.out` for a Linux or macOS target or `a.exe` for a Windows target in the working directory, regardless of the compiler's host OS. An existing output file is overwritten. `run` uses the current working directory and standard input/output, removing its temporary executable when the program exits.
 
 ## Program arguments
 
@@ -24,13 +24,13 @@ Before `--` are Xen options; after it are your program's arguments. Read them wi
 
 ## Choose the execution environment
 
-The default target follows the installed compiler's OS and architecture. `check`, `build`, `run`, and `test` accept `--target=x86_64-linux`, `--target=aarch64-linux` and `--target=x86_64-windows`. `arm64-linux` is an alias for `aarch64-linux`.
+The default target follows the installed compiler's OS and architecture. `check`, `build`, `run`, and `test` accept `--target=x86_64-linux`, `--target=aarch64-linux`, `--target=x86_64-windows` and `--target=aarch64-macos`. `arm64-linux` and `arm64-darwin` are aliases.
 
 ```sh
 xen build hello.xen --target=aarch64-linux -o hello-arm64
 ```
 
-Run the output on a compatible OS and CPU. Selecting another target does not make it executable on the current machine. AArch64 and Windows x86-64 support are experimental; physical hardware validation is pending. Windows compiler, PE execution and standard library tests pass on Windows Server 2022 native CI; Windows desktop hardware validation is still required. Windows ARM64 and macOS are unsupported. Windows raw syscalls and `extern_call` are unavailable. In PowerShell, build with `-o hello.exe` and execute `.\hello.exe`.
+Run the output on a compatible OS and CPU. Selecting another target does not make it executable on the current machine. AArch64, Windows x86-64 and Apple Silicon macOS support are experimental. Apple Silicon native CI validation is pending; Intel macOS and Windows ARM64 remain unsupported. Windows compiler, PE execution and standard library tests pass on Windows Server 2022 native CI; Windows desktop hardware validation is still required. Windows raw syscalls and `extern_call` are unavailable. In PowerShell, build with `-o hello.exe` and execute `.\hello.exe`.
 
 ## Select tests
 

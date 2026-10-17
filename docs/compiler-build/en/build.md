@@ -11,6 +11,7 @@ and tar.gz packages. This guide covers building the compiler from source.
 | Linux x86_64, building an x86_64 compiler | Native x86_64 OCaml |
 | Linux AArch64, building an AArch64 compiler | Native AArch64 OCaml |
 | Windows x86_64, building `xen.exe` | Native Windows x64 OCaml (MinGW) |
+| Apple Silicon macOS, building `xen` | Native macOS arm64 OCaml |
 | Linux x86_64, building an AArch64 compiler | Native x86_64 OCaml and an AArch64 cross OCaml toolchain |
 
 Cross OCaml runs on the build host and emits code for another CPU. Installing an
@@ -115,6 +116,20 @@ native CI has passed compiler, PE/loader, runtime and standard library checks.
 Windows desktop validation on physical hardware is still required. Windows ARM64,
 raw syscalls and `extern_call` are unsupported. Python is required for packaging
 and verification, not for use of an installed compiler.
+
+## Apple Silicon macOS (experimental)
+
+Use a native arm64 OCaml 5.5.0 switch and Dune 3.24.2. `ocamlc -config` must
+report `architecture: arm64` and `system: macosx`. From the repository root:
+
+```sh
+opam install dune.3.24.2
+opam exec -- dune build @release
+opam exec -- python3 scripts/test.py --suite macos
+```
+
+The suite builds and runs generated programs and validates a relocated macOS
+tar.gz. Native CI validation is pending; Intel macOS is unsupported.
 
 ## Compiler version
 

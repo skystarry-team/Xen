@@ -25,10 +25,11 @@ and explicit error handling. Build a standalone executable or run a source file
 directly with the `xen` command.
 
 **Xen is an early release.** Syntax and APIs may change. Programs run on Linux
-x86-64 and AArch64, and Windows x86-64. AArch64 and Windows support are experimental;
+x86-64 and AArch64, Windows x86-64, and Apple Silicon macOS. AArch64, Windows and macOS support are experimental;
 validation on physical hardware is pending. Windows compiler, PE execution and
 standard library tests pass on Windows Server 2022 native CI; Windows desktop
-validation on physical hardware is still required. Windows ARM64 and macOS are unsupported.
+validation on physical hardware is still required. Native Apple Silicon CI validation is pending;
+Windows ARM64 and Intel macOS are unsupported.
 
 ## Write your first program
 

@@ -1,11 +1,11 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
-(* CPU-independent, thin little-endian Mach-O64 PIE prototype. The encoder must
+(* CPU-independent, thin little-endian Mach-O64 PIE writer. The encoder must
    return position-independent code; absolute address fixups are not permitted.
    dyld starts the LC_MAIN function using the platform C argc/argv convention.
    libSystem is loaded for dyld initialization, but this image imports no symbols.
    Ad-hoc SHA-256 signatures are emitted directly, without codesign or a linker.
-   This writer is not registered as a supported CLI target until macOS execution
-   has been validated. See MACOS_VALIDATION.md for execution prerequisites. *)
+   Apple Silicon native execution is checked by macOS CI. See
+   MACOS_VALIDATION.md for the validation scope. *)
 exception Error of string
 let fail message = raise(Error message)
 let align n amount =

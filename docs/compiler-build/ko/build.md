@@ -11,6 +11,7 @@ Xen 컴파일러는 OCaml 실행 파일입니다. 컴파일러가 실행되는 C
 | Linux x86_64에서 x86_64 컴파일러 빌드 | x86_64 네이티브 OCaml |
 | Linux AArch64에서 AArch64 컴파일러 빌드 | AArch64 네이티브 OCaml |
 | Windows x86_64에서 `xen.exe` 빌드 | Windows x64 네이티브 OCaml (MinGW) |
+| Apple Silicon macOS에서 `xen` 빌드 | macOS arm64 네이티브 OCaml |
 | Linux x86_64에서 AArch64 컴파일러 빌드 | x86_64 네이티브 OCaml과 AArch64 크로스 OCaml |
 
 크로스 OCaml은 빌드 호스트에서 실행되며 다른 CPU의 코드를 생성합니다.
@@ -114,6 +115,20 @@ Windows Server 2022 네이티브 CI에서 컴파일러·PE/로더·런타임·�
 통과했습니다. Windows 데스크톱 실 하드웨어 검증은 추가로 필요합니다.
 Windows ARM64·원시 syscall·`extern_call`은 미지원입니다.
 Python은 패키징과 검증에 필요하며, 설치한 컴파일러를 사용할 때는 필요하지 않습니다.
+
+## Apple Silicon macOS (실험적 지원)
+
+arm64 네이티브 OCaml 5.5.0 switch와 Dune 3.24.2를 사용합니다. `ocamlc -config`에
+`architecture: arm64`, `system: macosx`가 나와야 합니다. 저장소 루트에서 실행합니다.
+
+```sh
+opam install dune.3.24.2
+opam exec -- dune build @release
+opam exec -- python3 scripts/test.py --suite macos
+```
+
+이 검증은 생성된 프로그램 실행과 재배치한 macOS tar.gz를 확인합니다.
+네이티브 CI 검증은 대기 중이며 Intel macOS는 미지원입니다.
 
 ## 컴파일러 버전
 

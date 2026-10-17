@@ -82,15 +82,14 @@ class ToolchainTests(unittest.TestCase):
         output = self.cwd / "preserved"
         output.write_bytes(b"preserve existing output")
         for command in ("check", "build", "run", "test"):
-            for target in ("aarch64-windows", "x86_64-macos", "aarch64-macos", "arm64-darwin"):
+            for target in ("aarch64-windows", "x86_64-macos"):
                 with self.subTest(command=command, target=target):
                     args = [command, self.cwd / "missing.xen", f"--target={target}"]
                     if command == "build":
                         args += ["-o", output]
                     result = self.invoke(*args)
                     self.assertEqual(result.returncode, 1, result.stderr)
-                    message = ("is unsupported; macOS development is discontinued"
-                               if target.endswith(("-macos", "-darwin")) else "is not implemented")
+                    message = "is not implemented"
                     self.assertIn(message, result.stderr)
                     self.assertIn("supported targets: x86_64-linux", result.stderr)
                     self.assertEqual(result.stdout, "")
@@ -371,6 +370,8 @@ class ToolchainTests(unittest.TestCase):
                              "compiler/platform/darwin/dune", "compiler/platform/darwin/mach_o.ml",
                              "compiler/platform/darwin/MACOS_VALIDATION.md",
                              "compiler/platform/darwin/arm64/darwin_backend.ml", "compiler/platform/darwin/arm64/darwin_runtime.ml",
+                             "stdlib/platform/aarch64-macos/std/platform.xen", ".github/workflows/macos.yml",
+                             "tests/integration/macos_test.py",
                              "compiler/cpu/arm64/README.md", "compiler/cpu/arm64/dune",
                              "compiler/cpu/arm64/native_backend.ml", "compiler/platform/README.md",
                              "compiler/backend.ml",

@@ -4,7 +4,7 @@ This chapter prints one line and then turns the program into an executable you c
 
 ## Prepare Xen
 
-You need Xen for Linux or Windows x86-64. Follow the [installation guide](../compiler-build/en/installation.md). Add the distribution's `bin` directory to `PATH` to use `xen` from any directory. Commands in this guide assume `xen` is available on your path.
+You need Xen for Linux, Windows x86-64 or Apple Silicon macOS. Follow the [installation guide](../compiler-build/en/installation.md). Add the distribution's `bin` directory to `PATH` to use `xen` from any directory. Commands in this guide assume `xen` is available on your path.
 
 From an extracted distribution, you can replace `xen` with `./bin/xen`. From the repository root, use `compiler/dist/xen`. Keep `bin` and `stdlib` together when moving a distribution.
 
@@ -41,7 +41,7 @@ xen build hello.xen -o hello
 
 `check` finds errors without running the program. Success produces no output. `build` creates an executable. `./hello` also prints `Hello, Xen!`; running that file does not require Xen.
 
-If Xen cannot find your file, check the working directory and filename. Executables need a compatible OS and CPU. Windows x86-64 support is experimental: Windows Server 2022 native CI has passed, while Windows desktop validation on physical hardware is still required. In PowerShell, use `xen build hello.xen -o hello.exe` and `.\hello.exe`. Windows ARM64 and macOS are unsupported.
+If Xen cannot find your file, check the working directory and filename. Executables need a compatible OS and CPU. Windows x86-64 support is experimental: Windows Server 2022 native CI has passed, while Windows desktop validation on physical hardware is still required. In PowerShell, use `xen build hello.xen -o hello.exe` and `.\hello.exe`. Apple Silicon macOS support is experimental and native CI validation is pending; Windows ARM64 and Intel macOS are unsupported.
 
 ## Try a change
 

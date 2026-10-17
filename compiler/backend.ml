@@ -4,6 +4,7 @@ let available : (module Backend_intf.S) list = [
   (module Xen_linux_x86_64.Linux_backend);
   (module Xen_linux_arm64.Linux_backend);
   (module Xen_windows_x86_64.Windows_backend);
+  (module Xen_darwin_arm64.Darwin_backend);
 ]
 
 let select target =
@@ -14,7 +15,7 @@ let select target =
       let supported = List.map (fun (module B : Backend_intf.S) ->
         Target.to_string B.description.target) available in
       let status = match target.Target.operating_system with
-        | Target.MacOS -> "is unsupported; macOS development is discontinued"
+        | Target.MacOS -> "is not implemented"
         | _ -> "is not implemented" in
       Error ("target '" ^ Target.to_string target ^ "' " ^ status ^
         "; supported targets: " ^ String.concat ", " supported)
@@ -31,7 +32,7 @@ let host_target ~architecture ~system =
   match cpu, operating_system with
   | Some architecture, Some operating_system -> Ok {Target.architecture;operating_system}
   | _ -> Error ("unsupported compiler host '" ^ architecture ^ "-" ^ system ^
-      "'; specify --target=x86_64-linux, --target=aarch64-linux or --target=x86_64-windows")
+      "'; specify --target=x86_64-linux, --target=aarch64-linux, --target=x86_64-windows or --target=aarch64-macos")
 let default_target () = host_target ~architecture:Host_config.architecture ~system:Host_config.system
 (* Legacy library fallback is fixed, independent of registration order. The CLI
    uses default_target/select directly and never falls back on an unsupported OS. *)
