@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.platform_types;
+
+struct Stat {
+    size: Int,
+    modified_seconds: Int,
+    is_directory: Bool,
+    is_file: Bool,
+}

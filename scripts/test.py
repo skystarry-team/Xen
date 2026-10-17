@@ -40,6 +40,7 @@ def main() -> None:
         run("dune", "exec", "tests/pe_writer_test.exe")
         run("dune", "exec", "tests/win64_test.exe")
         run("dune", "exec", "tests/backend_contract_test.exe")
+        run("dune", "exec", "tests/platform_service_test.exe")
         integration("windows", *(["--require-native"] if os.name == "nt" else []))
         integration("windows_abi", *(["--require-native"] if os.name == "nt" else []))
         integration("windows_runtime", *(["--require-native"] if os.name == "nt" else []))

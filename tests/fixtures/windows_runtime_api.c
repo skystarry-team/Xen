@@ -3,12 +3,14 @@
    against real Win32 APIs; these ms_abi exports provide local fault injection. */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #define RESULT(value) ((UINT64_C(0xabcddcba)<<32)|(uint32_t)(value))
 #define API __attribute__((ms_abi,visibility("default")))
@@ -17,10 +19,14 @@ static int arg_count;
 static char **arg_values;
 static struct {void *address;size_t size;int persistent;} maps[1024];
 static unsigned char files[1024];
+static DIR *directories[1024];
+static char *pending[1024];
+static unsigned directory_calls, snapshot;
+static int fail_service_allocation;
 void xen_test_arguments(int count,char **values) {arg_count=count;arg_values=values;}
 static unsigned native_error(void) {
     switch(errno) {case ENOENT:return 2;case EACCES:return 5;case EBADF:return 6;
-      case ENOMEM:return 8;case EPIPE:return 109;default:return 87;}
+      case ENOMEM:return 8;case EPIPE:return 109;case ENOTDIR:return 267;default:return 87;}
 }
 static int fail_nth(const char *name,unsigned count) {
     const char *value=getenv(name);return value && strtoul(value,NULL,10)==count;
@@ -28,7 +34,8 @@ static int fail_nth(const char *name,unsigned count) {
 API uint64_t GetLastError(void) {return RESULT(last_error);}
 API void *VirtualAlloc(void *address,uint64_t size,unsigned type,unsigned protect) {
     (void)address;(void)type;(void)protect;
-    if(fail_nth("XEN_TEST_ALLOC_FAIL",++allocations)) {last_error=8;return NULL;}
+    int failing=fail_service_allocation;fail_service_allocation=0;
+    if(fail_nth("XEN_TEST_ALLOC_FAIL",++allocations) || failing) {last_error=8;return NULL;}
     void *p=mmap(NULL,size,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
     if(p==MAP_FAILED) {last_error=8;return NULL;}
     for(unsigned i=0;i<1024;i++)if(!maps[i].address){
@@ -101,13 +108,19 @@ API void *CommandLineToArgvW(void *command,unsigned *count) {
 API void *LocalFree(void *address) {free(address);return NULL;}
 API uint64_t GetStdHandle(unsigned code) {return (uint64_t)((int32_t)-10-(int32_t)code)+16;}
 API uint64_t CreateFileW(const uint16_t *path,unsigned access,unsigned share,void *security,unsigned disposition,unsigned attrs,void *template) {
-    if(share!=7 || security || attrs!=0x80 || template)abort();
+    if(share!=7 || security || (attrs!=0x80 && attrs!=0x02000000) || template)abort();
     char *name=malloc(to_utf8(path,NULL,0));to_utf8(path,name,0x7fffffff);
-    int fd=open(name,access==0x80000000?O_RDONLY:O_WRONLY|O_CREAT|O_TRUNC,0644);free(name);
-    if((access==0x80000000 && disposition!=3)||(access==0x40000000 && disposition!=2))abort();
+    int flags;
+    if((access==0x80000000 || access==0) && disposition==3)flags=O_RDONLY;
+    else if(access==0x40000000 && disposition==2)flags=O_WRONLY|O_CREAT|O_TRUNC;
+    else if(access==4 && disposition==4)flags=O_WRONLY|O_CREAT|O_APPEND;
+    else abort();
+    int fd=open(name,flags,0644);free(name);
     if(fd<0){last_error=native_error();return UINT64_MAX;}
     if(fd>=1024)abort();
-    files[fd]=1;return fd+16;
+    files[fd]=1;
+    if(access==0 && getenv("XEN_TEST_METADATA_ALLOC_FAIL"))fail_service_allocation=1;
+    return fd+16;
 }
 API uint64_t ReadFile(uint64_t file,void *buffer,unsigned length,unsigned *count,void *overlapped) {
     if(overlapped)abort();
@@ -123,15 +136,93 @@ API uint64_t WriteFile(uint64_t file,const void *buffer,unsigned length,unsigned
     ssize_t result=write(file-16,buffer,length);if(result<0){last_error=native_error();return RESULT(0);}*count=result;return RESULT(1);
 }
 API uint64_t CloseHandle(uint64_t file) {
+    if(file==0x10000 && snapshot){snapshot=0;return RESULT(1);}
     unsigned fd=(unsigned)(file-16);
     if(fd>=1024 || !files[fd]){last_error=6;return RESULT(0);}
     files[fd]=0;
+    if(directories[fd]){closedir(directories[fd]);directories[fd]=NULL;}
+    free(pending[fd]);pending[fd]=NULL;
     int result=close(fd);if(result){last_error=native_error();return RESULT(0);}
     if(getenv("XEN_TEST_CLOSE_FAIL")){last_error=0xffffffff;return RESULT(0);}return RESULT(1);
 }
+static void put32(void *buffer,unsigned offset,uint32_t value) {memcpy((char*)buffer+offset,&value,4);}
+static void put64(void *buffer,unsigned offset,uint64_t value) {memcpy((char*)buffer+offset,&value,8);}
+API uint64_t GetFileInformationByHandle(uint64_t file,void *buffer) {
+    struct stat info;
+    if(getenv("XEN_TEST_METADATA_FAIL")){last_error=0xffffffff;return RESULT(0);}
+    if(fstat(file-16,&info)){last_error=native_error();return RESULT(0);}
+    memset(buffer,0,52);
+    put32(buffer,0,S_ISDIR(info.st_mode)?0x10:0x80);
+    put64(buffer,20,(uint64_t)(info.st_mtim.tv_sec+INT64_C(11644473600))*10000000+info.st_mtim.tv_nsec/100);
+    put32(buffer,32,(uint64_t)info.st_size>>32);put32(buffer,36,(uint32_t)info.st_size);
+    return RESULT(1);
+}
+API uint64_t GetFileType(uint64_t file) {
+    struct stat info;if(fstat(file-16,&info)){last_error=6;return RESULT(0);}
+    return RESULT(S_ISREG(info.st_mode)||S_ISDIR(info.st_mode)?1:2);
+}
+API uint64_t GetFileInformationByHandleEx(uint64_t file,unsigned kind,void *buffer,unsigned capacity) {
+    unsigned fd=file-16,used=0,previous=0;struct stat info;
+    if(kind!=14 || fd>=1024 || capacity<68)abort();
+    if(fail_nth("XEN_TEST_DIRECTORY_FAIL",++directory_calls)){last_error=0xffffffff;return RESULT(0);}
+    if(fstat(fd,&info)){last_error=native_error();return RESULT(0);}
+    if(!S_ISDIR(info.st_mode)){last_error=267;return RESULT(0);}
+    if(!directories[fd]){directories[fd]=fdopendir(dup(fd));if(!directories[fd])abort();}
+    while(1){
+        if(!pending[fd]){struct dirent *entry=readdir(directories[fd]);if(!entry)break;pending[fd]=strdup(entry->d_name);}
+        int words=to_wide((unsigned char*)pending[fd],NULL,0)-1;
+        unsigned start=(used+7)&~7u,size=68+2*words;
+        if(start+size>capacity){if(!used){last_error=234;return RESULT(0);}break;}
+        if(used)put32(buffer,previous,start-previous);
+        memset((char*)buffer+start,0,size);put32(buffer,start+60,words*2);
+        uint16_t *name=malloc(2*(words+1));to_wide((unsigned char*)pending[fd],name,words+1);
+        memcpy((char*)buffer+start+68,name,words*2);free(name);free(pending[fd]);pending[fd]=NULL;
+        previous=start;used=start+size;
+    }
+    if(!used){last_error=18;return RESULT(0);}
+    const char *corrupt=getenv("XEN_TEST_DIRECTORY_CORRUPT");
+    if(corrupt){
+        if(!strcmp(corrupt,"next"))put32(buffer,0,capacity+8);
+        else if(!strcmp(corrupt,"length"))put32(buffer,60,0xfffffffe);
+        else if(!strcmp(corrupt,"odd"))put32(buffer,60,1);
+        else if(!strcmp(corrupt,"aligned"))put32(buffer,0,71);
+        else abort();
+    }
+    return RESULT(1);
+}
+API uint64_t GetCurrentDirectoryW(unsigned capacity,uint16_t *buffer) {
+    if(getenv("XEN_TEST_CWD_FAIL")){last_error=0xffffffff;return RESULT(0);}
+    char *path=getcwd(NULL,0);if(!path){last_error=native_error();return RESULT(0);}
+    int needed=to_wide((unsigned char*)path,NULL,0);
+    if(capacity && getenv("XEN_TEST_CWD_RACE")){free(path);return RESULT(capacity+1);}
+    if(capacity<(unsigned)needed){
+        if(!capacity && getenv("XEN_TEST_CWD_ALLOC_FAIL"))fail_service_allocation=1;
+        free(path);return RESULT(needed);
+    }
+    to_wide((unsigned char*)path,buffer,capacity);free(path);return RESULT(needed-1);
+}
+API uint64_t GetCurrentProcessId(void) {
+    if(getenv("XEN_TEST_PARENT_ALLOC_FAIL"))fail_service_allocation=1;
+    return RESULT(getpid());
+}
+API uint64_t CreateToolhelp32Snapshot(unsigned flags,unsigned pid) {
+    if(flags!=2 || pid || snapshot)abort();
+    if(getenv("XEN_TEST_SNAPSHOT_FAIL")){last_error=0xffffffff;return UINT64_MAX;}
+    snapshot=1;return 0x10000;
+}
+API uint64_t Process32FirstW(uint64_t handle,void *entry) {
+    uint32_t size;memcpy(&size,entry,4);if(handle!=0x10000 || !snapshot || size!=568)abort();
+    if(getenv("XEN_TEST_PROCESS_FIRST_FAIL")){last_error=0xffffffff;return RESULT(0);}
+    put32(entry,8,0);put32(entry,32,0);return RESULT(1);
+}
+API uint64_t Process32NextW(uint64_t handle,void *entry) {
+    if(handle!=0x10000 || !snapshot)abort();
+    if(getenv("XEN_TEST_PROCESS_NEXT_FAIL")){last_error=0xffffffff;return RESULT(0);}
+    put32(entry,8,getpid());put32(entry,32,getppid());return RESULT(1);
+}
 API __attribute__((noreturn)) void ExitProcess(unsigned status) {
     if(getenv("XEN_TEST_RESOURCE_CHECK")) {
-        unsigned memory=0,handles=0;
+        unsigned memory=0,handles=snapshot;
         for(unsigned i=0;i<1024;i++){
             if(maps[i].address && !maps[i].persistent)memory++;
             if(files[i])handles++;

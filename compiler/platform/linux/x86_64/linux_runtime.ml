@@ -23,6 +23,8 @@ let alloc output =
 let open_ output =
   M.bytes output [0x48;0x89;0xf2;0x48;0x89;0xfe;0x48;0xc7;0xc7;0x9c;0xff;0xff;0xff;
     0x41;0xba;0xa4;1;0;0];syscall output 257
+let platform_call _ service = Error("platform service '"^Platform_service.name service^
+  "' is unavailable through this target's intrinsic; use std.platform")
 let raw_syscall output ~arity =
   let load displacement bytes=M.bytes output bytes;M.u32 output(Int64.of_int displacement)in
   load((arity-1)*8)[0x48;0x8b;0x84;0x24];

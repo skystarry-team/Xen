@@ -126,6 +126,7 @@ let boundary (op:operation) = match op.node with
   |Eval(_,Cpu_relax)->"CPU hint"
   |Eval(_,Memory_fence)->"hardware memory fence"
   |Eval(_,Foreign_call _)->"C ABI call/unknown memory"
+  |Eval(_,Platform_call _)->"platform service/unknown memory"
   |Eval(_,Atomic _)->"atomic memory access"
   |Eval(_,(Volatile_load _|Volatile_store _))->"volatile memory access"
   |Eval(_,Binary(("/"|"%"|"**"|"<<"|">>"),_,_))->"fallible arithmetic"

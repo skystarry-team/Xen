@@ -207,7 +207,7 @@ let check_internal ?(numeric_runtime=false) ~entry (program : Ast.program) =
       "global opt mode is not supported; use #scope[opt]";
   let signatures = Hashtbl.create 16 in
   let conversions=["i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"] in
-  let builtins = conversions @ ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";"panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";"syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6"] in
+  let builtins = conversions @ ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";"panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"platform_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";"syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6"] in
   List.iter (fun (f:func) ->
     List.iter(fun(p:param)->validate_type p.span p.typ)f.params;validate_type f.span f.return_type;
     let effective_modes = union_modes program.global_mode_set f.mode_set in
@@ -609,6 +609,17 @@ let check_internal ?(numeric_runtime=false) ~entry (program : Ast.program) =
     | Generic_call(("ptr_addr" as n),types,args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 1 args;let p=expression ~explc ~bb ~transfer:Ir.Direct env(List.hd args)in let t=match p.typ with Ptr t->t|_->invalid p.span(n^" expects Ptr<T>")in (match types with []->()|[x]->require v.span t(canonical x)|_->invalid v.span(n^" expects at most one type argument"));make I64(Ir.Ptr_addr(t,p))
     | Call(("raw_alloc" as n),_)->invalid v.span(n^" requires an explicit type argument")
     | Call(("raw_load"|"raw_store"|"raw_free"|"ptr_addr"|"volatile_load"|"volatile_store" as n),args)->expression ~explc ~bb env {v with node=Generic_call(n,[],args)}
+    | Call("platform_call",args)->
+        if not bb then capability_error v.span Bb "platform_call requires #![bb]";
+        let service,operands=match args with
+          |{node=String_lit name;_}::xs->(match Platform_service.find name with
+              |Some service->service,xs
+              |None->invalid v.span ("unknown platform service '"^name^"'"))
+          |_->invalid v.span "platform_call requires a literal service name" in
+        args_exact "platform_call" (Platform_service.arity service) operands;
+        let xs=List.map(fun x->let x=expression ~explc ~bb ~expected:I64 env x in
+          require x.span I64 x.typ;x)operands in
+        make I64(Ir.Platform_call(service,xs))
     | Call(("syscall0"|"syscall1"|"syscall2"|"syscall3"|"syscall4"|"syscall5"|"syscall6" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");let arity=Char.code n.[7]-Char.code '0' in args_exact n(arity+1)args;let xs=List.map(fun x->let x=expression ~explc ~bb ~expected:I64 env x in require x.span I64 x.typ;x)args in make I64(Ir.Syscall xs)
     | Call(("raw_alloc_int" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 1 args;let count=expression ~explc ~bb ~expected:I64 env(List.hd args)in require count.span I64 count.typ;make(Ptr I64)(Ir.Raw_alloc(I64,count))
     | Call(("raw_load_int" as n),args)->if not bb then capability_error v.span Bb (n^" requires #![bb]");args_exact n 2 args;let p=expression ~explc ~bb ~expected:(Ptr I64) env(List.nth args 0)and i=expression ~explc ~bb ~expected:I64 env(List.nth args 1)in require p.span (Ptr I64) p.typ;require i.span I64 i.typ;make I64(Ir.Raw_load(I64,p,i))
@@ -920,7 +931,7 @@ let check_project ?(entry_function="main") ~(entry_module:string) (programs : As
   let builtins = ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";
     "panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";
     "read_floats";"open_read";"open_write";"raw_alloc_int";"raw_load_int";
-    "raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";
+    "raw_store_int";"raw_free_int";"raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"platform_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";
     "syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6";
     "box";"i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"] in
   let module_name p = match p.module_decl with Some(n,_)->n | None->"$entry" in

@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+module std.platform;
+use std.platform_types;
+
+#![bb]
+fn read(fd: Int, address: Int, count: Int) -> Int { return platform_call("read", fd, address, count); }
+#![bb]
+fn write(fd: Int, address: Int, count: Int) -> Int { return platform_call("write", fd, address, count); }
+#![bb]
+fn open(address: Int, flags: Int, mode: Int) -> Int { return platform_call("open", address, flags, mode); }
+#![bb]
+fn close(fd: Int) -> Int { return platform_call("close", fd); }
+#![bb]
+fn directory(fd: Int, address: Int, count: Int) -> Int { return platform_call("directory", fd, address, count); }
+#![bb]
+fn id() -> Int { return platform_call("id"); }
+// The creator PID from a process snapshot, or negative errno on failure.
+// A returned PID does not imply that the creator is still alive.
+#![bb]
+fn parent_id() -> Int { return platform_call("parent_id"); }
+fn interrupted(raw: Int) -> Bool { return raw == -4; }
+fn read_flags() -> Int { return 0; }
+fn write_flags() -> Int { return 1; }
+fn append_flags() -> Int { return 2; }
+fn directory_flags() -> Int { return 3; }
+fn file_mode() -> Int { return 0; }
+
+#![bb]
+fn metadata(path: Ptr<U8>) -> Result<std.platform_types.Stat, Int> {
+    let data = raw_alloc<Int>(4);
+    let result = platform_call("metadata", ptr_addr(path), ptr_addr(data));
+    if result < 0 {
+        raw_free(data);
+        return Result<std.platform_types.Stat, Int>.Err(-result);
+    }
+    let value = std.platform_types.Stat {
+        size: raw_load(data, 0), modified_seconds: raw_load(data, 1),
+        is_directory: raw_load(data, 2) != 0, is_file: raw_load(data, 3) != 0,
+    };
+    raw_free(data);
+    return Result<std.platform_types.Stat, Int>.Ok(value);
+}
+
+#![bb]
+fn cwd() -> Result<String, Int> {
+    // Retry only a size race, bounded even if another thread keeps changing cwd.
+    for attempt in 0..8 {
+        let needed = platform_call("cwd", 0, 0);
+        if needed < 0 {
+            if needed != -34 { return Result<String, Int>.Err(-needed); }
+        } else {
+            if needed < 1 { return Result<String, Int>.Err(5); }
+            let buffer = raw_alloc<U8>(needed);
+            let count = platform_call("cwd", ptr_addr(buffer), needed);
+            if count < 0 {
+                raw_free(buffer);
+                if count != -34 { return Result<String, Int>.Err(-count); }
+            } else {
+                if count < 1 || count > needed || raw_load(buffer, count - 1) != u8(0) {
+                    raw_free(buffer);
+                    return Result<String, Int>.Err(5);
+                }
+                let mut bytes: Vec<U8> = [];
+                for index in 0..(count - 1) { bytes.push(raw_load(buffer, index)); }
+                raw_free(buffer);
+                return Result<String, Int>.Ok(bytes.into_string());
+            }
+        }
+    }
+    return Result<String, Int>.Err(34);
+}
+
+fn word(bytes: Slice<U8>, offset: Int) -> Int {
+    return i64(bytes.get(offset)) + 256 * i64(bytes.get(offset + 1));
+}
+fn dword(bytes: Slice<U8>, offset: Int) -> Int {
+    return word(bytes, offset) + 65536 * word(bytes, offset + 2);
+}
+
+// FILE_FULL_DIR_INFO: aligned records, counted UTF-16 names without a NUL.
+fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, Int> {
+    let mut names: Vec<String> = [];
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if bytes.len() - offset < 68 { return Result<Vec<String>, Int>.Err(0); }
+        let next = dword(bytes, offset);
+        let length = dword(bytes, offset + 60);
+        if length < 2 || length % 2 != 0 || length > bytes.len() - offset - 68 {
+            return Result<Vec<String>, Int>.Err(0);
+        }
+        let end = offset + 68 + length;
+        if next == 0 {
+            if end != bytes.len() { return Result<Vec<String>, Int>.Err(0); }
+        } else {
+            if next < 68 + length || next % 8 != 0 || next >= bytes.len() - offset {
+                return Result<Vec<String>, Int>.Err(0);
+            }
+        }
+        let mut encoded: Vec<U8> = [];
+        let mut index = offset + 68;
+        while index < end {
+            let mut point = word(bytes, index);
+            index = index + 2;
+            if point >= 55296 && point <= 56319 {
+                if end - index < 2 { return Result<Vec<String>, Int>.Err(0); }
+                let low = word(bytes, index);
+                if low < 56320 || low > 57343 { return Result<Vec<String>, Int>.Err(0); }
+                point = 65536 + (point - 55296) * 1024 + low - 56320;
+                index = index + 2;
+            } else if point >= 56320 && point <= 57343 {
+                return Result<Vec<String>, Int>.Err(0);
+            }
+            if point == 0 { return Result<Vec<String>, Int>.Err(0); }
+            if point < 128 { encoded.push(u8(point)); }
+            else if point < 2048 {
+                encoded.push(u8(192 + point / 64));
+                encoded.push(u8(128 + point % 64));
+            } else if point < 65536 {
+                encoded.push(u8(224 + point / 4096));
+                encoded.push(u8(128 + point / 64 % 64));
+                encoded.push(u8(128 + point % 64));
+            } else {
+                encoded.push(u8(240 + point / 262144));
+                encoded.push(u8(128 + point / 4096 % 64));
+                encoded.push(u8(128 + point / 64 % 64));
+                encoded.push(u8(128 + point % 64));
+            }
+        }
+        let name = encoded.into_string();
+        if name != "." && name != ".." { names.push(name); }
+        if next == 0 { offset = bytes.len(); } else { offset = offset + next; }
+    }
+    return Result<Vec<String>, Int>.Ok(names);
+}

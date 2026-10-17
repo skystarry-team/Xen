@@ -839,6 +839,11 @@ let rec emit_rvalue env (expression:value) node =
       let n=List.length arguments in
       R.raw_syscall output ~arity:n;
       env.stack_depth<-env.stack_depth-n*8
+  | Platform_call(service,arguments) ->
+      List.iter(fun(a:value)->emit_value env a;push_rax env)arguments;
+      (match R.platform_call output service with
+       |Ok()->env.stack_depth<-env.stack_depth-8*List.length arguments
+       |Error message->unsupported ~span:expression.span message)
   | Function_address name ->
       M.bytes output [0x48;0x8d;0x05];M.rel32 output ("fn_"^name)
   | Indirect_call (callee,arguments) ->

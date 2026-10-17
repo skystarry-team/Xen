@@ -11,6 +11,11 @@
  (libraries unix xen_common))
 
 (test
+ (name platform_service_test)
+ (modules platform_service_test)
+ (libraries xen_common))
+
+(test
  (name operators_test)
  (modules operators_test)
  (libraries unix xen_common))

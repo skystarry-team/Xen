@@ -21,6 +21,15 @@ let read = service "read"
 let write = service "write"
 let close = service "close"
 let open_ = service "open"
+let platform_call m operation =
+  let count=Platform_service.arity operation in
+  (* The finite service ABI uses rdi/rsi/rdx; operands are evaluated exactly
+     once before these loads and the service preserves all other live state. *)
+  List.iteri(fun index r->
+    M.bytes m[0x48;0x8b;0x84 lor(r lsl 3);0x24];
+    M.u32 m(Int64.of_int(8*(count-index-1))))(List.filteri(fun i _->i<count)[7;6;2]);
+  if count>0 then(M.bytes m[0x48;0x81;0xc4];M.u32 m(Int64.of_int(8*count)));
+  service(Platform_service.name operation)m;Ok ()
 let imm m r n =
   M.u8 m (if r>=8 then 0x49 else 0x48);M.u8 m (0xb8 lor(r land 7));M.u64 m n
 let int m r n = imm m r (Int64.of_int n)
@@ -33,6 +42,11 @@ let mem m opcode r base displacement =
   if base land 7=4 then M.u8 m 0x24;
   M.u32 m(Int64.of_int displacement)
 let load m r base offset = mem m 0x8b r base offset
+let load32 m r base offset =
+  if r>=8 || base>=8 then M.u8 m(0x40 lor(if r>=8 then 4 else 0)lor(if base>=8 then 1 else 0));
+  M.bytes m[0x8b;0x80 lor((r land 7)lsl 3)lor(base land 7)];
+  if base land 7=4 then M.u8 m 0x24;
+  M.u32 m(Int64.of_int offset)
 let store m base offset r = mem m 0x89 r base offset
 let lea m r base offset = mem m 0x8d r base offset
 let test m r =
@@ -87,7 +101,9 @@ let emit ?(import=(fun library symbol->library,symbol)) m =
   let frames=ref [] and bridges=ref [] in
   let api ?(library="KERNEL32.dll") symbol sources =
     let result32=List.mem symbol["GetLastError";"VirtualFree";"ReadFile";"WriteFile";
-      "CloseHandle";"MultiByteToWideChar";"WideCharToMultiByte"]in
+      "CloseHandle";"MultiByteToWideChar";"WideCharToMultiByte";
+      "GetCurrentDirectoryW";"GetCurrentProcessId";"Process32FirstW";"Process32NextW";
+      "GetFileInformationByHandle";"GetFileInformationByHandleEx";"GetFileType"]in
     let library,symbol=import library symbol in
     let label="__xen_win_api_"^string_of_int(List.length !bridges)in
     bridges:= !bridges@[label,library,symbol,sources];call m label;
@@ -119,7 +135,7 @@ let emit ?(import=(fun library symbol->library,symbol)) m =
   List.iter(fun(native,errno)->let next="__xen_win_error_"^string_of_int native in
     cmp m 0 native;jump m 0x85 next;int m 0 (-errno);goto m done_;M.label m next)
     [2,2;3,2;5,13;6,9;8,12;14,12;32,13;80,17;87,22;112,28;123,22;
-     145,39;183,17;206,36;995,4;1113,84];
+     145,39;183,17;206,36;267,20;995,4;1113,84];
   int m 0 (-5);M.label m done_;finish();
   let finish=begin_ "alloc" in
   (* VirtualAlloc rejects size zero; Xen permits an empty raw allocation. *)
@@ -162,6 +178,10 @@ let emit ?(import=(fun library symbol->library,symbol)) m =
   let finish=begin_ "open"in
   let failure="__xen_win_open_failure" and release="__xen_win_open_release"
   and done_="__xen_win_open_return"in
+  (* 0 read, 1 truncate/create, 2 atomic append/create, 3 directory,
+     4 metadata (internal). Reject unknown modes before opening a path. *)
+  cmp m 6 4;jump m 0x86 "__xen_win_open_mode_ok";
+  int m 0 (-22);goto m done_;M.label m "__xen_win_open_mode_ok";
   api "MultiByteToWideChar" [n 65001;n 8;g 7;n (-1);n 0;n 0];
   test m 0;jump m 0x84 failure;
   store m 5 (-152)0;M.bytes m[0x48;0xd1;0xe0];mov m 6 0;alloc m;
@@ -170,16 +190,120 @@ let emit ?(import=(fun library symbol->library,symbol)) m =
   api "MultiByteToWideChar" [n 65001;n 8;g 7;n (-1);g 0;g 9];
   test m 0;jump m 0x84 failure;
   load m 7 5 (-160);load m 6 5 (-56);
-  let reading="__xen_win_open_reading"and create="__xen_win_open_create"in
-  test m 6;jump m 0x84 reading;int m 2 0x40000000;int m 8 2;goto m create;
-  M.label m reading;int m 2 0x80000000;int m 8 3;M.label m create;
-  api "CreateFileW" [g 7;g 2;n 7;n 0;g 8;n 0x80;n 0];
+  int m 2 0x80000000;int m 8 3;int m 9 0x80;
+  cmp m 6 0;jump m 0x84 "__xen_win_open_create";
+  cmp m 6 1;jump m 0x85 "__xen_win_open_not_truncate";
+  int m 2 0x40000000;int m 8 2;goto m "__xen_win_open_create";
+  M.label m "__xen_win_open_not_truncate";
+  cmp m 6 2;jump m 0x85 "__xen_win_open_not_append";
+  int m 2 4;int m 8 4;goto m "__xen_win_open_create";
+  M.label m "__xen_win_open_not_append";
+  int m 9 0x02000000; (* FILE_FLAG_BACKUP_SEMANTICS *)
+  cmp m 6 4;jump m 0x85 "__xen_win_open_create";int m 2 0;
+  M.label m "__xen_win_open_create";
+  api "CreateFileW" [g 7;g 2;n 7;n 0;g 8;g 9;n 0];
   cmp m 0 (-1);jump m 0x85 release;
   M.label m failure;error();
   M.label m release;store m 5 (-168)0;load m 7 5 (-160);
   test m 7;jump m 0x84 "__xen_win_open_no_buffer";
   unmap m;M.label m "__xen_win_open_no_buffer";load m 0 5 (-168);
   M.label m done_;finish();
+  let finish=begin_ "directory"in
+  let invalid="__xen_win_directory_invalid" and done_="__xen_win_directory_return"
+  and failed="__xen_win_directory_failed" and loop="__xen_win_directory_loop"in
+  cmp m 2 68;jump m 0x82 invalid;cmp m 2 0x7fffffff;jump m 0x87 invalid;
+  api "GetFileInformationByHandleEx" [g 7;n 14;g 6;g 2];
+  test m 0;jump m 0x85 loop;
+  api "GetLastError" [];cmp m 0 18;jump m 0x85 failed;
+  int m 0 0;goto m done_;
+  M.label m loop;mov m 7 6;int m 8 0;
+  M.label m "__xen_win_directory_record";
+  mov m 9 2;M.bytes m[0x4d;0x29;0xc1];cmp m 9 68;jump m 0x82 invalid;
+  load32 m 0 7 60;cmp m 0 2;jump m 0x82 invalid;
+  M.bytes m[0xa8;1];jump m 0x85 invalid;
+  M.bytes m[0x48;0x83;0xc0;68;0x4c;0x39;0xc8];jump m 0x87 invalid;
+  load32 m 10 7 0;test m 10;jump m 0x85 "__xen_win_directory_next";
+  M.bytes m[0x4c;0x01;0xc0];goto m done_;
+  M.label m "__xen_win_directory_next";
+  M.bytes m[0x49;0x39;0xc2];jump m 0x82 invalid; (* next >= header+name *)
+  M.bytes m[0x4d;0x39;0xca];jump m 0x87 invalid;
+  M.bytes m[0x41;0xf6;0xc2;7];jump m 0x85 invalid;
+  M.bytes m[0x4d;0x01;0xd0;0x4c;0x01;0xd7];goto m "__xen_win_directory_record";
+  M.label m failed;error();goto m done_;
+  M.label m invalid;int m 0 (-22);M.label m done_;finish();
+  let finish=begin_ "cwd"in
+  let failure="__xen_win_cwd_failure" and release="__xen_win_cwd_release"
+  and done_="__xen_win_cwd_return"in
+  api "GetCurrentDirectoryW" [n 0;n 0];
+  test m 0;jump m 0x84 failure;store m 5 (-144)0;
+  M.bytes m[0x48;0xd1;0xe0];mov m 6 0;alloc m;
+  test m 0;jump m 0x88 done_;store m 5 (-152)0;
+  load m 7 5 (-144);api "GetCurrentDirectoryW" [g 7;g 0];
+  test m 0;jump m 0x84 failure;
+  load m 2 5 (-144);M.bytes m[0x48;0x39;0xd0];jump m 0x82 "__xen_win_cwd_convert";
+  int m 0 (-34);goto m release; (* directory grew between query and fill *)
+  M.label m "__xen_win_cwd_convert";
+  load m 7 5 (-152);load m 6 5 (-64);load m 9 5 (-56);
+  api "WideCharToMultiByte" [n 65001;n 0x80;g 7;n (-1);n 0;n 0;n 0;n 0];
+  test m 0;jump m 0x84 failure;
+  test m 6;jump m 0x84 release;
+  M.bytes m[0x4c;0x39;0xc8];jump m 0x86 "__xen_win_cwd_copy";
+  int m 0 (-34);goto m release;
+  M.label m "__xen_win_cwd_copy";
+  (* Conversion capacity is the queried DWORD, never a truncated caller Int. *)
+  mov m 9 0;
+  api "WideCharToMultiByte" [n 65001;n 0x80;g 7;n (-1);g 6;g 9;n 0;n 0];
+  test m 0;jump m 0x85 release;
+  M.label m failure;error();
+  M.label m release;store m 5 (-160)0;load m 7 5 (-152);
+  test m 7;jump m 0x84 "__xen_win_cwd_no_buffer";unmap m;
+  M.label m "__xen_win_cwd_no_buffer";load m 0 5 (-160);
+  M.label m done_;finish();
+  let finish=begin_ "metadata"in
+  let failure="__xen_win_metadata_failure" and close_="__xen_win_metadata_close"
+  and release="__xen_win_metadata_release" and done_="__xen_win_metadata_return"in
+  int m 6 4;open_ m;test m 0;jump m 0x88 done_;store m 5 (-144)0;
+  int m 6 64;alloc m;test m 0;jump m 0x88 close_;store m 5 (-152)0;
+  load m 7 5 (-144);api "GetFileInformationByHandle" [g 7;g 0];
+  test m 0;jump m 0x84 failure;
+  api "GetFileType" [g 7];store m 5 (-176)0;
+  load m 6 5 (-152);load m 7 5 (-56);
+  load32 m 0 6 32;M.bytes m[0x48;0xc1;0xe0;32];load32 m 2 6 36;
+  M.bytes m[0x48;0x09;0xd0];store m 7 0 0;
+  load m 0 6 20;int m 2 0;int m 1 10000000;M.bytes m[0x48;0xf7;0xf1];
+  imm m 1 11644473600L;M.bytes m[0x48;0x29;0xc8];store m 7 8 0;
+  load32 m 0 6 0;M.bytes m[0x48;0xc1;0xe8;4;0x48;0x83;0xe0;1];store m 7 16 0;
+  M.bytes m[0x48;0x83;0xf0;1];load m 2 5 (-176);cmp m 2 1;
+  jump m 0x84 "__xen_win_metadata_kind";int m 0 0;
+  M.label m "__xen_win_metadata_kind";store m 7 24 0;int m 0 0;goto m close_;
+  M.label m failure;error();
+  M.label m close_;store m 5 (-160)0;load m 7 5 (-144);close m;
+  load m 2 5 (-160);test m 2;jump m 0x88 release;store m 5 (-160)0;
+  M.label m release;load m 7 5 (-152);test m 7;jump m 0x84 "__xen_win_metadata_no_buffer";
+  unmap m;M.label m "__xen_win_metadata_no_buffer";load m 0 5 (-160);
+  M.label m done_;finish();
+  let finish=begin_ "id"in api "GetCurrentProcessId" [];finish();
+  let finish=begin_ "parent_id"in
+  let failure="__xen_win_parent_failure" and release="__xen_win_parent_release"
+  and done_="__xen_win_parent_return" and loop="__xen_win_parent_loop"in
+  api "GetCurrentProcessId" [];store m 5 (-144)0;
+  int m 6 568;alloc m;test m 0;jump m 0x88 done_;store m 5 (-152)0;
+  int m 2 568;store m 0 0 2;
+  api "CreateToolhelp32Snapshot" [n 2;n 0];cmp m 0 (-1);jump m 0x84 failure;
+  store m 5 (-160)0;mov m 7 0;load m 6 5 (-152);
+  api "Process32FirstW" [g 7;g 6];
+  M.label m loop;test m 0;jump m 0x84 failure;
+  load32 m 0 6 8;load m 2 5 (-144);M.bytes m[0x48;0x39;0xd0];
+  jump m 0x84 "__xen_win_parent_found";
+  api "Process32NextW" [g 7;g 6];goto m loop;
+  M.label m "__xen_win_parent_found";load32 m 0 6 32;goto m release;
+  M.label m failure;error();
+  M.label m release;store m 5 (-168)0;load m 7 5 (-160);
+  test m 7;jump m 0x84 "__xen_win_parent_no_handle";close m;
+  load m 2 5 (-168);test m 2;jump m 0x88 "__xen_win_parent_no_handle";
+  test m 0;jump m 0x89 "__xen_win_parent_no_handle";store m 5 (-168)0;
+  M.label m "__xen_win_parent_no_handle";load m 7 5 (-152);unmap m;
+  load m 0 5 (-168);M.label m done_;finish();
   let finish=begin_ "exit"in api "ExitProcess" [g 7];M.bytes m[0x0f;0x0b];finish();
   let finish=begin_ "startup"in
   let failed="__xen_win_startup_failed" and loop="__xen_win_startup_loop"

@@ -203,9 +203,11 @@ fn read_dir(path: String) -> Result<Vec<String>, std.io.IoError> {
 }
 
 test fn null_file() {
-    assert(match read("/dev/null") { Result.Ok(text) => len(text) == 0, _ => false });
-    assert(match metadata("/dev/null") { Result.Ok(info) => !info.is_file && !info.is_directory, _ => false });
-    assert(match read_dir("/dev/null") { Result.Err(_) => true, _ => false });
+    let nul: Vec<U8> = [0];
+    let path = nul.into_string();
+    assert(match read(path) { Result.Err(std.io.IoError.InvalidPath) => true, _ => false });
+    assert(match metadata(path) { Result.Err(std.io.IoError.InvalidPath) => true, _ => false });
+    assert(match read_dir(path) { Result.Err(std.io.IoError.InvalidPath) => true, _ => false });
 }
 
 test fn invalid_paths_and_records() {

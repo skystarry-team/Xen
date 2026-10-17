@@ -590,6 +590,8 @@ let rvalue e (v:value) node =
       load e 8 number;List.iteri(fun reg arg->load e reg arg)args;
       R.raw_syscall m;store e v 0
   |Syscall []->assert false
+  |Platform_call(service,_)->unsupported ~span:v.span
+      ("platform service '"^Platform_service.name service^"' is unavailable for this target")
   |_->unsupported ~span:v.span "this operation is not implemented in the initial ARM64 backend"
 let operation e (op:operation) = match op.node with
   |Storage_live _|Storage_dead _->()

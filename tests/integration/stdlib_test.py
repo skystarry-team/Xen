@@ -332,6 +332,9 @@ fn main() {
         path = self.root / "input"
         path.write_bytes(b"a\0\xff\n")
         source = ('use std.fs;use std.io;fn main(){'
+                  'assert(match std.fs.read("/dev/null"){Result.Ok(s)=>s=="",_=>false});'
+                  'assert(match std.fs.metadata("/dev/null"){Result.Ok(m)=>!m.is_file && !m.is_directory,_=>false});'
+                  'assert(match std.fs.read_dir("/dev/null"){Result.Err(_)=>true,_=>false});'
                   'assert(match std.fs.copy("input","output"){Result.Ok(4)=>true,_=>false});'
                   'assert(match std.fs.read("."){Result.Err(std.io.IoError.Read(21))=>true,_=>false});'
                   'assert(match std.fs.write("/dev/full","x"){Result.Err(std.io.IoError.Write(28))=>true,_=>false});'

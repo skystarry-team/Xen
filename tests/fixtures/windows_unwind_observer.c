@@ -1,12 +1,22 @@
 /* SPDX-License-Identifier: MIT OR Apache-2.0 */
 /* Native-only observer called through the generated program's real IAT. */
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#endif
 #include <windows.h>
+#include <tlhelp32.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stddef.h>
 _Static_assert(sizeof(CONTEXT)==1232,"unexpected AMD64 CONTEXT size");
 _Static_assert(offsetof(CONTEXT,Xmm0)==416,"unexpected AMD64 XMM context layout");
+_Static_assert(sizeof(PROCESSENTRY32W)==568,"unexpected process snapshot size");
+_Static_assert(offsetof(PROCESSENTRY32W,th32ProcessID)==8,"unexpected PID offset");
+_Static_assert(offsetof(PROCESSENTRY32W,th32ParentProcessID)==32,"unexpected parent PID offset");
+_Static_assert(sizeof(BY_HANDLE_FILE_INFORMATION)==52,"unexpected metadata size");
+_Static_assert(offsetof(BY_HANDLE_FILE_INFORMATION,ftLastWriteTime)==20,"unexpected FILETIME offset");
+_Static_assert(offsetof(FILE_FULL_DIR_INFO,FileName)==68,"unexpected directory name offset");
 
 __declspec(dllexport) DWORD RunOnSmallStack(LPTHREAD_START_ROUTINE code) {
     HANDLE thread=CreateThread(NULL,4096,code,NULL,0,NULL);

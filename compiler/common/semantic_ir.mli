@@ -64,6 +64,7 @@ type rvalue =
   | Inline_asm of Ast.asm_spec * value list
   | Cpu_relax | Memory_fence
   | Foreign_call of Ast.foreign_symbol * value list
+  | Platform_call of Platform_service.t * value list
   | Atomic of Ast.atomic_kind * Ast.typ * Ast.memory_order * Ast.memory_order option * value list
   | Ptr_addr of Ast.typ * value
   | Ptr_len of value

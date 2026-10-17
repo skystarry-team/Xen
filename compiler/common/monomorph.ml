@@ -63,7 +63,7 @@ let run ?(iterator_sources=[]) (program:program) =
   let builtin_call n = List.mem n ["print";"println";"len";"arg";"arg_count";"assert";"assert_msg";
     "panic";"float";"int";"int_to_str";"zeros";"repeat";"read_text";"read_ints";"read_floats";
     "open_read";"open_write";"raw_alloc_int";"raw_load_int";"raw_store_int";"raw_free_int";
-    "raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";
+    "raw_alloc";"raw_load";"raw_store";"raw_free";"ptr_addr";"ptr_from_addr";"volatile_load";"volatile_store";"cpu_relax";"memory_fence";"extern_call";"platform_call";"atomic_load";"atomic_store";"atomic_exchange";"atomic_compare_exchange";"atomic_fetch_add";"atomic_fetch_sub";"atomic_fetch_and";"atomic_fetch_or";"atomic_fetch_xor";
     "syscall0";"syscall1";"syscall2";"syscall3";"syscall4";"syscall5";"syscall6";
     "i8";"u8";"i16";"u16";"i32";"u32";"i64";"u64";"f32";"f64"]in
   let local_call env n =
@@ -250,7 +250,7 @@ let run ?(iterator_sources=[]) (program:program) =
     |("print"|"println"|"assert"|"assert_msg"|"panic"|"cpu_relax"|"memory_fence"|"raw_store"|"volatile_store"|"raw_free"|"raw_store_int"|"raw_free_int"),_,_->Some Unit
     |("i8"|"u8"|"i16"|"u16"|"i32"|"u32"|"i64"|"u64"|"f32"|"f64"|"int"|"float"),_,_->
         Some(match n with "i8"->I8|"u8"->U8|"i16"->I16|"u16"->U16|"i32"->I32|"u32"->U32|"u64"->U64|"f32"->F32|"f64"|"float"->F64|_->I64)
-    |("len"|"arg_count"|"ptr_addr"|"raw_load_int"|"syscall0"|"syscall1"|"syscall2"|"syscall3"|"syscall4"|"syscall5"|"syscall6"),_,_->Some I64
+    |("platform_call"|"len"|"arg_count"|"ptr_addr"|"raw_load_int"|"syscall0"|"syscall1"|"syscall2"|"syscall3"|"syscall4"|"syscall5"|"syscall6"),_,_->Some I64
     |_->None
   and method_signature env r name = match Option.bind(generic_type env r)(fun t->aggregate(referent t))with
     |Some(owner,args)->let method_name="__method$"^owner^"$"^name in
@@ -561,7 +561,7 @@ let run ?(iterator_sources=[]) (program:program) =
     | Match_control(_,typ,_,_)->Some typ
     | Call(("open_read"|"open_write"),_)->Some File
     | Call(("read_text"|"arg"|"int_to_str"),_)->Some String
-    | Call(("arg_count"|"len"|"ptr_addr"|"syscall0"|"syscall1"|"syscall2"|"syscall3"|"syscall4"|"syscall5"|"syscall6"),_)->Some I64
+    | Call(("platform_call"|"arg_count"|"len"|"ptr_addr"|"syscall0"|"syscall1"|"syscall2"|"syscall3"|"syscall4"|"syscall5"|"syscall6"),_)->Some I64
     | Call(("i8"|"u8"|"i16"|"u16"|"i32"|"u32"|"i64"|"u64"|"f32"|"f64"|"int"|"float" as n),_)->
         Some(match n with "i8"->I8|"u8"->U8|"i16"->I16|"u16"->U16|"i32"->I32|"u32"->U32
           |"u64"->U64|"f32"->F32|"f64"|"float"->F64|_->I64)

@@ -21,6 +21,7 @@ module Probe = struct
   let open_ = service "open"
   let exit output status = service ("exit:" ^ string_of_int status) output
   let raw_syscall output ~arity = service ("raw:" ^ string_of_int arity) output
+  let platform_call _ _ = Error "platform service unavailable in probe runtime"
   let entry output =
     M.bytes output [0x90;0x90;0x90];M.label output "_start"
   let start output = entry output;service "start" output

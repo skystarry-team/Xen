@@ -60,7 +60,7 @@ class WindowsRuntimeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return source, PE(image)
 
-    def execute(self, pe, *args, env=None):
+    def execute(self, pe, *args, env=None, data=None):
         if not (NATIVE or AUXILIARY):
             self.skipTest("execution requires native Windows or Linux x86-64 service oracle")
         command = ([str(pe.path)] if NATIVE else
@@ -69,7 +69,7 @@ class WindowsRuntimeTests(unittest.TestCase):
         if AUXILIARY:
             environment["XEN_TEST_RESOURCE_CHECK"] = "1"
         return subprocess.run([*command, *map(str, args)], cwd=self.root, capture_output=True,
-                              env=environment, timeout=30)
+                              env=environment, input=data, timeout=30)
 
     def success(self, result, stdout=b""):
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, stdout, b""))
@@ -154,12 +154,193 @@ class WindowsRuntimeTests(unittest.TestCase):
             self.assertIn(message, result.stderr)
             self.assertIn(str(source).encode(), result.stderr)
             self.assertFalse(output.exists())
-        source.write_text('use std.fs;fn main(){}')
-        result = self.invoke("build", source, "--target=x86_64-windows", "-o", output)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn(b"std.platform", result.stderr)
-        self.assertIn(b"x86_64-windows", result.stderr)
-        self.assertFalse(output.exists())
+        source.write_text('#global[bb]\nfn main(){platform_call("id");}')
+        for target in ("x86_64-linux", "aarch64-linux"):
+            result = self.invoke("build", source, "--target="+target, "-o", output)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(b"platform service 'id'", result.stderr)
+            self.assertIn(b"unavailable", result.stderr)
+            self.assertIn(str(source).encode(), result.stderr)
+            self.assertFalse(output.exists())
+
+    def test_stdlib_file_modes_metadata_and_utf8_paths(self):
+        path = self.root/"표준 파일 😀.txt"
+        copy = self.root/"복사 😀.txt"
+        text = ('use std.fs;use std.io;fn main(){'
+                'assert(match std.fs.write(arg(0),"old data"){Result.Ok(8)=>true,_=>false});'
+                'assert(match std.fs.write(arg(0),"한"){Result.Ok(3)=>true,_=>false});'
+                'assert(match std.fs.append(arg(0),"글😀"){Result.Ok(7)=>true,_=>false});'
+                'assert(match std.fs.append(arg(0),""){Result.Ok(0)=>true,_=>false});'
+                'assert(match std.fs.read(arg(0)){Result.Ok(s)=>s=="한글😀",_=>false});'
+                'assert(match std.fs.copy(arg(0),arg(1)){Result.Ok(10)=>true,_=>false});'
+                'assert(match std.fs.metadata(arg(0)){Result.Ok(m)=>m.size==10 && m.is_file && !m.is_directory,_=>false});'
+                'assert(match std.fs.metadata("."){Result.Ok(m)=>m.is_directory && !m.is_file,_=>false});'
+                'let m=match std.fs.metadata(arg(2)){Result.Ok(m)=>m.modified_seconds,_=>0};println(m);'
+                'assert(match std.fs.read("missing"){Result.Err(std.io.IoError.Open(2))=>true,_=>false});'
+                'assert(match std.fs.metadata("missing"){Result.Err(std.io.IoError.Metadata(2))=>true,_=>false});'
+                'let nul:Vec<U8>=[97,0,98];assert(match std.fs.write(nul.into_string(),"x"){Result.Err(std.io.IoError.InvalidPath)=>true,_=>false});'
+                'let bad:Vec<U8>=[255];assert(match std.fs.read(bad.into_string()){Result.Err(std.io.IoError.Open(84))=>true,_=>false});'
+                'assert(match std.fs.read_dir(arg(0)){Result.Err(_)=>true,_=>false});}')
+        stamp = self.root/"timestamp"
+        stamp.touch()
+        # FILETIME -> Unix seconds, including a fractional pre-1970 value.
+        os.utime(stamp, ns=(-1234500000, -1234500000))
+        for opt in ("off", "basic"):
+            _, pe = self.build(text, opt)
+            self.success(self.execute(pe, path, copy, stamp), b"-2\n")
+            self.assertEqual(path.read_bytes(), "한글😀".encode())
+            self.assertEqual(copy.read_bytes(), path.read_bytes())
+            path.unlink()
+            copy.unlink()
+            _, pe = self.build('use std.fs;fn main(){assert(match std.fs.append(arg(0),"created"){Result.Ok(7)=>true,_=>false});}', opt)
+            self.success(self.execute(pe, path))
+            self.assertEqual(path.read_bytes(), b"created")
+            path.unlink()
+
+    def test_stdlib_directory_batches_and_names(self):
+        directory = self.root/"목록 😀"
+        directory.mkdir()
+        empty = self.root/"empty"
+        empty.mkdir()
+        names = {f"파일-{i:03}-😀-abcdef" for i in range(140)}
+        for name in names:
+            (directory/name).touch()
+        text = ('use std.fs;fn main(){for pass in 0..4{'
+                'assert(match std.fs.read_dir(arg(1)){Result.Ok(v)=>v.len()==0,_=>false});'
+                'assert(match std.fs.read_dir("missing"){Result.Err(_)=>true,_=>false});'
+                'let names=match std.fs.read_dir(arg(0)){Result.Ok(v)=>v,_=>[]};'
+                'assert(names.len()==140);if pass==3{for index in 0..names.len(){println(names.get(index));}}}}')
+        for opt in ("off", "basic"):
+            _, pe = self.build(text, opt)
+            result = self.execute(pe, directory, empty)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, b"")
+            actual = result.stdout.decode().splitlines()
+            self.assertEqual(len(actual), len(names))
+            self.assertEqual(set(actual), names)
+
+    def test_stdlib_cwd_args_identity_and_io(self):
+        text = ('use std.env;use std.process;use std.io;fn main(){'
+                'println(std.process.id());println(std.process.parent_id());'
+                'println(match std.env.cwd(){Result.Ok(p)=>p,_=>"bad"});'
+                'let args=std.env.args();assert(args.len()==2 && args.get(0)=="" && args.get(1)=="인자 😀");'
+                'let text=match std.io.read_stdin(){Result.Ok(t)=>t,_=>"bad"};'
+                'assert(match std.io.write_stdout(text){Result.Ok(11)=>true,_=>false});'
+                'assert(match std.io.write_stderr("err"){Result.Ok(3)=>true,_=>false});'
+                'assert(match std.io.read_fd(-1){Result.Err(std.io.IoError.Read(9))=>true,_=>false});'
+                'assert(match std.io.write_fd(-1,"x"){Result.Err(std.io.IoError.Write(9))=>true,_=>false});}')
+        for opt in ("off", "basic"):
+            _, pe = self.build(text, opt)
+            command = ([str(pe.path)] if NATIVE else
+                       [str(self.tools/"runner"), str(pe.path), str(self.tools/"api.so"), "--runtime"])
+            env = dict(os.environ, XEN_TEST_RESOURCE_CHECK="1")
+            with subprocess.Popen([*command, "", "인자 😀"], cwd=self.root, env=env,
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+                stdout, stderr = child.communicate("입력 😀".encode(), timeout=30)
+                self.assertEqual(child.returncode, 0, stderr)
+                lines = stdout.decode().splitlines()
+                self.assertEqual(lines, [str(child.pid), str(os.getpid()), str(self.root), "입력 😀"])
+                self.assertEqual(stderr, b"err")
+
+    def test_metadata_follows_file_and_directory_links(self):
+        directory = self.root/"실제 😀"
+        directory.mkdir()
+        target = directory/"file"
+        target.write_bytes(b"follow")
+        (self.root/"file-link").symlink_to(target)
+        (self.root/"dir-link").symlink_to(directory, target_is_directory=True)
+        (self.root/"dangling").symlink_to(directory/"missing")
+        text = ('use std.fs;use std.io;fn main(){'
+                'assert(match std.fs.metadata("file-link"){Result.Ok(m)=>m.is_file && !m.is_directory && m.size==6,_=>false});'
+                'assert(match std.fs.metadata("dir-link"){Result.Ok(m)=>m.is_directory && !m.is_file,_=>false});'
+                'assert(match std.fs.read("file-link"){Result.Ok(t)=>t=="follow",_=>false});'
+                'assert(match std.fs.read_dir("dir-link"){Result.Ok(v)=>v.len()==1 && v.get(0)=="file",_=>false});'
+                'assert(match std.fs.metadata("dangling"){Result.Err(std.io.IoError.Metadata(2))=>true,_=>false});}')
+        for opt in ("off", "basic"):
+            _, pe = self.build(text, opt)
+            self.success(self.execute(pe))
+
+    def test_directory_decoder_windows_boundaries(self):
+        def record(name, next_offset=0):
+            encoded = name.encode("utf-16-le", errors="surrogatepass")
+            data = bytearray(68+len(encoded))
+            struct.pack_into("<I", data, 0, next_offset)
+            struct.pack_into("<I", data, 60, len(encoded))
+            data[68:] = encoded
+            return data
+        good = record("한😀")
+        bad = [bytearray(67), record(""), record("\0"), record("\ud800"),
+               record("\udc00"), record("\ud800a"), record("a", 1), record("a", 72), good+b"\0"]
+        odd = record("a")
+        struct.pack_into("<I", odd, 60, 1)
+        bad.append(odd)
+        large = record("a")
+        struct.pack_into("<I", large, 60, 0xffffffff)
+        bad.append(large)
+        body = ''
+        for index, data in enumerate(bad):
+            body += f'let b{index}:Vec<U8>=[{",".join(map(str,data))}];'
+            body += f'assert(match std.fs.decode_directory(b{index}.as_slice()){{Result.Err(_)=>true,_=>false}});'
+        body += f'let good:Vec<U8>=[{",".join(map(str,good))}];'
+        body += 'assert(match std.fs.decode_directory(good.as_slice()){Result.Ok(v)=>v.len()==1 && v.get(0)=="한😀",_=>false});'
+        for opt in ("off", "basic"):
+            _, pe = self.build('use std.fs;fn main(){'+body+'}', opt)
+            self.success(self.execute(pe))
+
+    @unittest.skipUnless(AUXILIARY, "standard library fault injection uses the service oracle")
+    def test_stdlib_query_failures_release_resources(self):
+        text = ('use std.fs;use std.io;use std.env;use std.process;fn main(){'
+                'println(match std.fs.metadata(arg(0)){Result.Err(std.io.IoError.Metadata(c))=>c,_=>0});'
+                'println(match std.fs.read_dir(arg(1)){Result.Err(std.io.IoError.Directory(c))=>c,_=>0});'
+                'println(match std.env.cwd(){Result.Err(std.io.IoError.Cwd(c))=>c,_=>0});'
+                'println(std.process.parent_id());}')
+        file = self.root/"payload"
+        file.touch()
+        directory = self.root/"entries"
+        directory.mkdir()
+        for index in range(100):
+            (directory/f"entry-{index:03}-long-name").touch()
+        for opt in ("off", "basic"):
+            _, pe = self.build(text, opt)
+            for parent_error in ("XEN_TEST_SNAPSHOT_FAIL", "XEN_TEST_PROCESS_FIRST_FAIL", "XEN_TEST_PROCESS_NEXT_FAIL"):
+                env = {"XEN_TEST_METADATA_FAIL":"1", "XEN_TEST_DIRECTORY_FAIL":"2", "XEN_TEST_CWD_FAIL":"1", parent_error:"1"}
+                self.success(self.execute(pe, file, directory, env=env), b"5\n5\n5\n-5\n")
+            _, pe = self.build('use std.env;use std.io;fn main(){assert(match std.env.cwd(){Result.Err(std.io.IoError.Cwd(34))=>true,_=>false});}', opt)
+            self.success(self.execute(pe, env={"XEN_TEST_CWD_RACE":"1"}))
+
+    @unittest.skipUnless(AUXILIARY, "service allocation and record fault injection uses the oracle")
+    def test_stdlib_allocation_conversion_and_record_failures(self):
+        file = self.root/"target"
+        file.touch()
+        directory = self.root/"entries"
+        directory.mkdir()
+        (directory/"entry").touch()
+        cases = [
+            ('use std.fs;use std.io;fn main(){assert(match std.fs.metadata("target"){Result.Err(std.io.IoError.Metadata(12))=>true,_=>false});}',
+             [{"XEN_TEST_METADATA_ALLOC_FAIL":"1"}]),
+            ('use std.env;use std.io;fn main(){assert(match std.env.cwd(){Result.Err(std.io.IoError.Cwd(12))=>true,_=>false});}',
+             [{"XEN_TEST_CWD_ALLOC_FAIL":"1"}]),
+            ('use std.process;fn main(){assert(std.process.parent_id()==-12);}',
+             [{"XEN_TEST_PARENT_ALLOC_FAIL":"1"}]),
+            ('use std.env;use std.io;fn main(){assert(match std.env.cwd(){Result.Err(std.io.IoError.Cwd(84))=>true,_=>false});}',
+             [{"XEN_TEST_CONVERT_FAIL":str(n)} for n in (1,2,3)]),
+            ('use std.fs;use std.io;fn main(){assert(match std.fs.read_dir("entries"){Result.Err(std.io.IoError.Directory(22))=>true,_=>false});}',
+             [{"XEN_TEST_DIRECTORY_CORRUPT":mode} for mode in ("next","length","odd","aligned")]),
+        ]
+        for opt in ("off", "basic"):
+            for text, environments in cases:
+                _, pe = self.build(text, opt)
+                for env in environments:
+                    self.success(self.execute(pe, env=env))
+
+    @unittest.skipUnless(NATIVE, "CLI run/test needs a native Windows host")
+    def test_native_stdlib_test_selectors(self):
+        for opt in ("off", "basic"):
+            for module in ("std.fs", "std.io", "std.env", "std.process"):
+                result = self.invoke("test", module, f"--opt={opt}")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(("PASS "+module+".").encode(), result.stdout)
+                self.assertIn(b"0 failed", result.stdout)
 
     @unittest.skipUnless(NATIVE, "CLI run/test needs a native Windows host")
     def test_native_cli_tests_success_and_failure(self):
