@@ -68,12 +68,17 @@ class PE:
     def imports(self):
         rva, size = self.directories[1]
         result = {}
+        if (rva, size) == (0, 0):
+            return result
+        if not rva or size < 20:
+            raise ValueError("invalid PE import directory")
         at = self.file_offset(rva, size)
-        for offset in range(at, at+size, 20):
+        # Some linkers include thunks/names in the directory extent. The null
+        # descriptor terminates the table, wherever it lies within that extent.
+        for offset in range(at, at+size-19, 20):
             lookup, stamp, chain, name, iat = struct.unpack_from("<5I", self.data, offset)
             if not any((lookup, stamp, chain, name, iat)):
-                assert offset == at+size-20
-                break
+                return result
             assert stamp == chain == 0
             symbols = []
             while True:
@@ -85,7 +90,7 @@ class PE:
                 assert hint >> 63 == 0
                 symbols.append(self.cstring(hint+2))
             result[self.cstring(name)] = (symbols, iat)
-        return result
+        raise ValueError("unterminated PE import directory")
 
 
 class PETests(unittest.TestCase):
@@ -134,6 +139,7 @@ class PETests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pe.file_offset(data[0]+0x1000)
         imports = pe.imports()
+        self.assertEqual(pe.directories[1][1], 20*(len(imports)+1))
         self.assertEqual(set(imports), {"SHELL32.dll", "KERNEL32.dll"})
         self.assertEqual(imports["SHELL32.dll"][0], ["CommandLineToArgvW"])
         self.assertEqual(set(imports["KERNEL32.dll"][0]), {"ExitProcess", "GetStdHandle", "ReadFile", "WriteFile", "GetModuleHandleW"})
@@ -168,6 +174,28 @@ class PETests(unittest.TestCase):
         for value in ("WriteFile", "ExitProcess", ".pdata", ".reloc"):
             self.assertIn(value, result.stdout)
 
+    def test_import_directory_extent_can_include_lookup_tables_and_names(self):
+        pe = self.fixture()
+        expected = pe.imports()
+        image = bytearray(pe.data)
+        # Reproduce MinGW's directory size, which covers the import payload
+        # beyond the descriptor terminator instead of only the descriptor array.
+        struct.pack_into("<I", image, pe.opt+112+8+4, pe.sections[".idata"][1])
+        path = self.root/"extended-import-directory.exe"
+        path.write_bytes(image)
+        self.assertEqual(PE(path).imports(), expected)
+
+    def test_import_directory_must_contain_a_complete_null_descriptor(self):
+        pe = self.fixture()
+        for size in (0, 19, 40, 59):
+            with self.subTest(size=size):
+                image = bytearray(pe.data)
+                struct.pack_into("<I", image, pe.opt+112+8+4, size)
+                path = self.root/"truncated-import-directory.exe"
+                path.write_bytes(image)
+                with self.assertRaisesRegex(ValueError, "PE import directory"):
+                    PE(path).imports()
+
     def test_relocation_blocks_across_code_constants_and_zero_fill_targets(self):
         pe = self.fixture("layout")
         text, const, data = (pe.sections[name] for name in (".text", ".rdata", ".data"))
@@ -192,6 +220,7 @@ class PETests(unittest.TestCase):
         self.assertEqual(at, end)
         self.assertEqual(found, sorted(expected))
         self.assertEqual(pe.directories[1], (0, 0))
+        self.assertEqual(pe.imports(), {})
         self.assertEqual(pe.directories[3], (0, 0))
 
     @unittest.skipUnless(NATIVE, "requires native Windows x64")
