@@ -120,7 +120,7 @@ Python은 패키징과 검증에 필요하며, 설치한 컴파일러를 사용�
 기본 버전은 `VERSION` 파일에서 읽습니다. Make에 버전을 지정하면 실행 파일에 포함됩니다.
 
 ```sh
-make build VERSION=0.1.0-demo.3
+make build VERSION=v0.1.0-demo.4
 compiler/dist/xen version
 ```
 

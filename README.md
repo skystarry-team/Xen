@@ -13,6 +13,13 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
+<div align="center">
+
+  [![Release packages](https://github.com/skystarry-team/Xen/actions/workflows/release.yml/badge.svg)](https://github.com/skystarry-team/Xen/actions/workflows/release.yml)
+  ![Version Badge](https://img.shields.io/badge/version-v0.1.0--demo.4-blue?link=https%3A%2F%2Fgithub.com%2Fskystarry-team%2FXen)
+</div>
+
+
 Xen lets you write small programs using functions, strings, vectors, structs,
 and explicit error handling. Build a standalone executable or run a source file
 directly with the `xen` command.

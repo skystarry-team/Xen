@@ -121,7 +121,7 @@ and verification, not for use of an installed compiler.
 `VERSION` declares the default compiler version. Make embeds a supplied override:
 
 ```sh
-make build VERSION=0.1.0-demo.3
+make build VERSION=v0.1.0-demo.4
 compiler/dist/xen version
 ```
 
