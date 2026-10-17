@@ -143,3 +143,14 @@ validation, Debian version ordering, real .deb metadata/payload and relocated
 execution, exact release assets/checksums, and preservation of existing files on
 archive or Debian packaging failure. Debian checks require `dpkg-dev`. Full archive
 relocation and compiler execution checks use `integration/host_test.py`.
+
+`python3 tests/integration/windows_package_test.py` checks PE architecture and
+system DLL policy (including rejection of delay imports), ZIP payloads, versions,
+format selection and preservation of existing output on failure. It also runs
+under `--suite packaging` and `--suite windows`. On native Windows x86_64 it builds
+the actual ZIP, extracts and relocates it, then runs version/check/build/run/test
+with an isolated PATH outside the repository, including stdlib file I/O, generated
+PE execution, Linux cross output and missing-bundle failure. Release CI repeats
+this on the ZIP uploaded for assembly using `python -m packaging.windows.smoke`.
+This checks a Windows Server 2022 CI host, not a clean Windows installation.
+Windows desktop validation on physical hardware is still required.

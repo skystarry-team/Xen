@@ -23,15 +23,41 @@ on `make package` or `make package-one`. Existing Make selectors remain availabl
 For installation of downloaded artifacts, see [installing Xen](installation.md).
 
 Distribution code is organized under [`packaging/`](../../../packaging/README.md):
-`archive/`, `debian/`, `toolchains/` and `github/`, with shared validation and build
+`archive/`, `debian/`, `windows/`, `toolchains/` and `github/`, with shared validation and build
 orchestration at the top level. `scripts/` contains the general test runner.
 
 Binary archives contain `bin/xen`, the runtime standard library, learning examples,
 license notices, `VERSION` and a distribution README. The `.xen` files in `stdlib/`
-are required by the compiler's module loader. Both Linux platform profiles are
-included so either compiler can emit either supported target.
+are required by the compiler's module loader. All three platform profiles are
+included so each compiler can emit Linux x86_64/AArch64 and Windows x86_64 programs.
 Compiler source, build documentation and development scripts belong to the
 separate source archive. macOS is unsupported.
+
+## Windows portable ZIP (experimental)
+
+On a native Windows x64 OCaml switch, run from the repository root in PowerShell:
+
+```powershell
+opam exec -- dune build '@release'
+opam exec -- python -m packaging.cli --platform windows --architecture x86_64 --formats zip
+$version = (Get-Content VERSION -Raw).Trim()
+python -m packaging.windows.smoke "dist/xen-$version-windows-x86_64.zip" --version $version
+```
+
+This produces `dist/xen-<version>-windows-x86_64.zip` with `bin/xen.exe`, all
+standard library profiles, examples and license notices. No Make is required.
+The script checks AMD64 PE32+, the embedded version and the reviewed system DLL
+import list. Extra runtime DLLs and delay imports fail packaging. A completed
+temporary ZIP replaces the output only after successful creation.
+
+The smoke test extracts and moves the actual ZIP to a path containing spaces and
+Unicode, then executes version/check/build/run/test outside the repository with
+only the installed `bin` and Windows System32 on PATH. It checks generated PE
+execution, stdlib file I/O and both Linux cross targets, plus failure without the
+bundled stdlib. This is an isolated PATH test on CI, not a clean Windows install.
+Compiler, loader and standard library checks have passed Windows Server 2022 native
+CI; the new ZIP check must also pass before release. Windows desktop validation
+on physical hardware is still required. Windows ARM64 is unsupported.
 
 ## Cross toolchain configuration
 
@@ -142,18 +168,18 @@ and [dpkg-shlibdeps](https://manpages.debian.org/stable/dpkg-dev/dpkg-shlibdeps.
 ## GitHub releases
 
 [The release workflow](../../../.github/workflows/release.yml) builds natively on
-Ubuntu 22.04 for amd64 and arm64, using OCaml 5.5.0 and Dune 3.24.2. This builds
-both the OCaml runtime and Xen against the older system libraries. Packages must
+Ubuntu 22.04 for amd64 and arm64, and Windows Server 2022 for x86_64, using OCaml 5.5.0 and Dune 3.24.2. This builds
+both the OCaml runtime and Xen against the older system libraries. Linux packages must
 pass installation, stdlib discovery, check/build/run/test and removal in clean
 **Debian 12/13 and Ubuntu 22.04/24.04/26.04** containers on each CPU. ARM hardware
 validation of other compiler features remains subject to the project's existing
 experimental-support scope. Other derivatives are not separately certified.
 
 1. Set `VERSION`, commit the release changes, and push the matching `v<VERSION>` tag.
-2. Both architecture jobs build tar.gz and .deb assets and run installation checks.
-3. Assembly requires exactly both binary archives, both .deb files and one source
+2. Both Linux jobs build tar.gz and .deb assets and run installation checks. The Windows job builds and relocates the ZIP, then checks execution with an isolated PATH.
+3. Assembly requires both Linux binary archives, both .deb files, the Windows ZIP and one source
    archive, then generates `SHA256SUMS`.
-4. Only a tag push publishes a GitHub release. It creates a draft, uploads all six
+4. Only a tag push publishes a GitHub release. It creates a draft, uploads all seven
    assets, then publishes it. Versions with `_` or `-` suffixes, or alpha/beta/rc
    markers, are marked as prereleases. A failed upload leaves a draft for inspection;
    delete that draft before rerunning the publish job. Published releases are not overwritten.
@@ -167,11 +193,12 @@ Debian metadata must be configured):
 ```sh
 make release-package DIST_DIR=dist/release
 make source-package DIST_DIR=dist/release
+# Copy xen-<version>-windows-x86_64.zip from the native Windows build into dist/release.
 python3 -m packaging.github.release --directory dist/release
 (cd dist/release && sha256sum --check SHA256SUMS)
 ```
 
-`release-package` itself creates four binary packages. The source archive and
+`release-package` itself creates four Linux binary packages. The Windows ZIP, source archive and
 checksum manifest are separate steps; the GitHub workflow performs all of them.
 After committing the release changes, publish the matching tag:
 
@@ -183,7 +210,7 @@ git push origin "$XEN_RELEASE_TAG"
 
 To validate an assembled local directory, run
 `python3 -m packaging.github.release --directory /path/to/assets --tag v<VERSION>`.
-The asset directory must contain only the five release packages (and optionally
+The asset directory must contain only the six release packages (and optionally
 an existing `SHA256SUMS`); stale files are rejected.
 
 ## Source distribution

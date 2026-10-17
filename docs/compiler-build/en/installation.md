@@ -2,15 +2,49 @@
 
 Download a matching compiler package and `SHA256SUMS` from
 [GitHub Releases](https://github.com/skystarry-team/Xen/releases).
-Use a new download directory for each release and select one compiler host CPU.
-The host CPU identifies the machine that runs Xen; either compiler can generate
-both supported Linux targets. AArch64 remains experimental as described in the
+Use a new download directory for each release and select the compiler host OS and CPU.
+Each compiler can generate Linux x86_64/AArch64 and Windows x86_64 programs.
+AArch64 remains experimental as described in the
 [project support scope](../../../README.md).
+
+Linux compiler packages:
 
 | Host CPU | Debian architecture | Debian package | Binary archive |
 | --- | --- | --- | --- |
 | x86-64 | `amd64` | `xen-lang_<debian-version>_amd64.deb` | `xen-<version>-linux-x86_64.tar.gz` |
 | AArch64 | `arm64` | `xen-lang_<debian-version>_arm64.deb` | `xen-<version>-linux-aarch64.tar.gz` |
+
+## Windows x86-64 (experimental)
+
+Choose `xen-<version>-windows-x86_64.zip` and `SHA256SUMS` from the same release.
+Use `Get-FileHash .\xen-<version>-windows-x86_64.zip -Algorithm SHA256` and compare
+the result with that ZIP's entry in `SHA256SUMS` before extraction.
+In PowerShell, replace `<version>` with the release version:
+
+```powershell
+$version = "<version>"
+Expand-Archive -LiteralPath ".\xen-$version-windows-x86_64.zip" -DestinationPath .\xen
+Set-Location ".\xen\xen-$version-windows-x86_64"
+.\bin\xen.exe version
+.\bin\xen.exe run examples\demo.xen
+.\bin\xen.exe build examples\demo.xen -o app.exe
+.\app.exe
+.\bin\xen.exe test std.fs --filter null
+$env:PATH = "$((Get-Location).Path)\bin;$env:PATH"
+```
+
+Keep `bin/` and `stdlib/` together. `XEN_STDLIB_ROOT` is unnecessary. OCaml, Dune,
+Python, Cygwin and MinGW are not required to use the installed compiler. PATH changes
+above apply to the current PowerShell session. Remove the extracted directory to
+uninstall and remove its PATH entry if you added one permanently.
+
+The default target is `x86_64-windows` and the default build output is `a.exe`.
+Use `--target=x86_64-linux` or `--target=aarch64-linux` to generate Linux programs;
+execution requires a compatible OS and CPU. Windows raw syscalls and `extern_call`
+are unsupported. Windows x86-64 remains experimental: compiler, PE execution and
+standard library tests pass on Windows Server 2022 native CI. Windows desktop
+validation on physical hardware is still required; Windows ARM64 is unsupported.
+The ZIP CI checks relocation and an isolated PATH, not installation on a clean OS.
 
 ## Debian and Ubuntu
 

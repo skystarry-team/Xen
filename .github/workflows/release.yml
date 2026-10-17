@@ -12,6 +12,9 @@ on:
       - 'VERSION'
       - 'scripts/test.py'
       - 'tests/integration/*package*'
+      - 'compiler/**'
+      - 'stdlib/**'
+      - 'docs/compiler-build/**'
 
 permissions:
   contents: read
@@ -78,8 +81,47 @@ jobs:
             dist/*.deb
           if-no-files-found: error
 
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.5.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build native Windows compiler
+        shell: pwsh
+        run: |
+          opam install dune.3.24.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $config = (opam exec -- ocamlc -config) -join "`n"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($config -notmatch '(?m)^system: (mingw64|win64)\s*$' -or $config -notmatch '(?m)^architecture: amd64\s*$') { throw "Expected native x64 Windows OCaml" }
+          if ($env:GITHUB_REF.StartsWith('refs/tags/') -and $env:GITHUB_REF_NAME -ne "v$((Get-Content VERSION -Raw).Trim())") { throw "Release tag does not match VERSION" }
+          opam exec -- dune build '@release'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify Windows ZIP packaging and relocated execution
+        run: opam exec -- python tests/integration/windows_package_test.py
+      - name: Create Windows distribution
+        run: opam exec -- python -m packaging.cli --platform windows --architecture x86_64 --formats zip
+      - name: Test actual release ZIP with isolated PATH
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          python -m packaging.windows.smoke "dist/xen-$version-windows-x86_64.zip" --version $version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows-x86_64
+          path: dist/*.zip
+          if-no-files-found: error
+
   assemble:
-    needs: build
+    needs: [build, windows]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6

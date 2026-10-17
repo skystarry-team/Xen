@@ -2,14 +2,48 @@
 
 [GitHub Releases](https://github.com/skystarry-team/Xen/releases)에서 호스트 CPU에
 맞는 컴파일러 패키지와 `SHA256SUMS`를 내려받습니다. 릴리스마다 새 다운로드
-디렉터리를 사용하고 컴파일러를 실행할 CPU 하나를 선택합니다. 어느 CPU용 컴파일러든
-지원하는 두 Linux 타깃의 프로그램을 생성할 수 있습니다. AArch64는
+디렉터리를 사용하고 컴파일러를 실행할 OS와 CPU를 선택합니다. 각 컴파일러에서
+Linux x86_64·AArch64와 Windows x86_64 프로그램을 생성할 수 있습니다. AArch64는
 [프로젝트 지원 범위](../../../README.md)에 명시한 실험적 지원 대상입니다.
+
+Linux 컴파일러 패키지:
 
 | 호스트 CPU | 데비안 아키텍처 | 데비안 패키지 | 바이너리 아카이브 |
 | --- | --- | --- | --- |
 | x86-64 | `amd64` | `xen-lang_<debian-version>_amd64.deb` | `xen-<version>-linux-x86_64.tar.gz` |
 | AArch64 | `arm64` | `xen-lang_<debian-version>_arm64.deb` | `xen-<version>-linux-aarch64.tar.gz` |
+
+## Windows x86-64 (실험적 지원)
+
+같은 릴리스의 `xen-<version>-windows-x86_64.zip`과 `SHA256SUMS`를 선택합니다.
+추출 전에 `Get-FileHash .\xen-<version>-windows-x86_64.zip -Algorithm SHA256`의
+결과를 `SHA256SUMS`의 해당 ZIP 항목과 비교합니다.
+PowerShell에서 `<version>`을 실제 릴리스 버전으로 바꾸어 실행합니다.
+
+```powershell
+$version = "<version>"
+Expand-Archive -LiteralPath ".\xen-$version-windows-x86_64.zip" -DestinationPath .\xen
+Set-Location ".\xen\xen-$version-windows-x86_64"
+.\bin\xen.exe version
+.\bin\xen.exe run examples\demo.xen
+.\bin\xen.exe build examples\demo.xen -o app.exe
+.\app.exe
+.\bin\xen.exe test std.fs --filter null
+$env:PATH = "$((Get-Location).Path)\bin;$env:PATH"
+```
+
+`bin/`과 `stdlib/`을 함께 유지하세요. `XEN_STDLIB_ROOT`는 설정하지 않아도 됩니다.
+설치한 컴파일러 사용에는 OCaml·Dune·Python·Cygwin·MinGW가 필요하지 않습니다.
+위 PATH 변경은 현재 PowerShell 세션에 적용됩니다. 제거할 때는 압축을 푼 디렉터리를
+삭제하고, PATH에 영구 등록했다면 해당 항목도 제거합니다.
+
+기본 타깃은 `x86_64-windows`, 기본 빌드 출력은 `a.exe`입니다.
+`--target=x86_64-linux` 또는 `--target=aarch64-linux`으로 Linux 프로그램을 만들 수 있으며,
+실행에는 호환 OS와 CPU가 필요합니다. Windows의 원시 syscall과 `extern_call`은 미지원입니다.
+Windows x86-64는 실험적 지원입니다. 컴파일러·PE 실행·표준 라이브러리는
+Windows Server 2022 네이티브 CI를 통과했으며, Windows 데스크톱 실 하드웨어 검증은
+추가로 필요합니다. Windows ARM64는 미지원입니다.
+ZIP CI는 재배치와 PATH 격리를 검사하며 깨끗한 OS 설치 검증을 대신하지 않습니다.
 
 ## Debian과 Ubuntu
 

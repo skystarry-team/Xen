@@ -10,6 +10,7 @@ Xen 컴파일러는 OCaml 실행 파일입니다. 컴파일러가 실행되는 C
 | --- | --- |
 | Linux x86_64에서 x86_64 컴파일러 빌드 | x86_64 네이티브 OCaml |
 | Linux AArch64에서 AArch64 컴파일러 빌드 | AArch64 네이티브 OCaml |
+| Windows x86_64에서 `xen.exe` 빌드 | Windows x64 네이티브 OCaml (MinGW) |
 | Linux x86_64에서 AArch64 컴파일러 빌드 | x86_64 네이티브 OCaml과 AArch64 크로스 OCaml |
 
 크로스 OCaml은 빌드 호스트에서 실행되며 다른 CPU의 코드를 생성합니다.
@@ -20,7 +21,7 @@ AArch64에서 실행되는 네이티브 OCaml을 x86_64에 설치하는 것과�
 
 - `PATH`에서 실행할 수 있는 네이티브 `ocamlc`와 `ocamlopt`. 기준 버전은 OCaml 5.5.0입니다.
 - Dune 3.18 이상. 기준 빌드 버전은 Dune 3.24.2입니다.
-- 저장소 빌드 명령에 사용하는 GNU Make.
+- Linux 저장소 명령에 사용하는 GNU Make. Windows에서는 Dune을 직접 실행합니다.
 - 패키징·테스트 스크립트에 사용하는 Python 3.10 이상. `.deb` 생성에는 `dpkg-dev`도 필요합니다.
 
 크로스 OCaml과 네이티브 OCaml의 버전은 정확히 같아야 합니다. 컴파일러 테스트에는
@@ -89,6 +90,30 @@ compiler/dist/xen run examples/demo.xen
 Linux AArch64의 네이티브 빌드도 크로스 workspace 없이 같은 명령을 사용합니다.
 CLI 기본 타깃은 컴파일러의 OCaml 빌드 아키텍처를 따릅니다.
 두 Linux 타깃은 스코프 AOT 최적화를 사용합니다.
+
+## Windows x86_64 (실험적 지원)
+
+OCaml 5.5.0과 Dune 3.24.2를 갖춘 Windows x64 네이티브 opam switch를 사용합니다.
+`ocamlc -config`에 `architecture: amd64`, `system: mingw64` 또는 `win64`,
+`os_type: Win32`가 나와야 합니다. Cygwin 타깃 OCaml은 이에 해당하지 않습니다.
+저장소 루트에서 PowerShell로 실행합니다.
+
+```powershell
+opam exec -- ocamlc -config
+opam install dune.3.24.2
+opam exec -- dune build '@release'
+.\compiler\dist\xen.exe version
+.\compiler\dist\xen.exe run examples\demo.xen
+opam exec -- python scripts/test.py --suite windows
+opam exec -- python -m packaging.cli --platform windows --formats zip
+```
+
+PowerShell의 `'@release'`는 따옴표로 감쌉니다. 배포 실행 파일은
+`compiler/dist/xen.exe`이며, 기본 생성 타깃은 `x86_64-windows`, 출력은 `a.exe`입니다.
+Windows Server 2022 네이티브 CI에서 컴파일러·PE/로더·런타임·표준 라이브러리 검사를
+통과했습니다. Windows 데스크톱 실 하드웨어 검증은 추가로 필요합니다.
+Windows ARM64·원시 syscall·`extern_call`은 미지원입니다.
+Python은 패키징과 검증에 필요하며, 설치한 컴파일러를 사용할 때는 필요하지 않습니다.
 
 ## 컴파일러 버전
 

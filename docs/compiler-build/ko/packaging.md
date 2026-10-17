@@ -22,14 +22,38 @@ dist/xen-<version>-linux-aarch64.tar.gz
 내려받은 배포물의 사용 방법은 [설치 안내](installation.md)에 있습니다.
 
 배포 코드는 [`packaging/`](../../../packaging/README.md)의 `archive/`, `debian/`,
-`toolchains/`, `github/`로 분리합니다. 상위 모듈이 공통 검증과 빌드를 담당하며,
+`windows/`, `toolchains/`, `github/`로 분리합니다. 상위 모듈이 공통 검증과 빌드를 담당하며,
 `scripts/`에는 일반 테스트 실행기를 둡니다.
 
 바이너리 tar.gz에는 `bin/xen`, 런타임 표준 라이브러리, 학습용 예제, 라이선스,
 `VERSION`과 배포용 README가 들어갑니다. `stdlib/`의 `.xen` 파일은 컴파일러의
-모듈 로더가 읽는 필수 구성입니다. 두 Linux 플랫폼 프로필을 함께 제공하므로
-어느 컴파일러에서도 두 지원 타깃의 프로그램을 생성할 수 있습니다.
+모듈 로더가 읽는 필수 구성입니다. 세 플랫폼 프로필을 함께 제공하므로
+각 컴파일러에서 Linux x86_64·AArch64와 Windows x86_64 프로그램을 생성할 수 있습니다.
 컴파일러 소스·빌드 문서·개발 스크립트는 별도 소스 패키지에 포함합니다. macOS는 미지원입니다.
+
+## Windows 포터블 ZIP (실험적 지원)
+
+Windows x64 네이티브 OCaml switch를 준비하고 저장소 루트에서 PowerShell로 실행합니다.
+
+```powershell
+opam exec -- dune build '@release'
+opam exec -- python -m packaging.cli --platform windows --architecture x86_64 --formats zip
+$version = (Get-Content VERSION -Raw).Trim()
+python -m packaging.windows.smoke "dist/xen-$version-windows-x86_64.zip" --version $version
+```
+
+`dist/xen-<version>-windows-x86_64.zip`에 `bin/xen.exe`, 모든 표준 라이브러리
+프로필, 예제와 라이선스를 넣습니다. Make는 필요하지 않습니다. AMD64 PE32+ 형식,
+실행 파일의 내장 버전과 검토된 시스템 DLL import 목록을 검사하며, 추가 런타임 DLL이나
+지연 import가 있으면 패키징을 중단합니다. 임시 ZIP 생성을 마친 뒤에만 기존 출력 파일을 교체합니다.
+
+검증 스크립트는 실제 ZIP을 추출하여 공백·유니코드가 포함된 경로로 옮기고 저장소 밖에서
+version/check/build/run/test를 실행합니다. PATH에는 설치한 `bin`과 Windows System32만
+남깁니다. 생성된 PE 실행, stdlib 파일 입출력, 두 Linux 타깃 생성과 번들 stdlib 누락 시
+실패도 확인합니다. 이는 CI의 PATH 격리 검사이며 깨끗한 Windows 설치 검증은 아닙니다.
+컴파일러·로더·표준 라이브러리는 Windows Server 2022 네이티브 CI를 통과했으며,
+새 ZIP 검증도 릴리스 전에 통과해야 합니다. Windows 데스크톱 실 하드웨어 검증은
+추가로 필요합니다. Windows ARM64는 미지원입니다.
 
 ## 크로스 툴체인 설정
 
@@ -134,17 +158,17 @@ sudo apt remove xen-lang
 ## GitHub 릴리스
 
 [릴리스 워크플로](../../../.github/workflows/release.yml)는 Ubuntu 22.04의 amd64·arm64
-러너에서 OCaml 5.5.0과 Dune 3.24.2로 각각 네이티브 빌드합니다.
+러너와 Windows Server 2022 x86_64 러너에서 OCaml 5.5.0과 Dune 3.24.2로 각각 네이티브 빌드합니다.
 OCaml 런타임도 이 환경에서 빌드해 시스템 라이브러리 기준을 맞춥니다.
-각 CPU에서 **Debian 12/13, Ubuntu 22.04/24.04/26.04**의 깨끗한 컨테이너에 설치하여
+Linux 패키지는 각 CPU에서 **Debian 12/13, Ubuntu 22.04/24.04/26.04**의 깨끗한 컨테이너에 설치하여
 stdlib 탐색과 check/build/run/test 및 제거 검사를 통과해야 합니다.
 다른 기능의 ARM 실기기 검증은 기존 실험적 지원 범위를 따르며,
 파생 배포판은 개별 인증 대상에 포함하지 않습니다.
 
 1. `VERSION`을 설정하고 변경 사항을 커밋한 뒤 정확히 일치하는 `v<VERSION>` 태그를 push합니다.
-2. 두 CPU의 tar.gz·deb 빌드와 설치 검사를 실행합니다.
-3. 바이너리 tar.gz 2개, deb 2개, 소스 tar.gz 1개가 정확히 있는지 검사하고 `SHA256SUMS`를 만듭니다.
-4. 태그 push일 때만 GitHub 릴리스를 만듭니다. 초안 생성 후 파일 6개를 업로드하고 공개합니다.
+2. 두 Linux CPU의 tar.gz·deb 빌드와 설치 검사를 실행합니다. Windows 작업은 ZIP을 생성·재배치하고 격리한 PATH에서 실행을 검사합니다.
+3. 바이너리 tar.gz 2개, deb 2개, Windows ZIP 1개, 소스 tar.gz 1개가 정확히 있는지 검사하고 `SHA256SUMS`를 만듭니다.
+4. 태그 push일 때만 GitHub 릴리스를 만듭니다. 초안 생성 후 파일 7개를 업로드하고 공개합니다.
    `_`·`-` 접미사 또는 alpha/beta/rc 표시가 있는 버전은 prerelease입니다.
    업로드 실패 시 초안이 남으므로 확인 후 초안을 삭제하고 publish 작업을 재실행합니다.
    이미 공개된 릴리스는 덮어쓰지 않습니다.
@@ -158,11 +182,12 @@ stdlib 탐색과 check/build/run/test 및 제거 검사를 통과해야 합니�
 ```sh
 make release-package DIST_DIR=dist/release
 make source-package DIST_DIR=dist/release
+# Windows 네이티브 빌드의 xen-<version>-windows-x86_64.zip도 dist/release에 복사합니다.
 python3 -m packaging.github.release --directory dist/release
 (cd dist/release && sha256sum --check SHA256SUMS)
 ```
 
-`release-package` 자체는 바이너리 패키지 4개를 만듭니다. 소스 아카이브와 체크섬은
+`release-package` 자체는 Linux 바이너리 패키지 4개를 만듭니다. Windows ZIP·소스 아카이브·체크섬은
 별도 단계이며 GitHub 워크플로가 이 작업을 모두 수행합니다.
 릴리스 변경 사항을 커밋한 뒤 일치하는 태그를 push합니다.
 
@@ -174,7 +199,7 @@ git push origin "$XEN_RELEASE_TAG"
 
 모아 둔 결과물은
 `python3 -m packaging.github.release --directory /path/to/assets --tag v<VERSION>`으로
-검사합니다. 지정 디렉터리에는 패키지 5개와 선택적인 기존 `SHA256SUMS`만 있어야 하며,
+검사합니다. 지정 디렉터리에는 패키지 6개와 선택적인 기존 `SHA256SUMS`만 있어야 하며,
 이전 배포 파일이 섞이면 실패합니다.
 
 ## 소스 배포

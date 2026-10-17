@@ -44,6 +44,7 @@ def main() -> None:
         integration("windows", *(["--require-native"] if os.name == "nt" else []))
         integration("windows_abi", *(["--require-native"] if os.name == "nt" else []))
         integration("windows_runtime", *(["--require-native"] if os.name == "nt" else []))
+        integration("windows_package")
     elif args.suite == "arm64":
         run("dune", "exec", "tests/arm64_machine_test.exe")
         integration("arm64", XEN_REQUIRE_ARM64="1")
@@ -54,6 +55,7 @@ def main() -> None:
     elif args.suite == "packaging":
         integration("package_build")
         integration("package_distribution")
+        integration("windows_package")
     elif args.suite in ("all", "quickcheck", "semantic"):
         if args.suite == "all":
             run("dune", "runtest")
@@ -64,7 +66,7 @@ def main() -> None:
             run("dune", "build", "tests/mach_o_fixture.exe", "tests/darwin_fixture.exe", "tests/darwin_abi_fixture.exe")
             integration("mach_o")
             run("dune", "exec", "tests/native_core_test.exe", XEN_TEST_OPT="basic")
-            for name in ("optimization", "operators", "power_remainder", "scoped_opt", "aot_fusion", "low_level", "low_level_extended", "x86_64_runtime", "toolchain", "package_build", "package_distribution", "arm64", "host", "stdlib"):
+            for name in ("optimization", "operators", "power_remainder", "scoped_opt", "aot_fusion", "low_level", "low_level_extended", "x86_64_runtime", "toolchain", "package_build", "package_distribution", "windows_package", "arm64", "host", "stdlib"):
                 integration(name)
             integration("stdlib", "--arm64")
             integration("test_workflow")
