@@ -30,6 +30,21 @@ def inspect(image):
     return run("file", str(image)), "\n".join(dependencies).encode()
 
 
+def rebuild_executable(workspace):
+    source = workspace / "rebuild.xen"
+    image = workspace / "rebuilt-app"
+    previous_inode = None
+    for optimization, message in (("off", "first"), ("basic", "second"), ("off", "third")):
+        source.write_text(f'fn main(){{println("{message}");}}', encoding="utf-8")
+        run(str(XEN), "build", str(source), "--target=aarch64-macos",
+            f"--opt={optimization}", "-o", str(image), cwd=workspace)
+        inode = image.stat().st_ino
+        assert inode != previous_inode, "rebuild modified signed code in place"
+        run("codesign", "--verify", "--strict", str(image), cwd=workspace)
+        assert run(str(image), cwd=workspace) == f"{message}\n".encode()
+        previous_inode = inode
+
+
 def foreign_calls(workspace):
     library = workspace / "libxen-ffi.dylib"
     c_source = workspace / "ffi.c"
@@ -84,6 +99,15 @@ fn main() {{
     image.rename(relocated / image.name)
     assert run(str(relocated / image.name), cwd=workspace) == b"foreign-ok\n"
     library = relocated / library.name
+    absolute_source = workspace / "foreign-absolute.xen"
+    absolute_source.write_text(
+        f'#![bb]\nfn main(){{println(extern_call<Int>('
+        f'{json.dumps(str(library), ensure_ascii=False)},"init_value"));}}', encoding="utf-8")
+    absolute_image = workspace / "foreign-absolute"
+    run(str(XEN), "build", str(absolute_source), "--target=aarch64-macos", "-o",
+        str(absolute_image), cwd=workspace)
+    run("codesign", "--verify", "--strict", str(absolute_image), cwd=workspace)
+    assert run(str(absolute_image), cwd=workspace) == b"42\n"
     for bad_library, bad_symbol in ((str(library), "missing_xen_symbol"),
                                     (str(workspace / "missing.dylib"), "init_value")):
         bad_source = workspace / "foreign-missing.xen"
@@ -92,9 +116,10 @@ fn main() {{
         bad_image = workspace / "foreign-missing"
         run(str(XEN), "build", str(bad_source), "--target=aarch64-macos", "-o",
             str(bad_image), cwd=workspace)
+        run("codesign", "--verify", "--strict", str(bad_image), cwd=workspace)
         failure = subprocess.run([str(bad_image)], cwd=workspace, capture_output=True,
                                  timeout=30)
-        assert failure.returncode != 0 and failure.stderr, failure
+        assert failure.returncode != 0 and failure.stderr, (bad_library, bad_symbol, failure)
 
 
 def main():
@@ -216,6 +241,7 @@ fn main() {
         inspect(fixture_image)
         assert run(str(fixture_image), cwd=workspace) == b"42\n17\ndata\nfixture-ok\n"
 
+        rebuild_executable(workspace)
         foreign_calls(workspace)
 
         run(sys.executable, "-m", "packaging.cli", "--platform", "macos",

@@ -51,6 +51,41 @@ extern_call<Unit>("/tmp/libxen-ffi.dylib","mark_exit");}
             signature_offset = struct.unpack_from("<I", image, commands[0x1d]+8)[0]
             self.assertLess(bind_offset+bind_size, signature_offset)
 
+    def test_rebuild_replaces_signed_image_and_preserves_output_on_failure(self):
+        fixture = REPO / "_build/default/tests/darwin_fixture.exe"
+        with tempfile.TemporaryDirectory(prefix="xen-darwin-rebuild-") as temp:
+            workspace = Path(temp) / "space 한글"
+            workspace.mkdir()
+            source = workspace / "app.xen"
+            output = workspace / "app"
+            previous_inode = None
+            previous_image = None
+            for message in ("first", "second", "third"):
+                source.write_text(f'fn main(){{println("{message}");}}', encoding="utf-8")
+                result = subprocess.run([str(fixture), str(source), str(output)],
+                                        capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                inode = output.stat().st_ino
+                self.assertNotEqual(inode, previous_inode, "signed image was modified in place")
+                image = output.read_bytes()
+                self.assertEqual(image[:4], b"\xcf\xfa\xed\xfe")
+                self.assertNotEqual(image, previous_image)
+                self.assertTrue(output.stat().st_mode & 0o111)
+                previous_inode, previous_image = inode, image
+            # Force the final rename to fail after the temporary image is written.
+            # The existing destination and directory contents must survive intact.
+            destination = workspace / "existing-directory"
+            destination.mkdir()
+            sentinel = destination / "keep"
+            sentinel.write_bytes(b"original")
+            before = set(workspace.iterdir())
+            failure = subprocess.run([str(fixture), str(source), str(destination)],
+                                     capture_output=True, timeout=30)
+            self.assertNotEqual(failure.returncode, 0)
+            self.assertEqual(sentinel.read_bytes(), b"original")
+            self.assertEqual(output.read_bytes(), previous_image)
+            self.assertEqual(set(workspace.iterdir()), before, "temporary image leaked")
+
     def test_darwin_adapter_carry_arguments_stack_and_leaf_return(self):
         runner = [] if platform.system() == "Linux" and platform.machine() in ("aarch64", "arm64") else [shutil.which("qemu-aarch64")]
         if runner and runner[0] is None:

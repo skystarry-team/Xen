@@ -10,5 +10,13 @@ include (struct
   type executable = bytes
   module Codegen = Xen_arm64.Native_backend.Make(Darwin_runtime)
   let generate = Codegen.generate
-  let write = Codegen.write
+  (* Signed Mach-O files must get a new inode on rebuild: macOS retains
+     code-signing state for an executable that was modified in place. *)
+  let write path executable =
+    let temporary = Filename.temp_file ~temp_dir:(Filename.dirname path)
+      ".xen-macho-" ".tmp" in
+    Fun.protect ~finally:(fun () ->
+      try Sys.remove temporary with Sys_error _ -> ()) (fun () ->
+        Codegen.write temporary executable;
+        Unix.rename temporary path)
 end : Backend_intf.S)
