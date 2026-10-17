@@ -21,8 +21,11 @@ from fractions import Fraction
 
 REPO = Path(__file__).resolve().parents[2]
 XEN = REPO / "compiler/dist/xen"
-NATIVE = platform.system() == "Linux" and platform.machine() in ("aarch64", "arm64")
-QEMU = shutil.which("qemu-aarch64")
+DEFAULT_TARGET = os.getenv("XEN_ARM64_TARGET", "aarch64-linux")
+NATIVE = (platform.machine() in ("aarch64", "arm64") and
+          ((DEFAULT_TARGET == "aarch64-linux" and platform.system() == "Linux") or
+           (DEFAULT_TARGET == "aarch64-macos" and platform.system() == "Darwin")))
+QEMU = shutil.which("qemu-aarch64") if DEFAULT_TARGET == "aarch64-linux" else None
 
 
 class Arm64Tests(unittest.TestCase):
@@ -34,7 +37,8 @@ class Arm64Tests(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(self.root / "no-tools"))
         self.env.pop("XEN_STDLIB_ROOT", None)
 
-    def compile(self, text, target="aarch64-linux", opt="off", flags=()):
+    def compile(self, text, target=None, opt="off", flags=()):
+        target = target or DEFAULT_TARGET
         self.source.write_text(text)
         output = self.root / target
         result = subprocess.run([str(XEN), "build", str(self.source),
@@ -49,7 +53,7 @@ class Arm64Tests(unittest.TestCase):
         if QEMU:
             return [QEMU]
         if os.getenv("XEN_REQUIRE_ARM64") == "1":
-            self.fail("ARM64 execution requires qemu-aarch64 or a native Linux ARM64 host")
+            self.fail("ARM64 execution requires a compatible native host or qemu-aarch64")
         self.skipTest("install qemu-user for ARM64 execution")
 
     def execute(self, binary, args=()):
@@ -67,7 +71,7 @@ class Arm64Tests(unittest.TestCase):
                 self.assertEqual(actual.stdout, expected)
                 if error:
                     self.assertIn(error, actual.stderr)
-                if platform.machine() == "x86_64":
+                if DEFAULT_TARGET == "aarch64-linux" and platform.system() == "Linux" and platform.machine() == "x86_64":
                     built, x86 = self.compile(text, target="x86_64-linux", opt=opt)
                     self.assertEqual(built.returncode, 0, built.stderr)
                     reference = subprocess.run([str(x86), *args], capture_output=True,

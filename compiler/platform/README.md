@@ -54,9 +54,11 @@ services; the pointer descriptor is non-owning and must be freed explicitly.
 
 ## macOS: Apple Silicon experimental support
 
-`aarch64-macos` is the initial Apple Silicon target. Native macOS 15 CI passes
-compiler execution, generated programs, the Darwin standard library profile and
-relocated tar.gz packaging. Intel `x86_64-macos` has no code generator and remains unsupported.
+`aarch64-macos` supports Apple Silicon macOS 15+. Native macOS 15 CI exercises
+compiler execution, generated programs, the Darwin standard library profile,
+foreign C calls and relocated tar.gz packaging. The experimental release label
+means user-owned physical Mac validation is pending. Intel `x86_64-macos` has no
+code generator and remains unsupported.
 
 `Target` recognizes x86_64-macos and aarch64-macos, including arm64/darwin aliases.
 OCaml amd64/macosx and arm64/macosx host configurations resolve to those targets.
@@ -77,12 +79,13 @@ BSD services use x16 and svc #0x80; carry/positive errno becomes negative errno,
 and x1..x5 are preserved around the trap. Memory/file services have Darwin-specific
 numbers, flags and open arguments; raw BSD numbers are not translated from Linux.
 The Apple Silicon `std.platform` profile implements Darwin file, directory,
-metadata, cwd and process services. Public FFI remains unavailable.
+metadata, cwd and process services. `extern_call` uses the Darwin AArch64 C ABI
+and eager dyld binding for libSystem or an explicitly named dylib.
 
 `python3 scripts/test.py --suite macos-prototype` checks both CPU headers, segments/permissions, entry
 and load commands, SHA-256 known answers, independent CodeDirectory page hashes,
 PIE relocation and generation from checked Xen IR. `tests/darwin_fixture.exe`
-can emit an internal ARM64 prototype image. These are structural
+can emit an ARM64 image. These are structural
 and encoding checks. `python3 scripts/test.py --suite macos` requires a native
 Apple Silicon host and checks dyld execution, signing, platform services and the
 relocated package. See the [validation scope](darwin/MACOS_VALIDATION.md).

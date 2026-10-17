@@ -2,7 +2,8 @@
 (* CPU-independent, thin little-endian Mach-O64 PIE writer. The encoder must
    return position-independent code; absolute address fixups are not permitted.
    dyld starts the LC_MAIN function using the platform C argc/argv convention.
-   libSystem is loaded for dyld initialization, but this image imports no symbols.
+   libSystem is loaded for dyld initialization. Foreign calls use eager dyld
+   bind opcodes into pointer slots in __DATA.
    Ad-hoc SHA-256 signatures are emitted directly, without codesign or a linker.
    Apple Silicon native execution is checked by macOS CI. See
    MACOS_VALIDATION.md for the validation scope. *)
@@ -36,7 +37,7 @@ let code_signature ~text_size image =
   done;
   Bytes.of_string(Buffer.contents out)
 
-let executable ~architecture ~entry ~code_size ~rodata ~data ~encode =
+let executable ~imports ~architecture ~entry ~code_size ~rodata ~data ~encode =
   if code_size<=0 || entry<0 || entry>=code_size then fail "Mach-O entry is outside code";
   if architecture=Target.Aarch64 && (entry mod 4<>0 || code_size mod 4<>0) then
     fail "Mach-O AArch64 code/entry is unaligned";
@@ -54,9 +55,40 @@ let executable ~architecture ~entry ~code_size ~rodata ~data ~encode =
     if prefix=24 then (u32 0;u32 0x10000;u32 0x10000);
     Buffer.add_string commands path;
     Buffer.add_string commands(String.make(command_size-prefix-String.length path)'\000') in
+  let libraries=List.fold_left(fun paths (path,_,_)->
+    let path=if path="libSystem.B.dylib" then "/usr/lib/libSystem.B.dylib" else path in
+    if List.mem path paths then paths else paths@[path])
+      ["/usr/lib/libSystem.B.dylib"] imports in
+  let dylib_ordinal path =
+    let rec find n=function
+      |[]->fail("missing Mach-O dylib: "^path)
+      |x::_ when x=path->n
+      |_::rest->find(n+1)rest in
+    find 1 libraries in
+  let bind=Buffer.create(32*List.length imports) in
+  let bind_uleb n =
+    if n<0 then fail "negative dyld bind offset";
+    let rec write n =
+      let byte=n land 127 in
+      if n<128 then Buffer.add_char bind(Char.chr byte)
+      else (Buffer.add_char bind(Char.chr(byte lor 128));write(n lsr 7)) in
+    write n in
+  List.iter(fun(library,symbol,offset)->
+    let library=if library="libSystem.B.dylib" then "/usr/lib/libSystem.B.dylib" else library in
+    if offset<0 || offset+8>String.length data || offset mod 8<>0 then
+      fail "Mach-O import slot is outside aligned data";
+    let ordinal=dylib_ordinal library in
+    if ordinal<=15 then Buffer.add_char bind(Char.chr(0x10 lor ordinal))
+    else (Buffer.add_char bind(Char.chr 0x20);bind_uleb ordinal);
+    Buffer.add_char bind(Char.chr 0x40);
+    Buffer.add_string bind ("_"^symbol^"\000");
+    Buffer.add_char bind(Char.chr 0x51);
+    Buffer.add_char bind(Char.chr 0x73);bind_uleb offset;
+    Buffer.add_char bind(Char.chr 0x90))imports;
+  if imports<>[] then Buffer.add_char bind '\000';
   let dylinker_size=align(12+String.length "/usr/lib/dyld"+1)8
-  and libsystem_size=align(24+String.length "/usr/lib/libSystem.B.dylib"+1)8 in
-  let command_size=72*5+80*3+dylinker_size+libsystem_size+24+24+48+24+80+24+16 in
+  and dylibs_size=List.fold_left(fun n path->n+align(24+String.length path+1)8)0 libraries in
+  let command_size=72*5+80*3+dylinker_size+dylibs_size+24+24+48+24+80+24+16 in
   let code_offset=align(32+command_size)16 in
   let text_size=align(code_offset+code_size)page in
   let rodata_offset=text_size in
@@ -64,8 +96,9 @@ let executable ~architecture ~entry ~code_size ~rodata ~data ~encode =
   let data_offset=rodata_offset+rodata_size in
   let data_size=align(max 1(String.length data))page in
   let linkedit_offset=data_offset+data_size in
-  (* The empty string table occupies one byte; signature follows at 16-byte alignment. *)
-  let signature_offset=align(linkedit_offset+1)16 in
+  (* Bind opcodes precede the empty string table and code signature. *)
+  let string_offset=linkedit_offset+Buffer.length bind in
+  let signature_offset=align(string_offset+1)16 in
   let signature_size=20+88+String.length "org.xen.generated\000"+((signature_offset+4095)/4096)*32 in
   let file_size=signature_offset+signature_size in
   ignore(align file_size 16);
@@ -85,11 +118,13 @@ let executable ~architecture ~entry ~code_size ~rodata ~data ~encode =
   segment "__DATA" data_offset data_size data_size 3 ["__data",data_offset,String.length data,3,0];
   segment "__LINKEDIT" linkedit_offset (align(file_size-linkedit_offset)page) (file_size-linkedit_offset) 1 [];
   command_string 0xe 12 "/usr/lib/dyld";
-  command_string 0xc 24 "/usr/lib/libSystem.B.dylib";
+  List.iter(command_string 0xc 24)libraries;
   u32 0x80000028;u32 24;u64(code_offset+entry);u64 0;
-  u32 0x32;u32 24;u32 1;u32 0x000c0000;u32 0x000c0000;u32 0;
-  u32 0x80000022;u32 48;for _=1 to 10 do u32 0 done;
-  u32 2;u32 24;u32 linkedit_offset;u32 0;u32 linkedit_offset;u32 1;
+  u32 0x32;u32 24;u32 1;u32 0x000f0000;u32 0x000f0000;u32 0;
+  u32 0x80000022;u32 48;
+  u32 0;u32 0;u32(if imports=[] then 0 else linkedit_offset);
+  u32(Buffer.length bind);for _=1 to 6 do u32 0 done;
+  u32 2;u32 24;u32 string_offset;u32 0;u32 string_offset;u32 1;
   u32 0xb;u32 80;for _=1 to 18 do u32 0 done;
   let code=encode ~code_address:(addr code_offset)
     ~rodata_address:(addr rodata_offset) ~data_address:(addr data_offset) in
@@ -103,12 +138,13 @@ let executable ~architecture ~entry ~code_size ~rodata ~data ~encode =
   if Buffer.length commands<>command_size then fail "Mach-O load command size mismatch";
   let out=Buffer.create file_size in
   let n width value=append_number out ~big:false width(Int64.of_int value) in
-  n 4 0xfeedfacf;n 4 cpu;n 4 subtype;n 4 2;n 4 14;n 4 command_size;n 4 0x200085;n 4 0;
+  n 4 0xfeedfacf;n 4 cpu;n 4 subtype;n 4 2;n 4 (13+List.length libraries);n 4 command_size;n 4 0x200085;n 4 0;
   Buffer.add_buffer out commands;
   let pad at=Buffer.add_string out(String.make(at-Buffer.length out)'\000') in
   pad code_offset;Buffer.add_bytes out code;
   pad rodata_offset;Buffer.add_string out rodata;
   pad data_offset;Buffer.add_string out data;
+  pad linkedit_offset;Buffer.add_buffer out bind;
   pad signature_offset;
   Buffer.add_bytes out(code_signature ~text_size(Buffer.contents out));
   if Buffer.length out<>file_size then fail "Mach-O signature size mismatch";

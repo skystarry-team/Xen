@@ -265,10 +265,10 @@ the [Linux generic syscall table](https://github.com/torvalds/linux/blob/master/
 
 ## Validation and limitations
 
-Linux numeric file readers and stdlib services are implemented; the
-[platform boundary](../../platform/README.md) defines macOS as unsupported, with
-no planned support. CPU encoders and internal Darwin/Mach-O prototypes are
-retained for implementation testing. User raw syscall numbers remain untranslated.
+Linux and Apple Silicon macOS numeric file readers and standard library services
+are implemented. The [platform boundary](../../platform/README.md) describes
+the Darwin backend and Mach-O writer. User raw syscall numbers remain
+OS-specific and are not translated.
 
 `python3 scripts/test.py --suite arm64` checks integer and FP instruction words against independent
 assembly, then runs both optimization levels under Linux ARM64 or QEMU.

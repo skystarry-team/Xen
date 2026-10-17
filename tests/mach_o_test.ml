@@ -15,7 +15,7 @@ let () =
     expect(try ignore(S.digest_substring "abc" offset length);false with Invalid_argument _->true)
       "invalid hash slice accepted")[-1,1;0,-1;2,2;4,0];
   let rejected ?(code_size=4) ?(entry=0) ?(encoded_size=4) () =
-    try ignore(M.executable ~architecture:Target.Aarch64 ~entry ~code_size ~rodata:"" ~data:""
+    try ignore(M.executable ~imports:[] ~architecture:Target.Aarch64 ~entry ~code_size ~rodata:"" ~data:""
       ~encode:(fun ~code_address:_ ~rodata_address:_ ~data_address:_->Bytes.make encoded_size '\000'));false
     with M.Error _->true in
   expect(rejected ~code_size:0 ())"empty Mach-O code accepted";

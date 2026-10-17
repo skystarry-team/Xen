@@ -2,6 +2,7 @@
 (test
  (name native_core_test)
  (modules native_core_test)
+ (enabled_if (and (= %{system} linux) (= %{architecture} amd64)))
  (deps (source_tree fixtures/language) (source_tree ../stdlib))
  (libraries unix xen_common xen_x86_64 xen_linux_x86_64))
 

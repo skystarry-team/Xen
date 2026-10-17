@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 """Native Apple Silicon loader, runtime, stdlib and relocated package gate."""
 import os
+import json
 from pathlib import Path
 import platform
 import subprocess
@@ -27,6 +28,73 @@ def run(*args, cwd=ROOT, env=None, input=None):
 def inspect(image):
     _, dependencies = validate_macos_image(image)
     return run("file", str(image)), "\n".join(dependencies).encode()
+
+
+def foreign_calls(workspace):
+    library = workspace / "libxen-ffi.dylib"
+    c_source = workspace / "ffi.c"
+    c_source.write_text('''
+#include <stdio.h>
+static long initialized;
+__attribute__((constructor)) static void init(void) { initialized = 42; }
+__attribute__((destructor)) static void finish(void) {
+    FILE *file = fopen("ffi-exit.txt", "wb");
+    if (file) { fputs("done", file); fclose(file); }
+}
+long init_value(void) { return initialized; }
+long sum6(long a, long b, long c, long d, long e, long f) {
+    return a+b+c+d+e+f;
+}
+double mixed(signed char a, float b, unsigned int c, double d, long e, float f) {
+    return a+b+c+d+e+f;
+}
+float small_float(float a, short b) { return a+b; }
+void store_value(long *pointer, long value) { *pointer = value; }
+''')
+    run("clang", "-dynamiclib", "-arch", "arm64", "-install_name",
+        "@loader_path/libxen-ffi.dylib", "-o", str(library), str(c_source),
+        cwd=workspace)
+    run("codesign", "--force", "--sign", "-", str(library), cwd=workspace)
+    source = workspace / "foreign.xen"
+    dylib = json.dumps("@loader_path/libxen-ffi.dylib")
+    source.write_text(f'''
+#![bb]
+fn main() {{
+    assert(extern_call<I32>("/usr/lib/libSystem.B.dylib","abs",i32(-42))==i32(42));
+    assert(extern_call<Int>({dylib},"init_value")==42);
+    assert(extern_call<Int>({dylib},"sum6",1,2,3,4,5,27)==42);
+    assert(extern_call<F64>({dylib},"mixed",i8(-2),f32(1.5),u32(30),4.5,5,f32(3.0))==42.0);
+    assert(extern_call<F32>({dylib},"small_float",f32(44.5),i16(-2))==f32(42.5));
+    let pointer=raw_alloc<Int>(1);
+    extern_call<Unit>({dylib},"store_value",pointer,42);
+    assert(raw_load(pointer,0)==42);raw_free(pointer);
+    println("foreign-ok");
+}}
+''')
+    image = workspace / "foreign-app"
+    run(str(XEN), "build", str(source), "--target=aarch64-macos", "-o", str(image),
+        cwd=workspace)
+    run("codesign", "--verify", "--strict", str(image), cwd=workspace)
+    assert b"@loader_path/libxen-ffi.dylib" in run("otool", "-L", str(image), cwd=workspace)
+    assert run(str(image), cwd=workspace) == b"foreign-ok\n"
+    assert (workspace / "ffi-exit.txt").read_bytes() == b"done"
+    relocated = workspace / "foreign relocated"
+    relocated.mkdir()
+    library.rename(relocated / library.name)
+    image.rename(relocated / image.name)
+    assert run(str(relocated / image.name), cwd=workspace) == b"foreign-ok\n"
+    library = relocated / library.name
+    for bad_library, bad_symbol in ((str(library), "missing_xen_symbol"),
+                                    (str(workspace / "missing.dylib"), "init_value")):
+        bad_source = workspace / "foreign-missing.xen"
+        bad_source.write_text(f'#![bb]\nfn main(){{extern_call<Int>({json.dumps(bad_library)},'
+                              f'"{bad_symbol}");}}')
+        bad_image = workspace / "foreign-missing"
+        run(str(XEN), "build", str(bad_source), "--target=aarch64-macos", "-o",
+            str(bad_image), cwd=workspace)
+        failure = subprocess.run([str(bad_image)], cwd=workspace, capture_output=True,
+                                 timeout=30)
+        assert failure.returncode != 0 and failure.stderr, failure
 
 
 def main():
@@ -124,6 +192,13 @@ fn main() {
     raw_store(pointer, 0, 17);
     println(raw_load(pointer, 0));
     raw_free(pointer);
+    let counter = raw_alloc<U64>(1);
+    atomic_store(counter, 0, u64(1), "release");
+    assert(atomic_fetch_add(counter, 0, u64(41)) == u64(1));
+    assert(atomic_load(counter, 0, "acquire") == u64(42));
+    raw_free(counter);
+    assert(asm<Int>("add x14,x14,#1", inout("x14", 41)) == 42);
+    memory_fence();
     let mut file = open_write("fixture.txt"); file.write("data"); file.close();
     println(read_text("fixture.txt"));
     let ints = read_ints("integers");
@@ -140,6 +215,8 @@ fn main() {
             str(fixture_source), str(fixture_image), cwd=workspace)
         inspect(fixture_image)
         assert run(str(fixture_image), cwd=workspace) == b"42\n17\ndata\nfixture-ok\n"
+
+        foreign_calls(workspace)
 
         run(sys.executable, "-m", "packaging.cli", "--platform", "macos",
             "--architecture", "aarch64", "--formats", "tar.gz", cwd=ROOT)

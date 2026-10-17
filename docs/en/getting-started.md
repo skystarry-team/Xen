@@ -41,7 +41,7 @@ xen build hello.xen -o hello
 
 `check` finds errors without running the program. Success produces no output. `build` creates an executable. `./hello` also prints `Hello, Xen!`; running that file does not require Xen.
 
-If Xen cannot find your file, check the working directory and filename. Executables need a compatible OS and CPU. Windows x86-64 support is experimental: Windows Server 2022 native CI has passed, while Windows desktop validation on physical hardware is still required. In PowerShell, use `xen build hello.xen -o hello.exe` and `.\hello.exe`. Apple Silicon macOS support is experimental and macOS 15 native CI has passed; Windows ARM64 and Intel macOS are unsupported.
+If Xen cannot find your file, check the working directory and filename. Executables need a compatible OS and CPU. Windows x86-64 support is experimental: Windows Server 2022 native CI has passed, while Windows desktop validation on physical hardware is still required. In PowerShell, use `xen build hello.xen -o hello.exe` and `.\hello.exe`. Apple Silicon macOS 15+ carries an experimental label because user-owned physical Mac validation is pending; macOS 15 native CI checks execution and packaging; Windows ARM64 and Intel macOS are unsupported.
 
 ## Try a change
 

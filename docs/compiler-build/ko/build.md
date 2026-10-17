@@ -117,7 +117,7 @@ Windows Server 2022 네이티브 CI에서 컴파일러·PE/로더·런타임·�
 Windows ARM64·원시 syscall·`extern_call`은 미지원입니다.
 Python은 패키징과 검증에 필요하며, 설치한 컴파일러를 사용할 때는 필요하지 않습니다.
 
-## Apple Silicon macOS (실험적 지원)
+## Apple Silicon macOS 15 이상 (실험적: 실기기 검증 전)
 
 arm64 네이티브 OCaml 5.5.0 switch와 Dune 3.24.2를 사용합니다. `ocamlc -config`에
 `architecture: arm64`, `system: macosx`가 나와야 합니다. 저장소 루트에서 실행합니다.
@@ -136,7 +136,7 @@ macOS 15 네이티브 CI가 통과했으며 Intel macOS는 미지원입니다.
 기본 버전은 `VERSION` 파일에서 읽습니다. Make에 버전을 지정하면 실행 파일에 포함됩니다.
 
 ```sh
-make build VERSION=v0.1.0-demo.4
+make build VERSION=v0.1.0-demo.6
 compiler/dist/xen version
 ```
 

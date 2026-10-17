@@ -17,6 +17,7 @@ HOST_RUNNER = json.loads(os.getenv("XEN_HOST_RUNNER", "[]"))
 RUNNER = json.loads(os.getenv("XEN_STDLIB_RUNNER", "[]"))
 TARGET = os.getenv("XEN_STDLIB_TARGET")
 OPT = os.getenv("XEN_STDLIB_OPT", "off")
+DARWIN = TARGET == "aarch64-macos"
 
 
 class StdlibTests(unittest.TestCase):
@@ -47,7 +48,7 @@ class StdlibTests(unittest.TestCase):
             if limit:
                 _, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
                 resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
-            if memory_limit and not RUNNER:
+            if memory_limit and not RUNNER and not DARWIN:
                 _, hard = resource.getrlimit(resource.RLIMIT_AS)
                 resource.setrlimit(resource.RLIMIT_AS, (memory_limit, hard))
         executable = self.root / "app"
@@ -337,7 +338,7 @@ fn main() {
                   'assert(match std.fs.read_dir("/dev/null"){Result.Err(_)=>true,_=>false});'
                   'assert(match std.fs.copy("input","output"){Result.Ok(4)=>true,_=>false});'
                   'assert(match std.fs.read("."){Result.Err(std.io.IoError.Read(21))=>true,_=>false});'
-                  'assert(match std.fs.write("/dev/full","x"){Result.Err(std.io.IoError.Write(28))=>true,_=>false});'
+                  + ('' if DARWIN else 'assert(match std.fs.write("/dev/full","x"){Result.Err(std.io.IoError.Write(28))=>true,_=>false});') +
                   'assert(match std.fs.close_fd(-1){Result.Err(std.io.IoError.Close(9))=>true,_=>false});'
                   'assert(match std.io.write_fd(-1,""){Result.Ok(0)=>true,_=>false});'
                   'let nul:Vec<U8>=[97,0,98];'
@@ -384,7 +385,10 @@ fn main() {
 
     def test_directory_decoder_boundaries(self):
         good = [0] * 24
-        good[16], good[19] = 24, 97
+        if DARWIN:
+            good[16], good[18], good[21] = 24, 1, 97
+        else:
+            good[16], good[19] = 24, 97
         bad = [[0] * 19, [0] * 20, [0] * 24, [1] * 20]
         bad[2][16] = 25
         bad[3][16], bad[3][17] = 20, 0
@@ -412,7 +416,11 @@ fn main() {
         result = subprocess.run(self.execution(output), cwd=vanished,
                                 preexec_fn=lambda: os.rmdir(vanished),
                                 capture_output=True, timeout=10)
-        self.assertEqual((result.returncode, result.stdout), (0, b"2\n"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        if DARWIN:
+            self.assertGreater(int(result.stdout), 0)
+        else:
+            self.assertEqual(result.stdout, b"2\n")
 
 
 if __name__ == "__main__":

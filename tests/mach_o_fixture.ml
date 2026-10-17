@@ -7,7 +7,7 @@ let () =
     |"x86_64"->Target.X86_64,Bytes.of_string "\049\192\195"
     |_->failwith "unsupported architecture" in
   let encode ~code_address:_ ~rodata_address:_ ~data_address:_ = code in
-  let image=Xen_darwin.Mach_o.executable ~architecture ~entry:0
+  let image=Xen_darwin.Mach_o.executable ~imports:[] ~architecture ~entry:0
     ~code_size:(Bytes.length code) ~rodata:"fixture constant\000" ~data:(String.make 8 '\000') ~encode in
   let channel=open_out_bin Sys.argv.(2) in
   Fun.protect ~finally:(fun()->close_out channel)(fun()->output_bytes channel image)

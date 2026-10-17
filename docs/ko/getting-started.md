@@ -41,7 +41,7 @@ xen build hello.xen -o hello
 
 `check`는 실행하지 않고 코드의 오류를 찾습니다. 오류가 없으면 아무것도 출력하지 않습니다. `build`는 실행 파일을 만듭니다. `./hello`도 `Hello, Xen!`을 출력하며, 이 파일을 실행할 때는 Xen이 필요하지 않습니다.
 
-파일을 찾을 수 없다는 오류가 나오면 현재 디렉터리와 파일 이름을 확인하세요. 실행 파일은 호환되는 OS와 CPU에서 실행해야 합니다. Windows x86-64는 실험적 지원입니다. Windows Server 2022 네이티브 CI는 통과했으며 Windows 데스크톱 실 하드웨어 검증이 추가로 필요합니다. PowerShell에서는 `xen build hello.xen -o hello.exe`와 `.\hello.exe`를 사용합니다. Apple Silicon macOS는 실험적 지원이며 macOS 15 네이티브 CI를 통과했습니다. Windows ARM64와 Intel macOS는 미지원입니다.
+파일을 찾을 수 없다는 오류가 나오면 현재 디렉터리와 파일 이름을 확인하세요. 실행 파일은 호환되는 OS와 CPU에서 실행해야 합니다. Windows x86-64는 실험적 지원입니다. Windows Server 2022 네이티브 CI는 통과했으며 Windows 데스크톱 실 하드웨어 검증이 추가로 필요합니다. PowerShell에서는 `xen build hello.xen -o hello.exe`와 `.\hello.exe`를 사용합니다. Apple Silicon macOS 15 이상에는 사용자 실기기 검증이 남아 있어 실험적 표기가 붙습니다. macOS 15 네이티브 CI는 실행과 패키지를 검사합니다. Windows ARM64와 Intel macOS는 미지원입니다.
 
 ## 바꿔 보기
 

@@ -118,7 +118,7 @@ Windows desktop validation on physical hardware is still required. Windows ARM64
 raw syscalls and `extern_call` are unsupported. Python is required for packaging
 and verification, not for use of an installed compiler.
 
-## Apple Silicon macOS (experimental)
+## Apple Silicon macOS 15+ (experimental: physical device validation pending)
 
 Use a native arm64 OCaml 5.5.0 switch and Dune 3.24.2. `ocamlc -config` must
 report `architecture: arm64` and `system: macosx`. From the repository root:
@@ -137,7 +137,7 @@ tar.gz. The macOS 15 native CI gate passes; Intel macOS is unsupported.
 `VERSION` declares the default compiler version. Make embeds a supplied override:
 
 ```sh
-make build VERSION=v0.1.0-demo.4
+make build VERSION=v0.1.0-demo.6
 compiler/dist/xen version
 ```
 

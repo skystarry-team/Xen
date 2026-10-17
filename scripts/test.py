@@ -2,6 +2,7 @@
 """Run Xen test suites from the repository root."""
 import argparse
 import os
+import platform
 from pathlib import Path
 import subprocess
 import sys
@@ -24,6 +25,27 @@ def prototype() -> None:
     integration("mach_o")
 
 
+MACOS_ARM64_CASES = (
+    "test_integer_widths_control_flow_and_calls",
+    "test_references_aggregates_generics_and_indirect_calls",
+    "test_string_lifetimes_and_program_arguments",
+    "test_recursive_function_field_types_and_label_names",
+    "test_generated_integer_programs",
+    "test_float_arithmetic_calls_storage_and_comparisons",
+    "test_float_checked_conversions",
+    "test_generated_float_arithmetic",
+    "test_heap_strings_clone_move_fields_and_reference_replacement",
+    "test_box_functions_borrows_extraction_and_recursive_types",
+    "test_collection_storage_operations_and_byte_views",
+    "test_collection_owned_elements_and_cleanup",
+    "test_collection_stdlib",
+    "test_collection_runtime_failures",
+    "test_ownership_flags_cleanup_on_branch_loop_return_and_try",
+    "test_raw_memory_pod_and_descriptor_contract",
+    "test_raw_memory_errors",
+)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=("all", "arm64", "host", "windows", "macos", "macos-prototype", "quickcheck", "semantic", "packaging"), default="all")
@@ -31,16 +53,24 @@ def main() -> None:
     parser.add_argument("--depth", default="standard")
     parser.add_argument("--seed")
     args = parser.parse_args()
+    if args.suite == "all" and platform.system() == "Darwin" and platform.machine() == "arm64":
+        args.suite = "macos"
     if args.suite != "macos-prototype":
         run("dune", "build", "@release")
     if args.suite == "macos-prototype":
         prototype()
     elif args.suite == "macos":
+        run("dune", "runtest")
         run("dune", "exec", "tests/backend_contract_test.exe")
         run("dune", "exec", "tests/mach_o_test.exe")
         run("dune", "build", "tests/mach_o_fixture.exe", "tests/darwin_fixture.exe")
         integration("mach_o")
         integration("macos")
+        integration("arm64", *("Arm64Tests." + case for case in MACOS_ARM64_CASES),
+                    XEN_ARM64_TARGET="aarch64-macos", XEN_REQUIRE_ARM64="1")
+        for optimization in ("off", "basic"):
+            integration("stdlib", XEN_STDLIB_TARGET="aarch64-macos",
+                        XEN_STDLIB_OPT=optimization)
     elif args.suite == "windows":
         run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe", "tests/windows_abi_fixture.exe", "tests/windows_runtime_fixture.exe")
         run("dune", "exec", "tests/pe_writer_test.exe")

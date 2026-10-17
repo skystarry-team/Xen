@@ -46,7 +46,7 @@ standard library tests pass on Windows Server 2022 native CI. Windows desktop
 validation on physical hardware is still required; Windows ARM64 is unsupported.
 The ZIP CI checks relocation and an isolated PATH, not installation on a clean OS.
 
-## Apple Silicon macOS (experimental)
+## Apple Silicon macOS 15+ (experimental: physical device validation pending)
 
 Once a release includes `xen-<version>-macos-aarch64.tar.gz`, download it with
 `SHA256SUMS` and compare its SHA-256 entry before extraction. On Apple Silicon:
@@ -60,7 +60,8 @@ cd xen-<version>-macos-aarch64
 ```
 
 Keep `bin/` and `stdlib/` together. The default target is `aarch64-macos`.
-The macOS 15 native CI package validation passes; Intel macOS is unsupported.
+The macOS 15 native CI package validation passes. The experimental release label
+records pending validation on a user-owned physical Mac; Intel macOS is unsupported.
 The compiler and generated binaries are ad hoc signed for local execution; this
 archive is not notarized. CI's `codesign --verify` check does not establish
 Gatekeeper acceptance after an internet download.
@@ -110,8 +111,8 @@ sudo apt remove xen-lang
 ```
 
 The Debian package version converts suffix separators and adds a packaging
-revision. For example, `v0.1.0-demo.4` becomes `0.1.0~demo.4-1`; `xen version`
-still reports `v0.1.0-demo.4`. See [version and dependency handling](packaging.md#debian-packages)
+revision. For example, `v0.1.0-demo.6` becomes `0.1.0~demo.6-1`; `xen version`
+still reports `v0.1.0-demo.6`. See [version and dependency handling](packaging.md#debian-packages)
 when building your own package, since its minimum system-library versions depend
 on the build environment.
 

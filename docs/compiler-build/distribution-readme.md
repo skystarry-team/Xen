@@ -41,8 +41,9 @@ desktop hardware is still required; Windows ARM64 is unsupported. The ZIP's
 relocation test uses an isolated PATH on CI, not a clean Windows installation.
 
 On Apple Silicon macOS, use the `macos-aarch64` tar.gz and the same `./bin/xen`
-commands shown for Linux. The target is experimental and macOS 15 native CI
-passes its compiler, generated execution and relocated archive checks. Intel macOS is unsupported.
+commands shown for Linux on macOS 15 or later. macOS 15 native CI checks its
+compiler, generated execution and relocated archive. The experimental label
+records pending validation on a user-owned physical Mac. Intel macOS is unsupported.
 
 Use an archive matching the CPU and OS that will execute the compiler. Its host
 system libraries must be available. Generated Linux programs are static

@@ -104,9 +104,10 @@ Host filesystem/process utilities are distinct from target
 runtime operations.
 
 Intel/Apple Silicon macOS targets are recognized as x86_64-macos/aarch64-macos;
-arm64 and darwin aliases normalize to these names. Apple Silicon has an
-experimental Darwin backend; Intel macOS remains unsupported. The native CI
-gate checks generated execution and packaging. See the
+arm64 and darwin aliases normalize to these names. Apple Silicon macOS 15+
+has a registered Darwin backend with the ARM64 language, standard library and
+external C call capabilities. Intel macOS remains unsupported. Native CI checks
+generated execution and packaging; user-owned physical Mac validation is pending. See the
 [platform support policy](platform/README.md).
 
 ## bb-scoped low-level operations

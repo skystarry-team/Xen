@@ -30,7 +30,7 @@ The default target follows the installed compiler's OS and architecture. `check`
 xen build hello.xen --target=aarch64-linux -o hello-arm64
 ```
 
-Run the output on a compatible OS and CPU. Selecting another target does not make it executable on the current machine. AArch64, Windows x86-64 and Apple Silicon macOS support are experimental. Apple Silicon compiler, Mach-O execution and package checks pass on macOS 15 native CI; Intel macOS and Windows ARM64 remain unsupported. Windows compiler, PE execution and standard library tests pass on Windows Server 2022 native CI; Windows desktop hardware validation is still required. Windows raw syscalls and `extern_call` are unavailable. In PowerShell, build with `-o hello.exe` and execute `.\hello.exe`.
+Run the output on a compatible OS and CPU. Selecting another target does not make it executable on the current machine. AArch64, Windows x86-64 and Apple Silicon macOS carry an experimental label. Apple Silicon macOS 15+ provides the ARM64 language, standard library and external C call capabilities. Its label means user-owned physical Mac validation is pending; native macOS 15 CI checks execution and packaging; Intel macOS and Windows ARM64 remain unsupported. Windows compiler, PE execution and standard library tests pass on Windows Server 2022 native CI; Windows desktop hardware validation is still required. Windows raw syscalls and `extern_call` are unavailable. In PowerShell, build with `-o hello.exe` and execute `.\hello.exe`.
 
 ## Select tests
 

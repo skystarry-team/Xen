@@ -1,8 +1,9 @@
 # Darwin/Mach-O validation
 
-Apple Silicon `aarch64-macos` is an experimental target with a registered CLI
-backend, Darwin standard library profile and tar.gz package. Native macOS 15 CI
-passes generated execution and relocated packaging. Intel
+Apple Silicon `aarch64-macos` supports macOS 15+ with a registered CLI backend,
+Darwin standard library profile, external C calls and tar.gz package. Native
+macOS 15 CI checks generated execution and relocated packaging. The experimental
+release label means validation on a user-owned physical Mac is pending. Intel
 `x86_64-macos` remains unsupported because it has no Darwin code generator.
 
 ## Retained components
@@ -14,7 +15,7 @@ passes generated execution and relocated packaging. Intel
 | Darwin ARM64 runtime and backend | `compiler/platform/darwin/arm64/` | Registered Apple Silicon target |
 
 CPU libraries remain independent of operating-system implementations. The
-Darwin prototype composes the ARM64 encoder with Darwin-specific services and
+Darwin backend composes the ARM64 encoder with Darwin-specific services and
 the shared Mach-O writer.
 
 ## Structural tests
@@ -35,6 +36,7 @@ The checks cover:
 
 These structural checks alone do not establish macOS execution support. The
 native gate is `python3 scripts/test.py --suite macos` on Apple Silicon. It
-checks the native compiler, generated Mach-O signatures, dyld execution,
+checks the native compiler, generated Mach-O signatures, dyld execution and
+external C calls, common ARM64 language and standard library behavior,
 Darwin file and process services, and a relocated tar.gz under a restricted
-PATH. CI uses the same command on `macos-15`.
+PATH. It runs both optimization levels. CI uses the same command on `macos-15`.

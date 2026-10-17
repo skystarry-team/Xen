@@ -134,9 +134,12 @@ The Darwin syscall adapter also executes under Linux ARM64/QEMU with simulated
 kernel returns, checking carry/errno normalization, x1 restoration, stack balance
 and leaf LR preservation. This does not certify Darwin kernel behavior.
 `python3 scripts/test.py --suite macos` requires a native Apple Silicon host.
-It checks compiler and generated executable signatures, dyld execution,
-platform services, CLI run/test and relocated tar.gz packaging. The new CI gate
-passes on macOS 15 native CI. Intel macOS remains unsupported.
+It runs the OCaml tests, ARM64 language execution at both optimization levels,
+the common standard library suite, compiler and generated executable signatures,
+dyld C calls including a relocated user dylib, platform services, CLI run/test
+and relocated tar.gz packaging. On Apple Silicon, `make test` selects this suite.
+The experimental release label records pending validation on a user-owned
+physical Mac. Intel macOS remains unsupported.
 See [Darwin/Mach-O validation scope](../compiler/platform/darwin/MACOS_VALIDATION.md).
 
 `python3 scripts/test.py --suite packaging` checks the default two-architecture

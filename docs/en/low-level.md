@@ -134,7 +134,7 @@ fn main() {
 ## External C functions
 
 `extern_call<Result>("library", "symbol", arguments...)` invokes an external
-function with Linux x86-64 System V ABI or Linux AArch64 AAPCS64. It requires `bb`,
+function with Linux x86-64 System V ABI or the AArch64 C ABI on Linux and macOS. It requires `bb`,
 an explicit result type and literal library/symbol names.
 
 Up to six fixed arguments may be integer scalars, F32/F64 or `Ptr<T>`. Integer
@@ -159,7 +159,10 @@ fn main() {
 }
 ```
 
-Programs with foreign calls use glibc dynamic ELF and `__libc_start_main` for C
+The example uses Linux's `libc.so.6`. On Apple Silicon macOS 15+, use
+`"/usr/lib/libSystem.B.dylib"` or an absolute path to an arm64 dylib.
+
+Linux programs with foreign calls use glibc dynamic ELF and `__libc_start_main` for C
 initialization and normal termination, library constructors/destructors and stdio
 cleanup. Interpreter paths are `/lib64/ld-linux-x86-64.so.2` and
 `/lib/ld-linux-aarch64.so.1`. Programs without foreign calls retain static ELF.
@@ -171,6 +174,12 @@ reports missing libraries/symbols at execution. Default RUNPATH is `$ORIGIN`.
 lookup/interposition rules rather than a library-private dlsym lookup. See
 [ELF dynamic linking](https://refspecs.linuxfoundation.org/elf/gabi4%2B/ch5.dynamic.html)
 and [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst).
+
+Apple Silicon programs use Mach-O `LC_LOAD_DYLIB` and eager dyld bindings for
+each imported C symbol. Their `LC_MAIN` entry returns through libSystem so
+dylib constructors and destructors run. Missing libraries and symbols are
+reported by dyld when the program starts. `@loader_path` is available for
+dylibs placed beside the generated executable.
 
 ## Inline assembly
 
