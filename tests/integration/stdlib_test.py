@@ -373,11 +373,14 @@ fn main() {
         expected = {f"entry-{i:04}-abcdefghijklmnop" for i in range(400)}
         for name in expected:
             (directory / name).touch()
+        # Darwin getdirentries64 returns EINVAL for an open regular file;
+        # Linux getdents64 returns ENOTDIR. Preserve each native errno.
+        directory_error = 22 if DARWIN else 20
         source = ('use std.fs;use std.io;fn main(){'
                   'for pass in 0..48{assert(match std.fs.read_dir("entries"){Result.Ok(names)=>names.len()==400,_=>false});'
                   'assert(match std.fs.read_dir("missing"){Result.Err(std.io.IoError.Open(2))=>true,_=>false});'
                   'let fd=match std.fs.open_path("app.xen",0,0){Result.Ok(value)=>value,_=>-1};'
-                  'assert(match std.fs.read_directory_fd(fd){Result.Err(std.io.IoError.Directory(20))=>true,_=>false});'
+                  f'assert_msg(match std.fs.read_directory_fd(fd){{Result.Err(std.io.IoError.Directory({directory_error}))=>true,_=>false}},"regular file directory errno");'
                   'std.fs.close_fd(fd);assert(match std.fs.read_dir("app.xen"){Result.Err(_)=>true,_=>false});}'
                   'let names=match std.fs.read_dir("entries"){Result.Ok(value)=>value,_=>[]};'
                   'for index in 0..names.len(){println(names.get(index));}}')
@@ -402,8 +405,10 @@ fn main() {
 
     def test_cwd_and_process_identity(self):
         source = ('use std.env;use std.process;fn main(){assert(std.process.id()>0);'
-                  'assert(std.process.parent_id()>0);println(match std.env.cwd(){Result.Ok(path)=>path,_=>"bad"});}')
-        self.assertEqual(self.run_source(source), str(self.root).encode() + b"\n")
+                  'assert(std.process.parent_id()>0);'
+                  'for pass in 0..48{assert_msg(match std.env.cwd(){Result.Ok(_)=>true,_=>false},"cwd lookup/cleanup");}'
+                  'println(match std.env.cwd(){Result.Ok(path)=>path,_=>"bad"});}')
+        self.assertEqual(self.run_source(source, limit=32), str(self.root.resolve()).encode() + b"\n")
 
     def test_deleted_cwd_error(self):
         source = self.root / "cwd.xen"
@@ -411,16 +416,22 @@ fn main() {
                           'Result.Err(std.io.IoError.Cwd(code))=>code,_=>0});}')
         output = self.root / "cwd-test"
         self.build_source(source, output)
-        vanished = self.root / "vanished"
-        vanished.mkdir()
-        result = subprocess.run(self.execution(output), cwd=vanished,
-                                preexec_fn=lambda: os.rmdir(vanished),
-                                capture_output=True, timeout=10)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        if DARWIN:
-            self.assertGreater(int(result.stdout), 0)
-        else:
-            self.assertEqual(result.stdout, b"2\n")
+        for recreate in (False, True):
+            with self.subTest(recreate=recreate):
+                vanished = self.root / ("recreated" if recreate else "vanished")
+                vanished.mkdir()
+                def remove_cwd():
+                    os.rmdir(vanished)
+                    if recreate:
+                        # The old cwd remains unlinked even though its name exists again.
+                        os.mkdir(vanished)
+                result = subprocess.run(self.execution(output), cwd=vanished,
+                                        preexec_fn=remove_cwd, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if DARWIN:
+                    self.assertGreater(int(result.stdout), 0)
+                else:
+                    self.assertEqual(result.stdout, b"2\n")
 
 
 if __name__ == "__main__":

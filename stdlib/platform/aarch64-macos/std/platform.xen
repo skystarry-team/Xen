@@ -106,8 +106,26 @@ fn cwd() -> Result<String, Int> {
     raw_free(dot);
     if fd < 0 { return Result<String, Int>.Err(-fd); }
     let buffer = raw_alloc<U8>(1024);
-    let mut status = syscall3(92, fd, 50, ptr_addr(buffer));
-    while interrupted(status) { status = syscall3(92, fd, 50, ptr_addr(buffer)); }
+    let record = raw_alloc<Int>(18);
+    let mut status = syscall2(339, fd, ptr_addr(record)); // fstat64
+    while interrupted(status) { status = syscall2(339, fd, ptr_addr(record)); }
+    if status >= 0 {
+        // stat64: device is the low 32 bits at byte 0; inode is at byte 8.
+        let device = raw_load(record, 0) & 4294967295;
+        let inode = raw_load(record, 1);
+        status = syscall3(92, fd, 50, ptr_addr(buffer)); // F_GETPATH
+        while interrupted(status) { status = syscall3(92, fd, 50, ptr_addr(buffer)); }
+        if status >= 0 {
+            // F_GETPATH may return a stale name after cwd is removed. Like
+            // libc getcwd, verify that the name still identifies the open cwd.
+            status = syscall2(338, ptr_addr(buffer), ptr_addr(record)); // stat64
+            while interrupted(status) { status = syscall2(338, ptr_addr(buffer), ptr_addr(record)); }
+            if status >= 0 && (device != (raw_load(record, 0) & 4294967295) || inode != raw_load(record, 1)) {
+                status = -22; // EINVAL: the path names a different directory.
+            }
+        }
+    }
+    raw_free(record);
     let closed = syscall1(6, fd);
     if status < 0 {
         raw_free(buffer);
