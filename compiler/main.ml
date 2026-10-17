@@ -76,7 +76,7 @@ type options = {
   opt : Semantic_opt.level;
   report : bool;
   source : string option;
-  output : string;
+  output : string option;
   filter : string;
   args : string list;
   target : string option;
@@ -102,14 +102,14 @@ let parse_options command arguments =
         let target=String.sub value 9 (String.length value-9) in
         if target="" then usage();
         loop {options with target=Some target} rest
-    | "-o" :: path :: rest when command="build" -> loop {options with output=path} rest
+    | "-o" :: path :: rest when command="build" -> loop {options with output=Some path} rest
     | "--filter" :: value :: rest when command="test" -> loop {options with filter=value} rest
     | "--" :: args when command="run" -> {options with args}
     | value :: rest when not(String.starts_with ~prefix:"-" value) && options.source=None ->
         loop {options with source=Some value} rest
     | _ -> usage() in
   let options=loop {opt=Semantic_opt.Basic;report=false;
-    source=None;output="a.out";filter="";args=[];target=None;cache_directory=None} arguments in
+    source=None;output=None;filter="";args=[];target=None;cache_directory=None} arguments in
   if (options.report || options.cache_directory<>None) && options.opt<>Semantic_opt.Basic then usage();
   options
 
@@ -137,7 +137,12 @@ let main () =
       let source=match o.source with Some source->source|None->usage() in
       let backend=select_backend o.target in
       let cache=prefix_cache o.cache_directory backend in
-      if command="build" then build ?cache backend o.opt o.report source o.output
+      if command="build" then begin
+        let module B=(val backend:Backend_intf.S)in
+        let output=Option.value o.output ~default:(
+          if B.description.target.operating_system=Target.Windows then "a.exe" else "a.out")in
+        build ?cache backend o.opt o.report source output
+      end
       else run ?cache backend o.opt o.report source o.args
   | _ :: "test" :: options ->
       let o=parse_options "test" options in

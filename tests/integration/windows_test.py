@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 """PE foundation checks; --require-native makes Windows execution mandatory.
 
-This fixture is independent of Xen lowering. Windows remains an unimplemented
-CLI output target until the CPU ABI and runtime are ready.
+These format fixtures complement the actual lowering/runtime checks in
+windows_runtime_test.py.
 """
 import ctypes
 import os
@@ -368,8 +368,9 @@ class CompilerHostTests(unittest.TestCase):
             self.assertEqual(pe.machine, 0x8664)
             print("Native compiler imports:", sorted(pe.imports()))
             result = self.invoke("build", self.source)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("x86_64-windows' is not implemented", result.stderr)
+            self.success(result)
+            self.assertEqual(PE(self.root/"a.exe").machine, 0x8664)
+            self.success(self.invoke("run", self.source))
 
     def test_relocated_stdlib_and_path_launch(self):
         original = self.root / "original"

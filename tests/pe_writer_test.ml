@@ -28,7 +28,16 @@ let () =
     (fun()->bad_function [{code_offset=5;operation=Alloc_stack 8}]);
     (fun()->bad_function [{code_offset=1;operation=Alloc_stack 7}]);
     (fun()->bad_function [{code_offset=1;operation=Push_nonvol 0}]);
+    (fun()->bad_function [{code_offset=1;operation=Save_nonvol(0,0)}]);
+    (fun()->bad_function [{code_offset=1;operation=Save_xmm(5,0)}]);
+    (fun()->bad_function [{code_offset=1;operation=Alloc_stack 32};
+                          {code_offset=2;operation=Save_xmm(6,24)}]);
+    (fun()->bad_function [{code_offset=1;operation=Alloc_stack 32};
+                          {code_offset=2;operation=Save_nonvol(3,32)}]);
     (fun()->bad_function [{code_offset=1;operation=Set_frame(5,0)}]);
+    (fun()->bad_function [{code_offset=1;operation=Push_nonvol 5};
+                          {code_offset=2;operation=Save_xmm(6,0)};
+                          {code_offset=3;operation=Set_frame(5,0)}]);
     (fun()->bad_function [{code_offset=1;operation=Push_nonvol 5};
                           {code_offset=1;operation=Alloc_stack 32}])];
   (* Distinct DLLs may export the same symbol; library casing is insignificant. *)
@@ -43,4 +52,8 @@ let () =
   List.iter(fun size->ignore(emit ~code_size:8 ~functions:[{
     begin_offset=0;end_offset=8;prolog_size=4;codes=[{code_offset=4;operation=Alloc_stack size}]}]()))
     [8;128;136;524280;524288];
+  ignore(emit ~code_size:8 ~functions:[{begin_offset=0;end_offset=8;prolog_size=4;
+    codes=[{code_offset=1;operation=Alloc_stack 64};
+           {code_offset=2;operation=Save_xmm(6,16)};
+           {code_offset=3;operation=Save_nonvol(3,48)}]}]());
   print_endline "PE input validation, DLL identity and unwind encodings passed"

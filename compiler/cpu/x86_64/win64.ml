@@ -4,9 +4,10 @@ module M = Machine_ir
 type scalar = I64 | F32 | F64
 type source = Gp of int | Fp of int | Stack of int | Immediate of int64
 type argument = { scalar : scalar; source : source }
-type unwind_operation = Push_nonvol of int | Alloc_stack of int | Set_frame of int * int
-type unwind_code = { code_offset : int; operation : unwind_operation }
-type function_frame = {
+type unwind_operation = M.unwind_operation = Push_nonvol of int | Alloc_stack of int | Set_frame of int * int
+  | Save_nonvol of int * int | Save_xmm of int * int
+type unwind_code = M.unwind_code = { code_offset : int; operation : unwind_operation }
+type function_frame = M.function_frame = {
   begin_offset : int; end_offset : int; prolog_size : int; codes : unwind_code list;
 }
 

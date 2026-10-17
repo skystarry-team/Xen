@@ -46,6 +46,11 @@
  (libraries xen_x86_64))
 
 (executable
+ (name windows_runtime_fixture)
+ (modules windows_runtime_fixture)
+ (libraries xen_common xen_x86_64 xen_windows_x86_64))
+
+(executable
  (name windows_fixture)
  (modules windows_fixture)
  (libraries xen_windows xen_x86_64))

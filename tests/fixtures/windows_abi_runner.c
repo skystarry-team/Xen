@@ -17,9 +17,16 @@ static void fail(const char *message) { fprintf(stderr,"ABI runner: %s\n",messag
 static void __attribute__((ms_abi,noreturn)) finish(unsigned status) { exit((int)status); }
 
 int main(int argc, char **argv) {
-    if (argc!=4) fail("expected image and two ABI shared objects");
-    void *libraries[2]={dlopen(argv[2],RTLD_NOW|RTLD_LOCAL),dlopen(argv[3],RTLD_NOW|RTLD_LOCAL)};
+    int runtime=argc>=4 && !strcmp(argv[3],"--runtime");
+    if (!runtime && argc!=4) fail("expected image and two ABI shared objects");
+    void *libraries[2]={dlopen(argv[2],RTLD_NOW|RTLD_LOCAL),NULL};
+    libraries[1]=runtime?libraries[0]:dlopen(argv[3],RTLD_NOW|RTLD_LOCAL);
     if (!libraries[0] || !libraries[1]) fail(dlerror());
+    if (runtime) {
+        void (*arguments)(int,char**)=dlsym(libraries[0],"xen_test_arguments");
+        if (!arguments) fail("missing runtime argument initializer");
+        arguments(argc-3,argv+3);
+    }
     FILE *file=fopen(argv[1],"rb");
     if (!file || fseek(file,0,SEEK_END)) fail("open image");
     long length=ftell(file);
@@ -76,7 +83,9 @@ int main(int argc, char **argv) {
             if (symbol+2>=size) fail("import name");
             char *export=(char*)base+symbol+2;
             void *address=NULL;
-            if (!strcmp(dll,"KERNEL32.dll") && !strcmp(export,"ExitProcess")) address=finish;
+            if (runtime && (!strcmp(dll,"KERNEL32.dll") || !strcmp(dll,"SHELL32.dll")))
+                address=dlsym(libraries[0],export);
+            else if (!strcmp(dll,"KERNEL32.dll") && !strcmp(export,"ExitProcess")) address=finish;
             else if (!strcmp(dll,"xen-abi-first.dll")) address=dlsym(libraries[0],export);
             else if (!strcmp(dll,"xen-abi-second.dll")) address=dlsym(libraries[1],export);
             if (!address) fail("unexpected/unresolved import");

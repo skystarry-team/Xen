@@ -4,6 +4,8 @@
 module M = Xen_x86_64.Machine_ir
 let expect condition message = if not condition then failwith message
 module Probe = struct
+  let stack_allocate m size = M.bytes m[0x48;0x81;0xec];M.u32 m(Int64.of_int size)
+  let function_prologue m = M.bytes m[0x55;0x48;0x89;0xe5];fun()->M.bytes m[0xc9;0xc3]
   let events = ref []
   let machine = ref None
   let service name output =

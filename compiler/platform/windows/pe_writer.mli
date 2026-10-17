@@ -1,5 +1,5 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
-(* Standalone AMD64 PE32+ console image writer. No Xen backend is registered.
+(* Standalone AMD64 PE32+ console image writer.
    Named imports only; no CRT, TLS, exports or language exception handlers.
    Callers supply Win64 code and accurate function/prolog descriptions. *)
 exception Error of string
@@ -12,6 +12,8 @@ type unwind_operation =
   | Push_nonvol of int
   | Alloc_stack of int
   | Set_frame of int * int (* register, byte displacement from fixed RSP *)
+  | Save_nonvol of int * int (* register, byte displacement from fixed RSP *)
+  | Save_xmm of int * int (* full 128-bit XMM6..15, byte displacement *)
 type unwind_code = { code_offset : int; operation : unwind_operation }
 type runtime_function = {
   begin_offset : int;
@@ -25,7 +27,7 @@ type runtime_function = {
    relocations. The encoder handles relative code/data/import references.
    Images without pointer fixups are explicitly fixed-base (no ASLR flags).
    import_address returns the VA of a loader-written IAT slot, not its contents.
-   Function descriptions support push/allocate/frame-pointer prologs only;
+   Function descriptions support push/allocate/frame-pointer and GP/XMM saves;
    stack probing and valid epilogs remain the code emitter's responsibility. *)
 val executable :
   ?stack_reserve:int64 -> ?stack_commit:int64 ->

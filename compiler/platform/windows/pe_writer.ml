@@ -7,6 +7,7 @@ type section = Code | Rodata | Data
 type address = { section : section; offset : int }
 type pointer = { at : address; target : address }
 type unwind_operation = Push_nonvol of int | Alloc_stack of int | Set_frame of int * int
+  | Save_nonvol of int * int | Save_xmm of int * int
 type unwind_code = { code_offset : int; operation : unwind_operation }
 type runtime_function = {
   begin_offset : int; end_offset : int; prolog_size : int; codes : unwind_code list;
@@ -39,6 +40,11 @@ let unwind_info code_size functions =
     let codes=List.sort(fun a b->compare b.code_offset a.code_offset)f.codes in
     let encoded=Buffer.create 16 and last=ref 256 and frame=ref 0 in
     let allocations=List.filter_map(fun c->match c.operation with Alloc_stack n->Some n|_->None)codes in
+    let frame_offset=List.find_map(fun c->match c.operation with Set_frame _->Some c.code_offset|_->None)codes in
+    List.iter(fun c->match c.operation,frame_offset with
+      |(Save_nonvol _|Save_xmm _),Some at when c.code_offset<=at->
+          fail "PE register saves must follow frame-pointer establishment"
+      |_->())codes;
     if List.length allocations>1 then fail "multiple stack allocations in PE prolog are unsupported";
     List.iter(fun c->
       if c.code_offset<=0 || c.code_offset>f.prolog_size || c.code_offset>= !last then
@@ -52,6 +58,16 @@ let unwind_info code_size functions =
           if size<=128 then op 2 (size/8-1)
           else if size/8<=0xffff then (op 1 0;int encoded 2 (size/8))
           else (op 1 1;int encoded 4 size)
+      |Save_nonvol(reg,offset)->
+          if not(nonvolatile reg) || offset<0 || offset mod 8<>0 || offset/8>0xffff then
+            fail "invalid PE saved GP register offset";
+          if offset+8>List.fold_left (+) 0 allocations then fail "PE GP save exceeds allocation";
+          op 4 reg;int encoded 2(offset/8)
+      |Save_xmm(reg,offset)->
+          if reg<6 || reg>15 || offset<0 || offset mod 16<>0 || offset/16>0xffff then
+            fail "invalid PE saved XMM register offset";
+          if offset+16>List.fold_left (+) 0 allocations then fail "PE XMM save exceeds allocation";
+          op 8 reg;int encoded 2(offset/16)
       |Set_frame(reg,offset)->
           if !frame<>0 || not(nonvolatile reg) || offset<0 || offset>240 || offset mod 16<>0 then
             fail "invalid PE frame register";

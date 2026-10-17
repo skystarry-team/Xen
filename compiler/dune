@@ -3,7 +3,7 @@
  (name xen_compiler)
  (wrapped false)
  (modules backend host_config test_runner)
- (libraries unix xen_common xen_linux_x86_64 xen_linux_arm64))
+ (libraries unix xen_common xen_linux_x86_64 xen_linux_arm64 xen_windows_x86_64))
 
 (executable
  (name main)

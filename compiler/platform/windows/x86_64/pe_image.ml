@@ -12,6 +12,7 @@ let executable ?stack_reserve ?stack_commit ?(bss_size=0) ?(pointers=[])
      codes=List.map(fun(c:W.unwind_code)->
        {P.code_offset=c.code_offset;operation=(match c.operation with
          |W.Push_nonvol r->P.Push_nonvol r|W.Alloc_stack n->P.Alloc_stack n
+         |W.Save_nonvol(r,n)->P.Save_nonvol(r,n)|W.Save_xmm(r,n)->P.Save_xmm(r,n)
          |W.Set_frame(r,n)->P.Set_frame(r,n))})f.codes})functions in
   P.executable ?stack_reserve ?stack_commit ~entry ~code_size:(M.position output)
     ~rodata:(Buffer.contents output.M.rodata) ~data:(Buffer.contents output.M.data)

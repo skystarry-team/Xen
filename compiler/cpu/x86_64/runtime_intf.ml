@@ -8,6 +8,11 @@
 module type S = sig
   val open_read_flags : int
   val open_write_flags : int
+  (* Allocate a constant stack region, retaining all inputs except r11/flags.
+     Platforms with guard pages probe each intervening page. *)
+  val stack_allocate : Machine_ir.t -> int -> unit
+  (* Emit a source-function prolog and return its epilog/frame-record emitter. *)
+  val function_prologue : Machine_ir.t -> (unit -> unit)
 
   (* rsi = size. Returns rax = address/error. Clobbers rcx, rdi, rdx, r8..r11
      and flags, preserving rsi and all other registers. Anonymous read/write

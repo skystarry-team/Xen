@@ -5,6 +5,10 @@
 module M = Xen_x86_64.Machine_ir
 let open_read_flags = 0
 let open_write_flags = 577
+let stack_allocate output size =
+  if size>0 then (M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int size))
+let function_prologue output =
+  M.bytes output[0x55;0x48;0x89;0xe5];fun()->M.bytes output[0xc9;0xc3]
 let trap output = M.bytes output [0x0f;0x05]
 let syscall output number = M.u8 output 0xb8;M.u32 output (Int64.of_int number);trap output
 let read output = M.bytes output [0x31;0xc0];trap output

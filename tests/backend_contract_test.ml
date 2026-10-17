@@ -26,9 +26,9 @@ let () =
     [""; "x86_64"; "x86_64-linux-extra"; "mystery-linux"; "x86_64-mystery"];
   List.iter (fun name -> expect (Result.is_error (Backend.of_string name))
     ("selected unimplemented target: " ^ name))
-    ["x86_64-windows"; "aarch64-windows"; "x86_64-macos"; "aarch64-macos"];
+    ["aarch64-windows"; "x86_64-macos"; "aarch64-macos"];
   List.iter (fun name -> expect (Result.is_ok (Backend.of_string name))
-    ("missing ARM64 backend: " ^ name)) ["aarch64-linux"; "arm64-linux"];
+    ("missing ARM64 backend: " ^ name)) ["aarch64-linux"; "arm64-linux"; "x86_64-windows"];
   let module Default = (val Backend.default : Backend_intf.S) in
   let expected=match Result.bind (Backend.default_target ()) Backend.select with
     |Ok backend->let module B=(val backend:Backend_intf.S)in B.description.target
