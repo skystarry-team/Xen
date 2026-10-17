@@ -40,10 +40,20 @@
  (modules pe_writer_test)
  (libraries xen_windows))
 
+(test
+ (name win64_test)
+ (modules win64_test)
+ (libraries xen_x86_64))
+
 (executable
  (name windows_fixture)
  (modules windows_fixture)
  (libraries xen_windows xen_x86_64))
+
+(executable
+ (name windows_abi_fixture)
+ (modules windows_abi_fixture)
+ (libraries xen_x86_64 xen_windows xen_windows_x86_64))
 
 (executable
  (name windows_runner_fixture)

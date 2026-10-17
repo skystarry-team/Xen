@@ -36,10 +36,12 @@ def main() -> None:
     if args.suite == "macos-prototype":
         prototype()
     elif args.suite == "windows":
-        run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe")
+        run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe", "tests/windows_abi_fixture.exe")
         run("dune", "exec", "tests/pe_writer_test.exe")
+        run("dune", "exec", "tests/win64_test.exe")
         run("dune", "exec", "tests/backend_contract_test.exe")
         integration("windows", *(["--require-native"] if os.name == "nt" else []))
+        integration("windows_abi", *(["--require-native"] if os.name == "nt" else []))
     elif args.suite == "arm64":
         run("dune", "exec", "tests/arm64_machine_test.exe")
         integration("arm64", XEN_REQUIRE_ARM64="1")
@@ -53,8 +55,9 @@ def main() -> None:
     elif args.suite in ("all", "quickcheck", "semantic"):
         if args.suite == "all":
             run("dune", "runtest")
-            run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe")
+            run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe", "tests/windows_abi_fixture.exe")
             integration("windows")
+            integration("windows_abi")
             run("dune", "build", "tests/mach_o_fixture.exe", "tests/darwin_fixture.exe", "tests/darwin_abi_fixture.exe")
             integration("mach_o")
             run("dune", "exec", "tests/native_core_test.exe", XEN_TEST_OPT="basic")

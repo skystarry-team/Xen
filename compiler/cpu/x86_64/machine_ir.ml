@@ -43,13 +43,14 @@ let rip_rel32 output section target =
   output.rip_fixups <- { offset; target; section } :: output.rip_fixups
 
 let import output library symbol =
-  match List.find_opt(fun(_,s,_)->s=symbol)output.imports with
+  match List.find_opt(fun(l,s,_)->l=library && s=symbol)output.imports with
   |Some(_,_,label)->label
   |None->let label="__xen_import_"^string_of_int(List.length output.imports)in
       add_data_u64 output label 0L;
       output.imports<-output.imports@[library,symbol,label];label
 
-let encode ?(code_address=0L) ?(rodata_address=0L) ?(data_address=0L) output =
+let encode ?(code_address=0L) ?(rodata_address=0L) ?(data_address=0L)
+    ?import_address output =
   let encoded = Bytes.of_string (Buffer.contents output.buffer) in
   List.iter (fun (fixup : fixup) ->
     let target = match Hashtbl.find_opt output.labels fixup.target with
@@ -65,7 +66,12 @@ let encode ?(code_address=0L) ?(rodata_address=0L) ?(data_address=0L) output =
       | Rodata -> output.rodata_labels, rodata_address
       | Data -> output.data_labels, data_address
     in
-    let target = match Hashtbl.find_opt labels fixup.target with
+    let imported = match fixup.section, import_address with
+      | Data, Some address -> List.find_map(fun(library,symbol,label)->
+          if label=fixup.target then Some(address ~library ~symbol)else None)output.imports
+      | _ -> None in
+    let target = match imported with Some address->address|None->
+      match Hashtbl.find_opt labels fixup.target with
       | Some target -> Int64.add base (Int64.of_int target)
       | None -> raise (Missing_label fixup.target)
     in

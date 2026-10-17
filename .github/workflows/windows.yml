@@ -1,4 +1,4 @@
-name: Windows foundation
+name: Windows foundation and ABI
 
 on:
   push:
@@ -35,7 +35,7 @@ jobs:
       - name: Build host and PE fixtures
         shell: pwsh
         run: |
-          opam exec -- dune build '@release' tests/windows_fixture.exe tests/windows_runner_fixture.exe
+          opam exec -- dune build '@release' tests/windows_fixture.exe tests/windows_runner_fixture.exe tests/windows_abi_fixture.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path -LiteralPath compiler/dist/xen.exe -PathType Leaf)) { throw "Release build did not produce compiler/dist/xen.exe" }
           & .\compiler\dist\xen.exe version
@@ -45,7 +45,7 @@ jobs:
         run: |
           llvm-readobj --file-headers --coff-imports compiler/dist/xen.exe | Tee-Object xen-pe.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Verify host portability and execute PE fixtures
+      - name: Verify host portability, Win64 ABI and native PE execution
         run: opam exec -- python scripts/test.py --suite windows
       - uses: actions/upload-artifact@v4
         if: always()
