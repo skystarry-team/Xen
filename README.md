@@ -16,7 +16,7 @@
 <div align="center">
 
   [![Release packages](https://github.com/skystarry-team/Xen/actions/workflows/release.yml/badge.svg)](https://github.com/skystarry-team/Xen/actions/workflows/release.yml)
-  ![Version Badge](https://img.shields.io/badge/version-v0.1.0--demo.6-blue?link=https%3A%2F%2Fgithub.com%2Fskystarry-team%2FXen)
+  ![Version Badge](https://img.shields.io/badge/version-v0.1.0--demo.5-blue?link=https%3A%2F%2Fgithub.com%2Fskystarry-team%2FXen)
 </div>
 
 

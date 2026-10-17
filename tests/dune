@@ -24,17 +24,26 @@
 (test
  (name semantic_opt_test)
  (modules semantic_opt_test)
+ (enabled_if (and (= %{system} linux) (= %{architecture} amd64)))
  (libraries unix xen_compiler xen_linux_x86_64))
 
 (test
  (name scoped_opt_test)
  (modules scoped_opt_test)
+ (enabled_if (and (= %{system} linux) (= %{architecture} amd64)))
  (libraries unix xen_compiler xen_linux_x86_64))
 
 (test
  (name aot_fusion_test)
  (modules aot_fusion_test)
+ (enabled_if (and (= %{system} linux) (= %{architecture} amd64)))
  (libraries unix xen_compiler xen_linux_x86_64))
+
+(test
+ (name version_gen_test)
+ (modules version_gen_test)
+ (deps ../compiler/version_gen.exe)
+ (libraries unix))
 
 (test
  (name backend_contract_test)

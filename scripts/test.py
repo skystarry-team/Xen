@@ -72,6 +72,7 @@ def main() -> None:
             integration("stdlib", XEN_STDLIB_TARGET="aarch64-macos",
                         XEN_STDLIB_OPT=optimization)
     elif args.suite == "windows":
+        run("dune", "exec", "tests/version_gen_test.exe")
         run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe", "tests/windows_abi_fixture.exe", "tests/windows_runtime_fixture.exe")
         run("dune", "exec", "tests/pe_writer_test.exe")
         run("dune", "exec", "tests/win64_test.exe")

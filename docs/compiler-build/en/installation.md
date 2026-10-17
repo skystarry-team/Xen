@@ -111,8 +111,8 @@ sudo apt remove xen-lang
 ```
 
 The Debian package version converts suffix separators and adds a packaging
-revision. For example, `v0.1.0-demo.6` becomes `0.1.0~demo.6-1`; `xen version`
-still reports `v0.1.0-demo.6`. See [version and dependency handling](packaging.md#debian-packages)
+revision. For example, `v0.1.0-demo.5` becomes `0.1.0~demo.5-1`; `xen version`
+still reports `v0.1.0-demo.5`. See [version and dependency handling](packaging.md#debian-packages)
 when building your own package, since its minimum system-library versions depend
 on the build environment.
 

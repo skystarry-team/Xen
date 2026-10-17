@@ -30,6 +30,12 @@ the generated/metamorphic checks. It does not run benchmarks.
 | `integration/low_level_extended_test.py`, `fixtures/ffi/` | asm aliases/partial initialization/multiple outputs/flags, integer atomic widths/order/bounds/wrap, C ABI and ELF loading/lifecycle, actual thread contention and release/acquire in both targets and optimizer levels |
 | `property/` | Whole-program generation, independent oracles and source metamorphisms |
 
+The native core and three OCaml optimization execution suites generate Linux
+x86-64 ELF binaries and run only on Linux x86-64. Portable IR and encoding
+checks remain enabled on other hosts; macOS uses its native off/basic gates.
+`version_gen_test.ml` checks LF/CRLF version files, overrides and invalid
+versions through the actual generator, including in the Windows suite.
+
 Focused commands:
 
 The extended low-level suite builds a native C fixture with gcc and an AArch64

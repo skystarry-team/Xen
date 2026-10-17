@@ -136,7 +136,7 @@ macOS 15 네이티브 CI가 통과했으며 Intel macOS는 미지원입니다.
 기본 버전은 `VERSION` 파일에서 읽습니다. Make에 버전을 지정하면 실행 파일에 포함됩니다.
 
 ```sh
-make build VERSION=v0.1.0-demo.6
+make build VERSION=v0.1.0-demo.5
 compiler/dist/xen version
 ```
 

@@ -137,7 +137,7 @@ tar.gz. The macOS 15 native CI gate passes; Intel macOS is unsupported.
 `VERSION` declares the default compiler version. Make embeds a supplied override:
 
 ```sh
-make build VERSION=v0.1.0-demo.6
+make build VERSION=v0.1.0-demo.5
 compiler/dist/xen version
 ```
 
