@@ -33,7 +33,13 @@ jobs:
           if ($config -notmatch '(?m)^architecture: amd64\s*$') { throw "Expected x64 OCaml" }
           "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Build host and PE fixtures
-        run: opam exec -- dune build @release tests/windows_fixture.exe tests/windows_runner_fixture.exe
+        shell: pwsh
+        run: |
+          opam exec -- dune build '@release' tests/windows_fixture.exe tests/windows_runner_fixture.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath compiler/dist/xen.exe -PathType Leaf)) { throw "Release build did not produce compiler/dist/xen.exe" }
+          & .\compiler\dist\xen.exe version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Inspect native compiler imports
         shell: pwsh
         run: |
