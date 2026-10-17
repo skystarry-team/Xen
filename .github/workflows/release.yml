@@ -30,11 +30,19 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-22.04
+            platform: linux
             architecture: x86_64
             deb_architecture: amd64
+            artifact: packages-x86_64
           - runner: ubuntu-22.04-arm
+            platform: linux
             architecture: aarch64
             deb_architecture: arm64
+            artifact: packages-aarch64
+          - runner: windows-2022
+            platform: windows
+            architecture: x86_64
+            artifact: packages-windows-x86_64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -42,27 +50,39 @@ jobs:
           persist-credentials: false
       - name: Check release tag
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: test "$RELEASE_TAG" = "v$(cat VERSION)"
+        run: |
+          version="$(cat VERSION)"
+          version="${version%$'\r'}"
+          test "$RELEASE_TAG" = "v$version"
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: '5.5.0'
+      - uses: actions/setup-python@v5
+        if: matrix.platform == 'windows'
+        with:
+          python-version: '3.13'
       - name: Install build tools
+        if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev qemu-user
           opam install dune.3.24.2
       - name: Test packaging and host behavior
+        if: matrix.platform == 'linux'
         run: |
           opam exec -- python3 scripts/test.py --suite packaging
           opam exec -- python3 scripts/test.py --suite host
       - name: Build binary distributions
+        if: matrix.platform == 'linux'
         run: opam exec -- make release-package PACKAGE_ARCHS=${{ matrix.architecture }}
       - name: Build source distribution
-        if: matrix.architecture == 'x86_64'
+        if: matrix.platform == 'linux' && matrix.architecture == 'x86_64'
         run: make source-package
       - name: Test installation on Debian and Ubuntu
+        if: matrix.platform == 'linux'
         env:
           DEB_ARCH: ${{ matrix.deb_architecture }}
         run: |
@@ -73,27 +93,8 @@ jobs:
               "$image" sh /smoke-test.sh \
               "$(basename dist/xen-lang_*_"$DEB_ARCH".deb)" "$(cat VERSION)"
           done
-      - uses: actions/upload-artifact@v4
-        with:
-          name: packages-${{ matrix.architecture }}
-          path: |
-            dist/*.tar.gz
-            dist/*.deb
-          if-no-files-found: error
-
-  windows:
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: '5.5.0'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
       - name: Build native Windows compiler
+        if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           opam install dune.3.24.2
@@ -101,14 +102,16 @@ jobs:
           $config = (opam exec -- ocamlc -config) -join "`n"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($config -notmatch '(?m)^system: (mingw64|win64)\s*$' -or $config -notmatch '(?m)^architecture: amd64\s*$') { throw "Expected native x64 Windows OCaml" }
-          if ($env:GITHUB_REF.StartsWith('refs/tags/') -and $env:GITHUB_REF_NAME -ne "v$((Get-Content VERSION -Raw).Trim())") { throw "Release tag does not match VERSION" }
           opam exec -- dune build '@release'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify Windows ZIP packaging and relocated execution
+        if: matrix.platform == 'windows'
         run: opam exec -- python tests/integration/windows_package_test.py
       - name: Create Windows distribution
+        if: matrix.platform == 'windows'
         run: opam exec -- python -m packaging.cli --platform windows --architecture x86_64 --formats zip
       - name: Test actual release ZIP with isolated PATH
+        if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
@@ -116,12 +119,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: packages-windows-x86_64
-          path: dist/*.zip
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.zip
           if-no-files-found: error
 
   assemble:
-    needs: [build, windows]
+    needs: build
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
