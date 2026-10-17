@@ -60,7 +60,10 @@ cd xen-<version>-macos-aarch64
 ```
 
 Keep `bin/` and `stdlib/` together. The default target is `aarch64-macos`.
-The native CI validation for this package is pending; Intel macOS is unsupported.
+The macOS 15 native CI package validation passes; Intel macOS is unsupported.
+The compiler and generated binaries are ad hoc signed for local execution; this
+archive is not notarized. CI's `codesign --verify` check does not establish
+Gatekeeper acceptance after an internet download.
 
 ## Debian and Ubuntu
 

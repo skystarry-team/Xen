@@ -64,7 +64,7 @@ on physical hardware is still required. Windows ARM64 is unsupported.
 On a native macOS arm64 OCaml switch, run `python3 scripts/test.py --suite macos`.
 It creates `dist/xen-<version>-macos-aarch64.tar.gz` and checks its relocated
 compiler, generated programs and standard library under a restricted PATH.
-Native CI validation is pending; Intel macOS is unsupported.
+The macOS 15 native CI gate passes; Intel macOS is unsupported.
 
 ## Cross toolchain configuration
 

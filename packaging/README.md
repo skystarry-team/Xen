@@ -46,7 +46,7 @@ Windows desktop validation on physical hardware is required.
 
 On native Apple Silicon macOS, `python3 scripts/test.py --suite macos` builds the
 compiler, runs generated Mach-O programs, creates the `macos-aarch64` tar.gz and
-checks its relocated execution. Native CI validation is pending.
+checks its relocated execution. The macOS 15 native CI gate passes.
 
 Keep the existing Make interface when adding formats. Put format-specific logic
 and templates in their own directory. See the [English guide](../docs/compiler-build/en/packaging.md)

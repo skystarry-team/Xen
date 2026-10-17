@@ -253,12 +253,11 @@ Its sibling `elf_writer.ml` emits
 EM_AARCH64, separate RX/R/RW load segments with 64KiB alignment (for 4/16/64KiB
 Linux page sizes), and a non-executable GNU stack. No RWX segment is created.
 `Native_backend.Make(Runtime)` separates CPU lowering from startup, syscall,
-file flags and executable construction. The internal Darwin prototype reuses this
+file flags and executable construction. The Apple Silicon Darwin backend reuses this
 lowering with PIE ADRP+ADD address fixups. Its runtime/backend live under
 `compiler/platform/darwin/arm64/`, and the shared Mach-O writer/signing code under
-`compiler/platform/darwin/`. The prototype is unregistered and does not provide
-macOS execution support. macOS is unsupported and has no planned support;
-these CPU and Mach-O implementations are retained for implementation testing.
+`compiler/platform/darwin/`. Native macOS CI checks its generated execution and
+relocated package. Intel macOS remains unsupported.
 
 The implementation was checked against [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst),
 [AAELF64](https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst), and

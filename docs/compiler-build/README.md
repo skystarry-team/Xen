@@ -24,11 +24,11 @@ the packaging guide. Distribution tooling lives in
 [`packaging/`](../../packaging/README.md)에서 패키징 형식별로 관리합니다.
 
 Linux x86_64, Linux AArch64, Windows x86_64 and Apple Silicon macOS are compiler hosts.
-AArch64, Windows and macOS support are experimental; Apple Silicon native CI validation is pending.
+AArch64, Windows and macOS support are experimental; Apple Silicon native CI passes on macOS 15.
 Windows native CI runs on Windows Server 2022; desktop hardware validation is
 still required. Windows ARM64 and Intel macOS are unsupported.
 
 Windows x86_64와 Apple Silicon macOS는 실험적 지원 대상입니다. Windows Server 2022 네이티브 CI는 통과했으며,
-Windows 데스크톱 실 하드웨어 검증은 추가로 필요합니다. Apple Silicon 네이티브 CI 검증은 대기 중입니다.
+Windows 데스크톱 실 하드웨어 검증은 추가로 필요합니다. Apple Silicon 네이티브 CI는 macOS 15에서 통과했습니다.
 Windows ARM64와 Intel macOS는 미지원입니다.
 Contributor test commands are documented in [tests/README.md](../../tests/README.md).

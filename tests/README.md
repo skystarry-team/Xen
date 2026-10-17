@@ -136,7 +136,7 @@ and leaf LR preservation. This does not certify Darwin kernel behavior.
 `python3 scripts/test.py --suite macos` requires a native Apple Silicon host.
 It checks compiler and generated executable signatures, dyld execution,
 platform services, CLI run/test and relocated tar.gz packaging. The new CI gate
-must pass before claiming native validation. Intel macOS remains unsupported.
+passes on macOS 15 native CI. Intel macOS remains unsupported.
 See [Darwin/Mach-O validation scope](../compiler/platform/darwin/MACOS_VALIDATION.md).
 
 `python3 scripts/test.py --suite packaging` checks the default two-architecture

@@ -59,7 +59,10 @@ cd xen-<version>-macos-aarch64
 ```
 
 `bin/`과 `stdlib/`을 함께 유지하세요. 기본 타깃은 `aarch64-macos`입니다.
-네이티브 CI 검증은 대기 중이며 Intel macOS는 미지원입니다.
+macOS 15 네이티브 CI 패키지 검증이 통과했으며 Intel macOS는 미지원입니다.
+컴파일러와 생성 바이너리는 로컬 실행을 위한 임시 서명(ad hoc signing)을 사용하며
+이 아카이브는 공증되지 않았습니다. CI의 `codesign --verify` 통과는 인터넷에서
+내려받은 파일의 Gatekeeper 허용을 보장하지 않습니다.
 
 ## Debian과 Ubuntu
 

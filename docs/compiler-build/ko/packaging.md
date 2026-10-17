@@ -60,7 +60,7 @@ version/check/build/run/test를 실행합니다. PATH에는 설치한 `bin`과 W
 macOS arm64 네이티브 OCaml switch에서 `python3 scripts/test.py --suite macos`를
 실행합니다. `dist/xen-<version>-macos-aarch64.tar.gz`를 만들고 재배치한 컴파일러,
 생성 프로그램과 표준 라이브러리를 제한된 PATH에서 검사합니다.
-네이티브 CI 검증은 대기 중이며 Intel macOS는 미지원입니다.
+macOS 15 네이티브 CI가 통과했으며 Intel macOS는 미지원입니다.
 
 ## 크로스 툴체인 설정
 

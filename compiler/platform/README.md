@@ -54,10 +54,9 @@ services; the pointer descriptor is non-owning and must be freed explicitly.
 
 ## macOS: Apple Silicon experimental support
 
-`aarch64-macos` is the initial Apple Silicon target. Native macOS CI validates
+`aarch64-macos` is the initial Apple Silicon target. Native macOS 15 CI passes
 compiler execution, generated programs, the Darwin standard library profile and
-relocated tar.gz packaging. This validation has not yet passed in the current
-development branch. Intel `x86_64-macos` has no code generator and remains unsupported.
+relocated tar.gz packaging. Intel `x86_64-macos` has no code generator and remains unsupported.
 
 `Target` recognizes x86_64-macos and aarch64-macos, including arm64/darwin aliases.
 OCaml amd64/macosx and arm64/macosx host configurations resolve to those targets.

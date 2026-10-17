@@ -36,6 +36,20 @@ def macos_architecture(binary: Path) -> str:
     return "aarch64"
 
 
+def validate_macos_image(binary: Path) -> tuple[str, list[str]]:
+    architecture = macos_architecture(binary)
+    subprocess.run(["codesign", "--verify", "--strict", str(binary)],
+                   check=True, capture_output=True, text=True, timeout=30)
+    output = subprocess.run(["otool", "-L", str(binary)], check=True,
+                            capture_output=True, text=True, timeout=30).stdout
+    dependencies = [line.strip().split(" (", 1)[0]
+                    for line in output.splitlines()[1:] if line.strip()]
+    if any(not item.startswith(("/usr/lib/", "/System/Library/Frameworks/"))
+           for item in dependencies):
+        raise ValueError(f"compiler has non-system macOS dependencies: {dependencies}")
+    return architecture, dependencies
+
+
 def parse_runner(value: str) -> list[str]:
     try:
         runner = json.loads(value)
@@ -63,7 +77,7 @@ def validate_binary(binary: Path, version: str, platform: str,
     elif platform == "linux":
         actual = binary_architecture(binary)
     elif platform == "macos":
-        actual = macos_architecture(binary)
+        actual, _ = validate_macos_image(binary)
     else:
         raise ValueError("unsupported compiler package platform; supported: linux windows macos")
     if architecture is not None and architecture != actual:

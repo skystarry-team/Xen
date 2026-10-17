@@ -30,7 +30,7 @@ xen build word_count.xen -o word-count
 xen build hello.xen --target=aarch64-linux -o hello-arm64
 ```
 
-만든 파일은 호환되는 OS와 CPU에서 실행하세요. 다른 타깃을 골라도 현재 머신에서 자동으로 실행되지는 않습니다. AArch64, Windows x86-64, Apple Silicon macOS는 실험적 지원입니다. Apple Silicon 네이티브 CI 검증은 대기 중이며 Intel macOS와 Windows ARM64는 미지원입니다. Windows 컴파일러·PE 실행·표준 라이브러리는 Windows Server 2022 네이티브 CI를 통과했지만, Windows 데스크톱 실기기 검증은 추가로 필요합니다. Windows의 원시 syscall과 `extern_call`은 지원하지 않습니다. PowerShell에서는 `-o hello.exe`로 빌드하고 `.\hello.exe`로 실행합니다.
+만든 파일은 호환되는 OS와 CPU에서 실행하세요. 다른 타깃을 골라도 현재 머신에서 자동으로 실행되지는 않습니다. AArch64, Windows x86-64, Apple Silicon macOS는 실험적 지원입니다. Apple Silicon 컴파일러·Mach-O 실행·패키지 검사는 macOS 15 네이티브 CI를 통과했으며 Intel macOS와 Windows ARM64는 미지원입니다. Windows 컴파일러·PE 실행·표준 라이브러리는 Windows Server 2022 네이티브 CI를 통과했지만, Windows 데스크톱 실기기 검증은 추가로 필요합니다. Windows의 원시 syscall과 `extern_call`은 지원하지 않습니다. PowerShell에서는 `-o hello.exe`로 빌드하고 `.\hello.exe`로 실행합니다.
 
 ## 테스트 선택
 

@@ -27,7 +27,8 @@ AArch64에서 실행되는 네이티브 OCaml을 x86_64에 설치하는 것과�
 
 크로스 OCaml과 네이티브 OCaml의 버전은 정확히 같아야 합니다. 컴파일러 테스트에는
 Python 3.10 이상과 binutils도 필요합니다. 상세 내용은 [테스트 안내](../../../tests/README.md)에 있습니다.
-Xen이 생성하는 프로그램에는 C 컴파일러·assembler·linker·libc가 필요하지 않습니다.
+Linux용 Xen 프로그램은 정적 런타임을 사용합니다. macOS용 Mach-O는 dyld와 libSystem을
+로드합니다. 생성된 프로그램 실행에는 C 컴파일러·assembler·linker가 필요하지 않습니다.
 OCaml 자체를 소스에서 빌드할 때는 네이티브 C 툴체인이 필요합니다.
 
 ## 네이티브 OCaml 설치
@@ -128,7 +129,7 @@ opam exec -- python3 scripts/test.py --suite macos
 ```
 
 이 검증은 생성된 프로그램 실행과 재배치한 macOS tar.gz를 확인합니다.
-네이티브 CI 검증은 대기 중이며 Intel macOS는 미지원입니다.
+macOS 15 네이티브 CI가 통과했으며 Intel macOS는 미지원입니다.
 
 ## 컴파일러 버전
 

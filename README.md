@@ -28,7 +28,8 @@ directly with the `xen` command.
 x86-64 and AArch64, Windows x86-64, and Apple Silicon macOS. AArch64, Windows and macOS support are experimental;
 validation on physical hardware is pending. Windows compiler, PE execution and
 standard library tests pass on Windows Server 2022 native CI; Windows desktop
-validation on physical hardware is still required. Native Apple Silicon CI validation is pending;
+validation on physical hardware is still required. Apple Silicon compiler, Mach-O execution and
+package relocation checks pass on macOS 15 native CI;
 Windows ARM64 and Intel macOS are unsupported.
 
 ## Write your first program

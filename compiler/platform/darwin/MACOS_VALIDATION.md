@@ -1,8 +1,8 @@
 # Darwin/Mach-O validation
 
 Apple Silicon `aarch64-macos` is an experimental target with a registered CLI
-backend, Darwin standard library profile and tar.gz package. Native macOS CI
-must pass before claiming verified execution or publishing a release. Intel
+backend, Darwin standard library profile and tar.gz package. Native macOS 15 CI
+passes generated execution and relocated packaging. Intel
 `x86_64-macos` remains unsupported because it has no Darwin code generator.
 
 ## Retained components

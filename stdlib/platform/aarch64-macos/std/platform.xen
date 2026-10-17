@@ -43,7 +43,11 @@ fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, Int> {
             return Result<Vec<String>, Int>.Err(0);
         }
         let mut name: Vec<U8> = [];
-        for index in 0..name_length { name.push(bytes.get(offset + 21 + index)); }
+        for index in 0..name_length {
+            let byte = bytes.get(offset + 21 + index);
+            if byte == u8(0) { return Result<Vec<String>, Int>.Err(0); }
+            name.push(byte);
+        }
         if bytes.get(offset + 21 + name_length) != u8(0) {
             return Result<Vec<String>, Int>.Err(0);
         }
@@ -52,6 +56,21 @@ fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, Int> {
         offset = offset + length;
     }
     return Result<Vec<String>, Int>.Ok(names);
+}
+
+fn stat_mode(word: Int) -> Int { return (word >> 32) & 65535; }
+
+test fn stat_mode_bits() {
+    let word = (32768 << 48) | (36863 << 32) | 1;
+    assert(stat_mode(word) == 36863);
+}
+
+test fn invalid_directory_name() {
+    let record: Vec<U8> = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,24,0,2,0,0,0,97,0];
+    assert(match decode_directory(record.as_slice()) {
+        Result.Err(_) => true,
+        _ => false,
+    });
 }
 
 #![bb]
@@ -64,7 +83,7 @@ fn metadata(path: Ptr<U8>) -> Result<std.platform_types.Stat, Int> {
         raw_free(record);
         return Result<std.platform_types.Stat, Int>.Err(-status);
     }
-    let mode = ((raw_load(record, 0) / 4294967296) % 65536 + 65536) % 65536;
+    let mode = stat_mode(raw_load(record, 0));
     let kind = mode / 4096;
     let value = std.platform_types.Stat {
         size: raw_load(record, 12),

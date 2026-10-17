@@ -27,8 +27,9 @@ See [AArch64 cross compilation](aarch64.md).
 
 The cross toolchain must match the native OCaml version exactly. Compiler tests
 also require Python 3.10 or later and binutils; see the [test guide](../../../tests/README.md).
-Generated Xen programs use a static runtime and do not require a C compiler,
-assembler, linker or libc. Building OCaml itself requires a native C toolchain.
+Generated Linux Xen programs use a static runtime. macOS Mach-O programs load
+dyld and libSystem. Neither target needs a C compiler, assembler or linker to
+run generated programs. Building OCaml itself requires a native C toolchain.
 
 ## Installing native OCaml
 
@@ -129,7 +130,7 @@ opam exec -- python3 scripts/test.py --suite macos
 ```
 
 The suite builds and runs generated programs and validates a relocated macOS
-tar.gz. Native CI validation is pending; Intel macOS is unsupported.
+tar.gz. The macOS 15 native CI gate passes; Intel macOS is unsupported.
 
 ## Compiler version
 

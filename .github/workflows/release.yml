@@ -7,11 +7,13 @@ on:
   pull_request:
     paths:
       - '.github/workflows/release.yml'
+      - '.github/workflows/macos.yml'
       - 'packaging/**'
       - 'Makefile'
       - 'VERSION'
       - 'scripts/test.py'
       - 'tests/integration/*package*'
+      - 'tests/integration/macos_test.py'
       - 'compiler/**'
       - 'stdlib/**'
       - 'docs/compiler-build/**'
