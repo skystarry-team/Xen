@@ -87,8 +87,8 @@ fn main() {{
     for bad_library, bad_symbol in ((str(library), "missing_xen_symbol"),
                                     (str(workspace / "missing.dylib"), "init_value")):
         bad_source = workspace / "foreign-missing.xen"
-        bad_source.write_text(f'#![bb]\nfn main(){{extern_call<Int>({json.dumps(bad_library)},'
-                              f'"{bad_symbol}");}}')
+        bad_source.write_text(f'#![bb]\nfn main(){{extern_call<Int>({json.dumps(bad_library, ensure_ascii=False)},'
+                              f'"{bad_symbol}");}}', encoding="utf-8")
         bad_image = workspace / "foreign-missing"
         run(str(XEN), "build", str(bad_source), "--target=aarch64-macos", "-o",
             str(bad_image), cwd=workspace)
