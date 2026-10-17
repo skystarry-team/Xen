@@ -2,8 +2,8 @@
 
 Xen is an early demo for Linux x86-64 and ARM64, including platform stdlib services.
 ARM64 supports checked numeric file readers and shared scoped AOT optimization.
-macOS is unsupported and has no planned support. CPU encoders and internal
-Mach-O/Darwin prototypes are retained for implementation testing.
+Apple Silicon macOS has an experimental backend and native CI gate. Intel macOS
+remains unsupported.
 Reproducible bug reports, documentation
 corrections and small changes with a concrete use case are welcome at
 [skystarry-team/Xen](https://github.com/skystarry-team/Xen).

@@ -17,6 +17,75 @@ FIXTURE = REPO / "_build/default/tests/mach_o_fixture.exe"
 
 
 class MachOTests(unittest.TestCase):
+    def test_foreign_import_bind_stream(self):
+        with tempfile.TemporaryDirectory(prefix="xen-darwin-import-") as temp:
+            source = Path(temp) / "app.xen"
+            source.write_text('''
+#![bb]
+fn main(){assert(extern_call<I32>("/usr/lib/libSystem.B.dylib","abs",i32(-42))==i32(42));
+extern_call<Unit>("/tmp/libxen-ffi.dylib","mark_exit");}
+''')
+            output = Path(temp) / "app"
+            result = subprocess.run([str(REPO / "_build/default/tests/darwin_fixture.exe"),
+                                     str(source), str(output)], capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            image = output.read_bytes()
+            commands = {}
+            dylibs = []
+            at = 32
+            for _ in range(struct.unpack_from("<I", image, 16)[0]):
+                command, size = struct.unpack_from("<II", image, at)
+                commands[command] = at
+                if command == 0xc:
+                    name_offset = struct.unpack_from("<I", image, at+8)[0]
+                    dylibs.append(image[at+name_offset:at+size].split(b"\0", 1)[0])
+                at += size
+            self.assertEqual(at, 32+struct.unpack_from("<I", image, 20)[0])
+            self.assertEqual(dylibs, [b"/usr/lib/libSystem.B.dylib", b"/tmp/libxen-ffi.dylib"])
+            info = struct.unpack_from("<10I", image, commands[0x80000022]+8)
+            bind_offset, bind_size = info[2:4]
+            bind = image[bind_offset:bind_offset+bind_size]
+            self.assertTrue(bind.startswith(b"\x11\x40_abs\0\x51\x73\x18\x90"), bind)
+            self.assertIn(b"\x12\x40_mark_exit\0\x51\x73\x20\x90", bind)
+            self.assertEqual(bind[-1:], b"\0")
+            signature_offset = struct.unpack_from("<I", image, commands[0x1d]+8)[0]
+            self.assertLess(bind_offset+bind_size, signature_offset)
+
+    def test_rebuild_replaces_signed_image_and_preserves_output_on_failure(self):
+        fixture = REPO / "_build/default/tests/darwin_fixture.exe"
+        with tempfile.TemporaryDirectory(prefix="xen-darwin-rebuild-") as temp:
+            workspace = Path(temp) / "space 한글"
+            workspace.mkdir()
+            source = workspace / "app.xen"
+            output = workspace / "app"
+            previous_inode = None
+            previous_image = None
+            for message in ("first", "second", "third"):
+                source.write_text(f'fn main(){{println("{message}");}}', encoding="utf-8")
+                result = subprocess.run([str(fixture), str(source), str(output)],
+                                        capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                inode = output.stat().st_ino
+                self.assertNotEqual(inode, previous_inode, "signed image was modified in place")
+                image = output.read_bytes()
+                self.assertEqual(image[:4], b"\xcf\xfa\xed\xfe")
+                self.assertNotEqual(image, previous_image)
+                self.assertTrue(output.stat().st_mode & 0o111)
+                previous_inode, previous_image = inode, image
+            # Force the final rename to fail after the temporary image is written.
+            # The existing destination and directory contents must survive intact.
+            destination = workspace / "existing-directory"
+            destination.mkdir()
+            sentinel = destination / "keep"
+            sentinel.write_bytes(b"original")
+            before = set(workspace.iterdir())
+            failure = subprocess.run([str(fixture), str(source), str(destination)],
+                                     capture_output=True, timeout=30)
+            self.assertNotEqual(failure.returncode, 0)
+            self.assertEqual(sentinel.read_bytes(), b"original")
+            self.assertEqual(output.read_bytes(), previous_image)
+            self.assertEqual(set(workspace.iterdir()), before, "temporary image leaked")
+
     def test_darwin_adapter_carry_arguments_stack_and_leaf_return(self):
         runner = [] if platform.system() == "Linux" and platform.machine() in ("aarch64", "arm64") else [shutil.which("qemu-aarch64")]
         if runner and runner[0] is None:
@@ -124,7 +193,7 @@ fn main(){println(arg_count());println(arg(0));println(1.5);
                         self.assertEqual(struct.unpack_from("<I", image, at+8)[0], prefix)
                         self.assertEqual(image[at+prefix:].split(b"\0", 1)[0], wanted)
                     self.assertEqual(struct.unpack_from("<4I", image, by_kind[0x32]+8),
-                                     (1, 0xc0000, 0xc0000, 0))
+                                     (1, 0xf0000, 0xf0000, 0))
                     signature_offset, signature_size = struct.unpack_from("<II", image, by_kind[0x1d]+8)
                     self.assertEqual(signature_offset % 16, 0)
                     self.assertEqual(signature_offset+signature_size, len(image))

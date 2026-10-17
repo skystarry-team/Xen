@@ -16,7 +16,7 @@
 <div align="center">
 
   [![Release packages](https://github.com/skystarry-team/Xen/actions/workflows/release.yml/badge.svg)](https://github.com/skystarry-team/Xen/actions/workflows/release.yml)
-  ![Version Badge](https://img.shields.io/badge/version-v0.1.0--demo.4-blue?link=https%3A%2F%2Fgithub.com%2Fskystarry-team%2FXen)
+  ![Version Badge](https://img.shields.io/badge/version-v0.1.0--demo.5-blue?link=https%3A%2F%2Fgithub.com%2Fskystarry-team%2FXen)
 </div>
 
 
@@ -25,10 +25,14 @@ and explicit error handling. Build a standalone executable or run a source file
 directly with the `xen` command.
 
 **Xen is an early release.** Syntax and APIs may change. Programs run on Linux
-x86-64 and AArch64, and Windows x86-64. AArch64 and Windows support are experimental;
-validation on physical hardware is pending. Windows compiler, PE execution and
+x86-64 and AArch64, Windows x86-64, and Apple Silicon macOS 15 or later. AArch64
+and Windows support are experimental. Apple Silicon macOS implements the ARM64
+language and standard library capabilities; the experimental release label records
+that validation on a user-owned physical Mac is still pending. Windows compiler, PE execution and
 standard library tests pass on Windows Server 2022 native CI; Windows desktop
-validation on physical hardware is still required. Windows ARM64 and macOS are unsupported.
+validation on physical hardware is still required. Apple Silicon compiler, Mach-O execution and
+package relocation checks pass on macOS 15 native CI;
+Windows ARM64 and Intel macOS are unsupported.
 
 ## Write your first program
 

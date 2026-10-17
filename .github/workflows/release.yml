@@ -7,11 +7,13 @@ on:
   pull_request:
     paths:
       - '.github/workflows/release.yml'
+      - '.github/workflows/macos.yml'
       - 'packaging/**'
       - 'Makefile'
       - 'VERSION'
       - 'scripts/test.py'
       - 'tests/integration/*package*'
+      - 'tests/integration/macos_test.py'
       - 'compiler/**'
       - 'stdlib/**'
       - 'docs/compiler-build/**'
@@ -43,6 +45,10 @@ jobs:
             platform: windows
             architecture: x86_64
             artifact: packages-windows-x86_64
+          - runner: macos-15
+            platform: macos
+            architecture: aarch64
+            artifact: packages-macos-aarch64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -61,7 +67,7 @@ jobs:
         with:
           ocaml-compiler: '5.5.0'
       - uses: actions/setup-python@v5
-        if: matrix.platform == 'windows'
+        if: matrix.platform == 'windows' || matrix.platform == 'macos'
         with:
           python-version: '3.13'
       - name: Install build tools
@@ -117,6 +123,14 @@ jobs:
           $version = (Get-Content VERSION -Raw).Trim()
           python -m packaging.windows.smoke "dist/xen-$version-windows-x86_64.zip" --version $version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build and validate native Apple Silicon distribution
+        if: matrix.platform == 'macos'
+        run: |
+          opam install dune.3.24.2
+          opam exec -- ocamlc -config | tee ocaml-config.txt
+          grep -Eq '^system: macosx$' ocaml-config.txt
+          grep -Eq '^architecture: arm64$' ocaml-config.txt
+          opam exec -- python3 scripts/test.py --suite macos
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

@@ -253,12 +253,11 @@ Its sibling `elf_writer.ml` emits
 EM_AARCH64, separate RX/R/RW load segments with 64KiB alignment (for 4/16/64KiB
 Linux page sizes), and a non-executable GNU stack. No RWX segment is created.
 `Native_backend.Make(Runtime)` separates CPU lowering from startup, syscall,
-file flags and executable construction. The internal Darwin prototype reuses this
+file flags and executable construction. The Apple Silicon Darwin backend reuses this
 lowering with PIE ADRP+ADD address fixups. Its runtime/backend live under
 `compiler/platform/darwin/arm64/`, and the shared Mach-O writer/signing code under
-`compiler/platform/darwin/`. The prototype is unregistered and does not provide
-macOS execution support. macOS is unsupported and has no planned support;
-these CPU and Mach-O implementations are retained for implementation testing.
+`compiler/platform/darwin/`. Native macOS CI checks its generated execution and
+relocated package. Intel macOS remains unsupported.
 
 The implementation was checked against [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst),
 [AAELF64](https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst), and
@@ -266,10 +265,10 @@ the [Linux generic syscall table](https://github.com/torvalds/linux/blob/master/
 
 ## Validation and limitations
 
-Linux numeric file readers and stdlib services are implemented; the
-[platform boundary](../../platform/README.md) defines macOS as unsupported, with
-no planned support. CPU encoders and internal Darwin/Mach-O prototypes are
-retained for implementation testing. User raw syscall numbers remain untranslated.
+Linux and Apple Silicon macOS numeric file readers and standard library services
+are implemented. The [platform boundary](../../platform/README.md) describes
+the Darwin backend and Mach-O writer. User raw syscall numbers remain
+OS-specific and are not translated.
 
 `python3 scripts/test.py --suite arm64` checks integer and FP instruction words against independent
 assembly, then runs both optimization levels under Linux ARM64 or QEMU.

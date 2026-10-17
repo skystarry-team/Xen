@@ -1,6 +1,6 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
 (* Generated runtime carries the additional MIT OR Apache-2.0 permission in LICENSE.
-   Internal Darwin AArch64 prototype, not a registered CLI execution target.
+   Darwin AArch64 runtime.
    BSD syscall number in x16, arguments x0..x5, svc #0x80, positive errno with
    carry on failure. Normalize to a negative errno for shared runtime services.
    Preserve x1..x5: Darwin returns a second result in x1, while the shared reader
@@ -40,7 +40,15 @@ let start m =
 let alloc m =
   M.mov m 1 0;M.int m 0 0;M.int m 2 3;M.int m 3 4098;
   M.imm m 4 (-1L);M.int m 5 0;syscall m 197
-let foreign_start _ ~main:_ = Error "extern_call currently requires Linux ELF"
+let foreign_start m ~main =
+  (* LC_MAIN is called with the C entry convention by dyld. Returning from
+     main lets libSystem run normal process termination and dylib destructors. *)
+  start m;call m main;
+  M.int m 0 0;
+  M.offset m 31 31 16;
+  M.load m 29 31 0;M.load m 30 31 8;
+  M.offset m 31 31 16;M.ret m;
+  Ok ()
 let unmap m = syscall m 73
 let emit m =
   Xen_arm64.Output_runtime.emit m ~write:(fun m->syscall m 4) ~exit;
@@ -51,7 +59,10 @@ let emit m =
     ~write:(fun m->syscall m 4) ~close:(fun m->syscall m 6);
   Xen_arm64.Numeric_runtime.emit m
 let executable m =
-  try Xen_darwin.Mach_o.executable ~architecture:Target.Aarch64 ~entry:0
+  try
+    let imports=List.map(fun(library,symbol,label)->
+      let _,offset=Hashtbl.find m.M.labels label in library,symbol,offset)m.M.imports in
+    Xen_darwin.Mach_o.executable ~architecture:Target.Aarch64 ~entry:0 ~imports
     ~code_size:(Buffer.length m.M.code) ~rodata:(Buffer.contents m.M.rodata)
     ~data:(Buffer.contents m.M.data) ~encode:(M.encode ~position_independent:true m)
   with Xen_darwin.Mach_o.Error message->raise(M.Error message)

@@ -23,11 +23,15 @@ the packaging guide. Distribution tooling lives in
 배포물 생성과 GitHub 릴리스는 패키징 안내를 따릅니다. 배포 도구는
 [`packaging/`](../../packaging/README.md)에서 패키징 형식별로 관리합니다.
 
-Linux x86_64, Linux AArch64 and Windows x86_64 are compiler hosts. AArch64 and
-Windows support are experimental; physical hardware validation is pending.
+Linux x86_64, Linux AArch64, Windows x86_64 and Apple Silicon macOS 15+ are compiler hosts.
+Apple Silicon implements the ARM64 language and standard library capabilities; its
+experimental release label records pending validation on a user-owned physical Mac.
+Apple Silicon native CI runs on macOS 15.
 Windows native CI runs on Windows Server 2022; desktop hardware validation is
-still required. Windows ARM64 and macOS are unsupported.
+still required. Windows ARM64 and Intel macOS are unsupported.
 
-Windows x86_64는 실험적 지원 대상입니다. Windows Server 2022 네이티브 CI는 통과했으며,
-Windows 데스크톱 실 하드웨어 검증은 추가로 필요합니다. Windows ARM64와 macOS는 미지원입니다.
+Windows x86_64는 실험적 지원 대상입니다. Apple Silicon macOS 15 이상은 ARM64 언어·표준 라이브러리 기능을 지원하며,
+실험적 표기는 사용자 실기기 검증이 아직 없다는 뜻입니다. Windows Server 2022 네이티브 CI는 통과했으며,
+Windows 데스크톱 실 하드웨어 검증은 추가로 필요합니다. Apple Silicon 네이티브 CI는 macOS 15에서 통과했습니다.
+Windows ARM64와 Intel macOS는 미지원입니다.
 Contributor test commands are documented in [tests/README.md](../../tests/README.md).

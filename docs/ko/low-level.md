@@ -131,7 +131,7 @@ fn main() {
 ## C ABI 외부 함수
 
 `extern_call<Result>("library", "symbol", arguments...)`는 Linux x86-64의
-System V ABI 또는 Linux AArch64의 AAPCS64로 외부 함수를 호출합니다.
+System V ABI 또는 Linux·Apple Silicon macOS의 AArch64 C ABI로 외부 함수를 호출합니다.
 `bb`, 명시한 결과 타입과 라이브러리·심볼 문자열 리터럴이 필요합니다.
 
 인자는 최대 6개의 고정 인자이며 정수, `F32/F64`, `Ptr<T>`를 지원합니다.
@@ -155,7 +155,10 @@ fn main() {
 }
 ```
 
-외부 호출이 있는 프로그램은 glibc 동적 ELF로 생성하며 `__libc_start_main`을
+위 예제의 `libc.so.6`은 Linux용입니다. Apple Silicon macOS 15 이상에서는
+`"/usr/lib/libSystem.B.dylib"` 또는 arm64 dylib의 절대 경로를 사용합니다.
+
+Linux에서 외부 호출이 있는 프로그램은 glibc 동적 ELF로 생성하며 `__libc_start_main`을
 통해 C 초기화·정상 종료와 라이브러리 생성자·소멸자, stdio 정리를 실행합니다.
 타깃 로더는 x86-64의 `/lib64/ld-linux-x86-64.so.2`, AArch64의
 `/lib/ld-linux-aarch64.so.1`입니다. 외부 호출이 없으면 기존 정적 ELF 경로를 씁니다.
@@ -167,6 +170,11 @@ fn main() {
 규칙을 따르므로 지정한 라이브러리만을 대상으로 하는 `dlsym` 조회와 다릅니다.
 자세한 계약은 [ELF 동적 링크](https://refspecs.linuxfoundation.org/elf/gabi4%2B/ch5.dynamic.html),
 [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst)를 참고하세요.
+
+Apple Silicon 프로그램은 Mach-O `LC_LOAD_DYLIB`와 즉시 dyld 바인딩으로 외부
+심볼을 연결합니다. `LC_MAIN` 진입점이 libSystem으로 반환하므로 dylib 생성자와
+소멸자가 실행됩니다. 라이브러리·심볼 누락은 실행 시 dyld가 보고합니다.
+실행 파일 옆의 dylib에는 `@loader_path`를 사용할 수 있습니다.
 
 ## 인라인 어셈블리
 

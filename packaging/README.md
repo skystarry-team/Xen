@@ -11,7 +11,7 @@ Debian packages additionally require `dpkg-dev` and the target's library metadat
 | `toolchains/` | Cross compiler configuration examples and Dune workspace |
 | `github/` | Complete release asset validation and SHA-256 manifest |
 
-`common.py` shares compiler-version and payload checks, with ELF and Windows PE validation. `build.py` orchestrates
+`common.py` shares compiler-version and payload checks, with ELF, Mach-O and Windows PE validation. `build.py` orchestrates
 native/cross builds; `cli.py` packages an existing executable or exports source.
 All requested formats and CPUs finish before replacing existing artifacts.
 
@@ -22,7 +22,7 @@ make release-package               # both CPUs, tar.gz and .deb
 make release-package PACKAGE_ARCHS=x86_64  # one native build, for CI
 make package-one PACKAGE_FORMATS=deb PACKAGE_BINARY=/path/to/xen
 make source-package
-python3 -m packaging.github.release # verify six packages and write SHA256SUMS
+python3 -m packaging.github.release # verify seven packages and write SHA256SUMS
 ```
 
 On a native Windows x86_64 OCaml switch, without Make (PowerShell):
@@ -43,6 +43,10 @@ only its `bin` and Windows System32 on PATH, without stdlib overrides. It also
 checks missing-bundle failure and Linux cross output. This is not a clean OS
 installation or physical hardware test. Windows x86_64 remains experimental;
 Windows desktop validation on physical hardware is required.
+
+On native Apple Silicon macOS, `python3 scripts/test.py --suite macos` builds the
+compiler, runs generated Mach-O programs, creates the `macos-aarch64` tar.gz and
+checks its relocated execution. The macOS 15 native CI gate passes.
 
 Keep the existing Make interface when adding formats. Put format-specific logic
 and templates in their own directory. See the [English guide](../docs/compiler-build/en/packaging.md)

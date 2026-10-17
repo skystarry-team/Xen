@@ -26,9 +26,9 @@ let () =
     [""; "x86_64"; "x86_64-linux-extra"; "mystery-linux"; "x86_64-mystery"];
   List.iter (fun name -> expect (Result.is_error (Backend.of_string name))
     ("selected unimplemented target: " ^ name))
-    ["aarch64-windows"; "x86_64-macos"; "aarch64-macos"];
+    ["aarch64-windows"; "x86_64-macos"];
   List.iter (fun name -> expect (Result.is_ok (Backend.of_string name))
-    ("missing ARM64 backend: " ^ name)) ["aarch64-linux"; "arm64-linux"; "x86_64-windows"];
+    ("missing backend: " ^ name)) ["aarch64-linux"; "arm64-linux"; "x86_64-windows"; "aarch64-macos"; "arm64-darwin"];
   let module Default = (val Backend.default : Backend_intf.S) in
   let expected=match Result.bind (Backend.default_target ()) Backend.select with
     |Ok backend->let module B=(val backend:Backend_intf.S)in B.description.target
@@ -36,7 +36,7 @@ let () =
   expect (Default.description.target=expected) "registry default mismatch";
   List.iter(fun name->let module B=(val Backend.library_default(Ok(parsed name)):Backend_intf.S)in
     expect(B.description.target=Target.default) "library fallback depends on registry order")
-    ["aarch64-macos";"x86_64-macos"];
+    ["x86_64-macos"];
   List.iter(fun (architecture,expected)->
     expect (Backend.host_target ~architecture ~system:"linux"=Ok (parsed expected)) "host target mismatch")
     ["amd64","x86_64-linux";"arm64","aarch64-linux"];

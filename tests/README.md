@@ -30,6 +30,12 @@ the generated/metamorphic checks. It does not run benchmarks.
 | `integration/low_level_extended_test.py`, `fixtures/ffi/` | asm aliases/partial initialization/multiple outputs/flags, integer atomic widths/order/bounds/wrap, C ABI and ELF loading/lifecycle, actual thread contention and release/acquire in both targets and optimizer levels |
 | `property/` | Whole-program generation, independent oracles and source metamorphisms |
 
+The native core and three OCaml optimization execution suites generate Linux
+x86-64 ELF binaries and run only on Linux x86-64. Portable IR and encoding
+checks remain enabled on other hosts; macOS uses its native off/basic gates.
+`version_gen_test.ml` checks LF/CRLF version files, overrides and invalid
+versions through the actual generator, including in the Windows suite.
+
 Focused commands:
 
 The extended low-level suite builds a native C fixture with gcc and an AArch64
@@ -103,7 +109,7 @@ symlink metadata, malformed and multi-batch directory records, removed cwd, low 
 limits and bounded guest VA. For a custom compiler/runner, use `XEN_BIN`, JSON
 `XEN_HOST_RUNNER`, `XEN_STDLIB_TARGET`, JSON `XEN_STDLIB_RUNNER` and `XEN_STDLIB_OPT`.
 Toolchain tests prove missing platform profiles cannot fall back to common/project
-files, and macOS Intel/Apple Silicon targets fail before source/output access.
+files, and the unimplemented Intel macOS target fails before source/output access.
 
 `python3 scripts/test.py --suite host` checks compiler version, import/check, default-target build/run/test,
 both cross-build targets, relocated stdlib discovery and binary packaging. It
@@ -126,15 +132,20 @@ metadata/directory/cwd/process calls for both CPU targets, independently of the
 compiler's own architecture.
 See [AArch64 compiler builds and validation](../docs/compiler-build/en/aarch64.md).
 
-`python3 scripts/test.py --suite macos-prototype` validates the internal Mach-O writer for both CPUs,
+`python3 scripts/test.py --suite macos-prototype` validates the Mach-O writer for both CPUs,
 independent SHA-256 page signatures and ARM64 PIE relocations. It also generates
-Darwin prototype images from checked Xen IR and confirms Darwin traps rather than
-Linux traps. It does not boot macOS or certify runtime/loader/packaging support;
+Darwin images from checked Xen IR and confirms Darwin traps rather than
+Linux traps. It does not boot macOS or certify runtime/loader/packaging support.
 The Darwin syscall adapter also executes under Linux ARM64/QEMU with simulated
 kernel returns, checking carry/errno normalization, x1 restoration, stack balance
 and leaf LR preservation. This does not certify Darwin kernel behavior.
-macOS is unsupported and has no planned support. These tests
-preserve the CPU/Mach-O prototypes without enabling macOS support.
+`python3 scripts/test.py --suite macos` requires a native Apple Silicon host.
+It runs the OCaml tests, ARM64 language execution at both optimization levels,
+the common standard library suite, compiler and generated executable signatures,
+dyld C calls including a relocated user dylib, platform services, CLI run/test
+and relocated tar.gz packaging. On Apple Silicon, `make test` selects this suite.
+The experimental release label records pending validation on a user-owned
+physical Mac. Intel macOS remains unsupported.
 See [Darwin/Mach-O validation scope](../compiler/platform/darwin/MACOS_VALIDATION.md).
 
 `python3 scripts/test.py --suite packaging` checks the default two-architecture

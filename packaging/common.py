@@ -23,6 +23,33 @@ def binary_architecture(binary: Path) -> str:
     return architecture
 
 
+def macos_architecture(binary: Path) -> str:
+    with binary.open("rb") as file:
+        header = file.read(32)
+    if len(header) < 32 or header[:4] != b"\xcf\xfa\xed\xfe":
+        raise ValueError("compiler must be a thin little-endian Mach-O64 executable")
+    cpu = struct.unpack_from("<I", header, 4)[0]
+    if cpu != 0x0100000c:
+        raise ValueError("compiler must be an Apple Silicon Mach-O64 executable")
+    if struct.unpack_from("<I", header, 12)[0] != 2:
+        raise ValueError("compiler Mach-O must have executable file type")
+    return "aarch64"
+
+
+def validate_macos_image(binary: Path) -> tuple[str, list[str]]:
+    architecture = macos_architecture(binary)
+    subprocess.run(["codesign", "--verify", "--strict", str(binary)],
+                   check=True, capture_output=True, text=True, timeout=30)
+    output = subprocess.run(["otool", "-L", str(binary)], check=True,
+                            capture_output=True, text=True, timeout=30).stdout
+    dependencies = [line.strip().split(" (", 1)[0]
+                    for line in output.splitlines()[1:] if line.strip()]
+    if any(not item.startswith(("/usr/lib/", "/System/Library/Frameworks/"))
+           for item in dependencies):
+        raise ValueError(f"compiler has non-system macOS dependencies: {dependencies}")
+    return architecture, dependencies
+
+
 def parse_runner(value: str) -> list[str]:
     try:
         runner = json.loads(value)
@@ -49,8 +76,10 @@ def validate_binary(binary: Path, version: str, platform: str,
         actual = "x86_64"
     elif platform == "linux":
         actual = binary_architecture(binary)
+    elif platform == "macos":
+        actual, _ = validate_macos_image(binary)
     else:
-        raise ValueError("unsupported compiler package platform; supported: linux windows")
+        raise ValueError("unsupported compiler package platform; supported: linux windows macos")
     if architecture is not None and architecture != actual:
         raise ValueError(f"compiler architecture mismatch: requested {architecture}, image is {actual}")
     embedded = subprocess.run([*(runner or []), str(binary), "version"], check=True,

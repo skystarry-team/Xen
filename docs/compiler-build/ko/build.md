@@ -11,6 +11,7 @@ Xen 컴파일러는 OCaml 실행 파일입니다. 컴파일러가 실행되는 C
 | Linux x86_64에서 x86_64 컴파일러 빌드 | x86_64 네이티브 OCaml |
 | Linux AArch64에서 AArch64 컴파일러 빌드 | AArch64 네이티브 OCaml |
 | Windows x86_64에서 `xen.exe` 빌드 | Windows x64 네이티브 OCaml (MinGW) |
+| Apple Silicon macOS에서 `xen` 빌드 | macOS arm64 네이티브 OCaml |
 | Linux x86_64에서 AArch64 컴파일러 빌드 | x86_64 네이티브 OCaml과 AArch64 크로스 OCaml |
 
 크로스 OCaml은 빌드 호스트에서 실행되며 다른 CPU의 코드를 생성합니다.
@@ -26,7 +27,8 @@ AArch64에서 실행되는 네이티브 OCaml을 x86_64에 설치하는 것과�
 
 크로스 OCaml과 네이티브 OCaml의 버전은 정확히 같아야 합니다. 컴파일러 테스트에는
 Python 3.10 이상과 binutils도 필요합니다. 상세 내용은 [테스트 안내](../../../tests/README.md)에 있습니다.
-Xen이 생성하는 프로그램에는 C 컴파일러·assembler·linker·libc가 필요하지 않습니다.
+Linux용 Xen 프로그램은 정적 런타임을 사용합니다. macOS용 Mach-O는 dyld와 libSystem을
+로드합니다. 생성된 프로그램 실행에는 C 컴파일러·assembler·linker가 필요하지 않습니다.
 OCaml 자체를 소스에서 빌드할 때는 네이티브 C 툴체인이 필요합니다.
 
 ## 네이티브 OCaml 설치
@@ -115,12 +117,26 @@ Windows Server 2022 네이티브 CI에서 컴파일러·PE/로더·런타임·�
 Windows ARM64·원시 syscall·`extern_call`은 미지원입니다.
 Python은 패키징과 검증에 필요하며, 설치한 컴파일러를 사용할 때는 필요하지 않습니다.
 
+## Apple Silicon macOS 15 이상 (실험적: 실기기 검증 전)
+
+arm64 네이티브 OCaml 5.5.0 switch와 Dune 3.24.2를 사용합니다. `ocamlc -config`에
+`architecture: arm64`, `system: macosx`가 나와야 합니다. 저장소 루트에서 실행합니다.
+
+```sh
+opam install dune.3.24.2
+opam exec -- dune build @release
+opam exec -- python3 scripts/test.py --suite macos
+```
+
+이 검증은 생성된 프로그램 실행과 재배치한 macOS tar.gz를 확인합니다.
+macOS 15 네이티브 CI가 통과했으며 Intel macOS는 미지원입니다.
+
 ## 컴파일러 버전
 
 기본 버전은 `VERSION` 파일에서 읽습니다. Make에 버전을 지정하면 실행 파일에 포함됩니다.
 
 ```sh
-make build VERSION=v0.1.0-demo.4
+make build VERSION=v0.1.0-demo.5
 compiler/dist/xen version
 ```
 

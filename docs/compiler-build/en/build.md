@@ -11,6 +11,7 @@ and tar.gz packages. This guide covers building the compiler from source.
 | Linux x86_64, building an x86_64 compiler | Native x86_64 OCaml |
 | Linux AArch64, building an AArch64 compiler | Native AArch64 OCaml |
 | Windows x86_64, building `xen.exe` | Native Windows x64 OCaml (MinGW) |
+| Apple Silicon macOS, building `xen` | Native macOS arm64 OCaml |
 | Linux x86_64, building an AArch64 compiler | Native x86_64 OCaml and an AArch64 cross OCaml toolchain |
 
 Cross OCaml runs on the build host and emits code for another CPU. Installing an
@@ -26,8 +27,9 @@ See [AArch64 cross compilation](aarch64.md).
 
 The cross toolchain must match the native OCaml version exactly. Compiler tests
 also require Python 3.10 or later and binutils; see the [test guide](../../../tests/README.md).
-Generated Xen programs use a static runtime and do not require a C compiler,
-assembler, linker or libc. Building OCaml itself requires a native C toolchain.
+Generated Linux Xen programs use a static runtime. macOS Mach-O programs load
+dyld and libSystem. Neither target needs a C compiler, assembler or linker to
+run generated programs. Building OCaml itself requires a native C toolchain.
 
 ## Installing native OCaml
 
@@ -116,12 +118,26 @@ Windows desktop validation on physical hardware is still required. Windows ARM64
 raw syscalls and `extern_call` are unsupported. Python is required for packaging
 and verification, not for use of an installed compiler.
 
+## Apple Silicon macOS 15+ (experimental: physical device validation pending)
+
+Use a native arm64 OCaml 5.5.0 switch and Dune 3.24.2. `ocamlc -config` must
+report `architecture: arm64` and `system: macosx`. From the repository root:
+
+```sh
+opam install dune.3.24.2
+opam exec -- dune build @release
+opam exec -- python3 scripts/test.py --suite macos
+```
+
+The suite builds and runs generated programs and validates a relocated macOS
+tar.gz. The macOS 15 native CI gate passes; Intel macOS is unsupported.
+
 ## Compiler version
 
 `VERSION` declares the default compiler version. Make embeds a supplied override:
 
 ```sh
-make build VERSION=v0.1.0-demo.4
+make build VERSION=v0.1.0-demo.5
 compiler/dist/xen version
 ```
 

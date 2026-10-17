@@ -28,10 +28,10 @@ orchestration at the top level. `scripts/` contains the general test runner.
 
 Binary archives contain `bin/xen`, the runtime standard library, learning examples,
 license notices, `VERSION` and a distribution README. The `.xen` files in `stdlib/`
-are required by the compiler's module loader. All three platform profiles are
-included so each compiler can emit Linux x86_64/AArch64 and Windows x86_64 programs.
+are required by the compiler's module loader. All four platform profiles are
+included so each compiler can emit Linux x86_64/AArch64, Windows x86_64 and Apple Silicon macOS programs.
 Compiler source, build documentation and development scripts belong to the
-separate source archive. macOS is unsupported.
+separate source archive. Intel macOS is unsupported.
 
 ## Windows portable ZIP (experimental)
 
@@ -58,6 +58,13 @@ bundled stdlib. This is an isolated PATH test on CI, not a clean Windows install
 Compiler, loader and standard library checks have passed Windows Server 2022 native
 CI; the new ZIP check must also pass before release. Windows desktop validation
 on physical hardware is still required. Windows ARM64 is unsupported.
+
+## Apple Silicon tar.gz (experimental)
+
+On a native macOS arm64 OCaml switch, run `python3 scripts/test.py --suite macos`.
+It creates `dist/xen-<version>-macos-aarch64.tar.gz` and checks its relocated
+compiler, generated programs and standard library under a restricted PATH.
+The macOS 15 native CI gate passes; Intel macOS is unsupported.
 
 ## Cross toolchain configuration
 
@@ -98,7 +105,7 @@ without promoting over `compiler/dist/xen`.
 
 ```sh
 make package
-make package VERSION=v0.1.0-demo.4
+make package VERSION=v0.1.0-demo.5
 make package-build
 make package PACKAGE_ARCHS=x86_64
 make package PACKAGE_ARCHS=aarch64
@@ -157,8 +164,8 @@ sudo apt remove xen-lang
 ```
 
 Debian versions must start with a digit. `_` and `-` suffix separators become
-`~`, and packaging revision `-1` is appended: `v0.1.0-demo.4` becomes
-`0.1.0~demo.4-1`, which sorts before `0.1.0-1`. Legacy `0.1.0_1-demo`
+`~`, and packaging revision `-1` is appended: `v0.1.0-demo.5` becomes
+`0.1.0~demo.5-1`, which sorts before `0.1.0-1`. Legacy `0.1.0_1-demo`
 versions map to `0.1.0~1~demo-1`. The compiler's version and bundled
 `VERSION` retain the original text. Dependency versions are calculated from the
 actual ELF with `dpkg-shlibdeps`; rebuilding on a newer OS can raise the minimum
@@ -168,7 +175,7 @@ and [dpkg-shlibdeps](https://manpages.debian.org/stable/dpkg-dev/dpkg-shlibdeps.
 ## GitHub releases
 
 [The release workflow](../../../.github/workflows/release.yml) builds natively on
-Ubuntu 22.04 for amd64 and arm64, and Windows Server 2022 for x86_64, using OCaml 5.5.0 and Dune 3.24.2. This builds
+Ubuntu 22.04 for amd64 and arm64, Windows Server 2022 for x86_64, and macOS 15 for arm64, using OCaml 5.5.0 and Dune 3.24.2. This builds
 both the OCaml runtime and Xen against the older system libraries. Linux packages must
 pass installation, stdlib discovery, check/build/run/test and removal in clean
 **Debian 12/13 and Ubuntu 22.04/24.04/26.04** containers on each CPU. ARM hardware
@@ -176,10 +183,10 @@ validation of other compiler features remains subject to the project's existing
 experimental-support scope. Other derivatives are not separately certified.
 
 1. Set `VERSION`, commit the release changes, and push the matching `v<VERSION>` tag.
-2. Both Linux jobs build tar.gz and .deb assets and run installation checks. The Windows job builds and relocates the ZIP, then checks execution with an isolated PATH.
-3. Assembly requires both Linux binary archives, both .deb files, the Windows ZIP and one source
+2. Both Linux jobs build tar.gz and .deb assets and run installation checks. The Windows and macOS jobs build, relocate and execute their packages.
+3. Assembly requires both Linux binary archives, both .deb files, the Windows ZIP, the macOS tar.gz and one source
    archive, then generates `SHA256SUMS`.
-4. Only a tag push publishes a GitHub release. It creates a draft, uploads all seven
+4. Only a tag push publishes a GitHub release. It creates a draft, uploads all eight
    assets, then publishes it. Versions with `_` or `-` suffixes, or alpha/beta/rc
    markers, are marked as prereleases. A failed upload leaves a draft for inspection;
    delete that draft before rerunning the publish job. Published releases are not overwritten.
@@ -194,11 +201,12 @@ Debian metadata must be configured):
 make release-package DIST_DIR=dist/release
 make source-package DIST_DIR=dist/release
 # Copy xen-<version>-windows-x86_64.zip from the native Windows build into dist/release.
+# Copy xen-<version>-macos-aarch64.tar.gz from the native macOS build into dist/release.
 python3 -m packaging.github.release --directory dist/release
 (cd dist/release && sha256sum --check SHA256SUMS)
 ```
 
-`release-package` itself creates four Linux binary packages. The Windows ZIP, source archive and
+`release-package` itself creates four Linux binary packages. The Windows ZIP, macOS tar.gz, source archive and
 checksum manifest are separate steps; the GitHub workflow performs all of them.
 After committing the release changes, publish the matching tag:
 
@@ -210,13 +218,13 @@ git push origin "$XEN_RELEASE_TAG"
 
 To validate an assembled local directory, run
 `python3 -m packaging.github.release --directory /path/to/assets --tag v<VERSION>`.
-The asset directory must contain only the six release packages (and optionally
+The asset directory must contain only the seven release packages (and optionally
 an existing `SHA256SUMS`); stale files are rejected.
 
 ## Source distribution
 
 ```sh
-make source-package VERSION=v0.1.0-demo.4
+make source-package VERSION=v0.1.0-demo.5
 ```
 
 This exports `xen-<version>-source.tar.gz` with compiler and standard library

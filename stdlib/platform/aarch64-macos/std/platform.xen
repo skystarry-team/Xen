@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Apple Silicon Darwin BSD traps. The backend normalizes carry/errno to -errno.
+// Numbers, flags and record layouts follow the XNU syscalls.master, fcntl.h,
+// stat.h and dirent.h definitions; they are independent of Linux.
+module std.platform;
+use std.platform_types;
+
+#![bb]
+fn read(fd: Int, address: Int, count: Int) -> Int { return syscall3(3, fd, address, count); }
+#![bb]
+fn write(fd: Int, address: Int, count: Int) -> Int { return syscall3(4, fd, address, count); }
+#![bb]
+fn open(address: Int, flags: Int, mode: Int) -> Int { return syscall3(5, address, flags, mode); }
+#![bb]
+fn close(fd: Int) -> Int { return syscall1(6, fd); }
+#![bb]
+fn directory(fd: Int, address: Int, count: Int) -> Int {
+    let position = raw_alloc<Int>(1);
+    let result = syscall4(344, fd, address, count, ptr_addr(position));
+    raw_free(position);
+    return result;
+}
+#![bb]
+fn id() -> Int { return syscall0(20); }
+#![bb]
+fn parent_id() -> Int { return syscall0(39); }
+fn interrupted(raw: Int) -> Bool { return raw == -4; }
+fn read_flags() -> Int { return 0; }
+fn write_flags() -> Int { return 1537; } // O_WRONLY | O_CREAT | O_TRUNC
+fn append_flags() -> Int { return 521; } // O_WRONLY | O_CREAT | O_APPEND
+fn directory_flags() -> Int { return 1048576; } // O_DIRECTORY
+fn file_mode() -> Int { return 420; } // 0644
+
+fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, Int> {
+    let mut names: Vec<String> = [];
+    let mut offset = 0;
+    while offset < bytes.len() {
+        // struct dirent: ino[8], seekoff[8], reclen[2], namlen[2], type[1], name[]
+        if bytes.len() - offset < 22 { return Result<Vec<String>, Int>.Err(0); }
+        let length = i64(bytes.get(offset + 16)) + 256 * i64(bytes.get(offset + 17));
+        let name_length = i64(bytes.get(offset + 18)) + 256 * i64(bytes.get(offset + 19));
+        if length < 22 || length > bytes.len() - offset || name_length < 1 || name_length + 22 > length {
+            return Result<Vec<String>, Int>.Err(0);
+        }
+        let mut name: Vec<U8> = [];
+        for index in 0..name_length {
+            let byte = bytes.get(offset + 21 + index);
+            if byte == u8(0) { return Result<Vec<String>, Int>.Err(0); }
+            name.push(byte);
+        }
+        if bytes.get(offset + 21 + name_length) != u8(0) {
+            return Result<Vec<String>, Int>.Err(0);
+        }
+        let text = name.into_string();
+        if text != "." && text != ".." { names.push(text); }
+        offset = offset + length;
+    }
+    return Result<Vec<String>, Int>.Ok(names);
+}
+
+fn stat_mode(word: Int) -> Int { return (word >> 32) & 65535; }
+
+test fn stat_mode_bits() {
+    let word = (32768 << 48) | (36863 << 32) | 1;
+    assert(stat_mode(word) == 36863);
+}
+
+test fn invalid_directory_name() {
+    let record: Vec<U8> = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,24,0,2,0,0,0,97,0];
+    assert(match decode_directory(record.as_slice()) {
+        Result.Err(_) => true,
+        _ => false,
+    });
+}
+
+#![bb]
+fn metadata(path: Ptr<U8>) -> Result<std.platform_types.Stat, Int> {
+    // Darwin stat64 is 144 bytes: mode at 4, mtime seconds at 48, size at 96.
+    let record = raw_alloc<Int>(18);
+    let mut status = syscall2(338, ptr_addr(path), ptr_addr(record));
+    while interrupted(status) { status = syscall2(338, ptr_addr(path), ptr_addr(record)); }
+    if status < 0 {
+        raw_free(record);
+        return Result<std.platform_types.Stat, Int>.Err(-status);
+    }
+    let mode = stat_mode(raw_load(record, 0));
+    let kind = mode / 4096;
+    let value = std.platform_types.Stat {
+        size: raw_load(record, 12),
+        modified_seconds: raw_load(record, 6),
+        is_directory: kind == 4,
+        is_file: kind == 8,
+    };
+    raw_free(record);
+    return Result<std.platform_types.Stat, Int>.Ok(value);
+}
+
+#![bb]
+fn cwd() -> Result<String, Int> {
+    // Darwin has no getcwd syscall. F_GETPATH on an open cwd directory returns
+    // its absolute NUL-terminated path (MAXPATHLEN = 1024).
+    let dot = raw_alloc<U8>(2);
+    raw_store(dot, 0, u8(46)); raw_store(dot, 1, u8(0));
+    let mut fd = syscall3(5, ptr_addr(dot), 1048576, 0);
+    while interrupted(fd) { fd = syscall3(5, ptr_addr(dot), 1048576, 0); }
+    raw_free(dot);
+    if fd < 0 { return Result<String, Int>.Err(-fd); }
+    let buffer = raw_alloc<U8>(1024);
+    let record = raw_alloc<Int>(18);
+    let mut status = syscall2(339, fd, ptr_addr(record)); // fstat64
+    while interrupted(status) { status = syscall2(339, fd, ptr_addr(record)); }
+    if status >= 0 {
+        // stat64: device is the low 32 bits at byte 0; inode is at byte 8.
+        let device = raw_load(record, 0) & 4294967295;
+        let inode = raw_load(record, 1);
+        status = syscall3(92, fd, 50, ptr_addr(buffer)); // F_GETPATH
+        while interrupted(status) { status = syscall3(92, fd, 50, ptr_addr(buffer)); }
+        if status >= 0 {
+            // F_GETPATH may return a stale name after cwd is removed. Like
+            // libc getcwd, verify that the name still identifies the open cwd.
+            status = syscall2(338, ptr_addr(buffer), ptr_addr(record)); // stat64
+            while interrupted(status) { status = syscall2(338, ptr_addr(buffer), ptr_addr(record)); }
+            if status >= 0 && (device != (raw_load(record, 0) & 4294967295) || inode != raw_load(record, 1)) {
+                status = -22; // EINVAL: the path names a different directory.
+            }
+        }
+    }
+    raw_free(record);
+    let closed = syscall1(6, fd);
+    if status < 0 {
+        raw_free(buffer);
+        return Result<String, Int>.Err(-status);
+    }
+    if closed < 0 {
+        raw_free(buffer);
+        return Result<String, Int>.Err(-closed);
+    }
+    let mut bytes: Vec<U8> = [];
+    let mut index = 0;
+    while index < 1024 && raw_load(buffer, index) != u8(0) {
+        bytes.push(raw_load(buffer, index));
+        index = index + 1;
+    }
+    raw_free(buffer);
+    if index == 0 || index == 1024 { return Result<String, Int>.Err(2); }
+    return Result<String, Int>.Ok(bytes.into_string());
+}

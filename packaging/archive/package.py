@@ -22,8 +22,8 @@ def package(name: str | None, output: Path | None, *, source: bool = False,
             runner: list[str] | None = None, output_dir: Path | None = None) -> Path:
     version = version if version is not None else (ROOT / "VERSION").read_text().strip()
     validate_version(version)
-    if not source and platform != "linux":
-        raise ValueError("unsupported binary archive platform; tar.gz supports linux only")
+    if not source and platform not in ("linux", "macos"):
+        raise ValueError("unsupported binary archive platform; tar.gz supports linux and macos")
     binary = (binary if binary is not None else ROOT / "compiler/dist/xen").resolve()
     if not source:
         actual_architecture = validate_binary(binary, version, platform, architecture, runner)

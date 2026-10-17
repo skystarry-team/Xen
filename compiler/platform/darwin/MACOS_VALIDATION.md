@@ -1,9 +1,10 @@
-# Darwin/Mach-O prototype validation
+# Darwin/Mach-O validation
 
-macOS on Intel and Apple Silicon is unsupported and has no planned support.
-No macOS compiler executable, binary package or standard library profile is
-provided. The CLI recognizes macOS target names and aliases but rejects them
-before source loading or output creation.
+Apple Silicon `aarch64-macos` supports macOS 15+ with a registered CLI backend,
+Darwin standard library profile, external C calls and tar.gz package. Native
+macOS 15 CI checks generated execution and relocated packaging. The experimental
+release label means validation on a user-owned physical Mac is pending. Intel
+`x86_64-macos` remains unsupported because it has no Darwin code generator.
 
 ## Retained components
 
@@ -11,10 +12,10 @@ before source loading or output creation.
 | --- | --- | --- |
 | CPU instruction encoders | `compiler/cpu/x86_64/`, `compiler/cpu/arm64/` | Instruction encoding and relocation |
 | Mach-O writer and SHA-256 signer | `compiler/platform/darwin/` | Internal executable construction for x86_64 and AArch64 |
-| Darwin ARM64 runtime and backend | `compiler/platform/darwin/arm64/` | Internal prototype; not registered in the CLI |
+| Darwin ARM64 runtime and backend | `compiler/platform/darwin/arm64/` | Registered Apple Silicon target |
 
 CPU libraries remain independent of operating-system implementations. The
-Darwin prototype composes the ARM64 encoder with Darwin-specific services and
+Darwin backend composes the ARM64 encoder with Darwin-specific services and
 the shared Mach-O writer.
 
 ## Structural tests
@@ -33,6 +34,9 @@ The checks cover:
 - Darwin syscall adapter carry/errno normalization, register preservation, stack
   balance and leaf return behavior, using simulated kernel returns under Linux QEMU.
 
-These checks do not establish macOS execution support. dyld loading, kernel
-services, platform code-signing acceptance and native compiler execution are
-outside the validation scope.
+These structural checks alone do not establish macOS execution support. The
+native gate is `python3 scripts/test.py --suite macos` on Apple Silicon. It
+checks the native compiler, generated Mach-O signatures, dyld execution and
+external C calls, common ARM64 language and standard library behavior,
+Darwin file and process services, and a relocated tar.gz under a restricted
+PATH. It runs both optimization levels. CI uses the same command on `macos-15`.
