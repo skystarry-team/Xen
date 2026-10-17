@@ -8,6 +8,11 @@
 module type S = sig
   val open_read_flags : int
   val open_write_flags : int
+  (* Allocate a constant stack region, retaining all inputs except r11/flags.
+     Platforms with guard pages probe each intervening page. *)
+  val stack_allocate : Machine_ir.t -> int -> unit
+  (* Emit a source-function prolog and return its epilog/frame-record emitter. *)
+  val function_prologue : Machine_ir.t -> (unit -> unit)
 
   (* rsi = size. Returns rax = address/error. Clobbers rcx, rdi, rdx, r8..r11
      and flags, preserving rsi and all other registers. Anonymous read/write
@@ -31,6 +36,9 @@ module type S = sig
      slots, last argument at rsp. Load the OS registers, consume arity*8 bytes,
      emit the trap, and return its unmodified native result in rax. *)
   val raw_syscall : Machine_ir.t -> arity:int -> unit
+  (* Arguments pushed left-to-right as I64 slots. Consume all slots, return
+     normalized I64 in rax. Unsupported services must report a source error. *)
+  val platform_call : Machine_ir.t -> Platform_service.t -> (unit, string) result
   (* Define _start, initialize __xen_argc/argv (excluding the executable name),
      and leave rsp aligned to 16 before the CPU calls the Xen entry function. *)
   val start : Machine_ir.t -> unit

@@ -82,7 +82,7 @@ class ToolchainTests(unittest.TestCase):
         output = self.cwd / "preserved"
         output.write_bytes(b"preserve existing output")
         for command in ("check", "build", "run", "test"):
-            for target in ("aarch64-windows", "x86_64-windows", "x86_64-macos", "aarch64-macos", "arm64-darwin"):
+            for target in ("aarch64-windows", "x86_64-macos", "aarch64-macos", "arm64-darwin"):
                 with self.subTest(command=command, target=target):
                     args = [command, self.cwd / "missing.xen", f"--target={target}"]
                     if command == "build":

@@ -10,7 +10,7 @@ module M = Machine_ir
 (* edi = unsigned byte -> eax = boolean. The numeric token grammar accepts
    ASCII space, horizontal tab, LF and CR; vertical tab/form feed are invalid. *)
 let emit_whitespace output =
-  M.label output "__xen_numeric_whitespace";
+  M.function_label output "__xen_numeric_whitespace";
   M.bytes output [0x31;0xc0]; (* xor    eax,eax *)
   M.bytes output [0x40;0x80;0xff;0x20]; (* cmp    dil,0x20 *)
   M.branch output [0x0f;0x87] "__xen_numeric_whitespace_return"; (* ja *)
@@ -20,13 +20,13 @@ let emit_whitespace output =
   M.bytes output [0x0f;0x92;0xc0]; (* setb   al *)
   M.bytes output [0x0f;0xb6;0xc0]; (* movzx  eax,al *)
   M.label output "__xen_numeric_whitespace_return";
-  M.bytes output [0xc3]; (* ret *)
+  M.ret output; (* ret *)
   ()
 
 (* Optional sign and decimal digits, with an unsigned pre-multiply limit so
    the asymmetric signed minimum is accepted without signed overflow. *)
 let emit_int output =
-  M.label output "__xen_numeric_parse_int";
+  M.function_label ~frame:12 output "__xen_numeric_parse_int";
   M.bytes output [0x49;0x89;0xfa]; (* mov    r10,rdi *)
   M.bytes output [0x49;0x89;0xf0]; (* mov    r8,rsi *)
   M.bytes output [0x49;0x89;0xd3]; (* mov    r11,rdx *)
@@ -48,7 +48,7 @@ let emit_int output =
   M.bytes output [0xb8;0x05;0x00;0x00;0x00]; (* mov    eax,0x5 *)
   M.bytes output [0x4c;0x39;0xc6]; (* cmp    rsi,r8 *)
   M.branch output [0x0f;0x85] "__xen_int_limit"; (* jne *)
-  M.bytes output [0xc3]; (* ret *)
+  M.ret output; (* ret *)
   M.label output "__xen_int_unsigned";
   M.bytes output [0x45;0x31;0xc9]; (* xor    r9d,r9d *)
   M.bytes output [0x31;0xf6]; (* xor    esi,esi *)
@@ -94,18 +94,19 @@ let emit_int output =
   M.label output "__xen_int_return";
   M.bytes output [0x5b]; (* pop    rbx *)
   M.bytes output [0x5d]; (* pop    rbp *)
-  M.bytes output [0xc3]; (* ret *)
+  M.ret output; (* ret *)
   ()
 
 (* Decimal significand, optional decimal point and signed exponent. Accumulate
    in x87 extended precision in the original order, then check the binary64
    result for infinity and nonzero decimal input rounded to zero. *)
 let emit_float output =
-  M.label output "__xen_numeric_parse_float";
+  M.function_label ~frame:12 output "__xen_numeric_parse_float";
   M.bytes output [0x55]; (* push   rbp *)
   M.bytes output [0x48;0x89;0xf1]; (* mov    rcx,rsi *)
   M.bytes output [0x49;0x89;0xd1]; (* mov    r9,rdx *)
   M.bytes output [0x53]; (* push   rbx *)
+  M.bytes output [0x48;0x83;0xec;0x10]; (* explicit scratch; no red zone *)
   M.bytes output [0x48;0x85;0xf6]; (* test   rsi,rsi *)
   M.branch output [0x0f;0x8e] "__xen_decimal_unsigned"; (* jle *)
   M.bytes output [0x8a;0x07]; (* mov    al,BYTE PTR [rdi] *)
@@ -135,8 +136,8 @@ let emit_float output =
   M.rip_rel32 output M.Rodata "__xen_decimal_ten";
   M.bytes output [0x48;0xff;0xc0]; (* inc    rax *)
   M.bytes output [0xbe;0x01;0x00;0x00;0x00]; (* mov    esi,0x1 *)
-  M.bytes output [0x89;0x54;0x24;0xf0]; (* mov    DWORD PTR [rsp-0x10],edx *)
-  M.bytes output [0xda;0x44;0x24;0xf0]; (* fiadd  DWORD PTR [rsp-0x10] *)
+  M.bytes output [0x89;0x14;0x24]; (* mov    DWORD PTR [rsp],edx *)
+  M.bytes output [0xda;0x04;0x24]; (* fiadd  DWORD PTR [rsp] *)
   M.branch output [0xe9] "__xen_decimal_integer"; (* jmp *)
   M.label output "__xen_decimal_point";
   M.bytes output [0x80;0xfa;0x2e]; (* cmp    dl,0x2e *)
@@ -155,9 +156,9 @@ let emit_float output =
   M.rip_rel32 output M.Rodata "__xen_decimal_ten";
   M.bytes output [0x48;0xff;0xc0]; (* inc    rax *)
   M.bytes output [0x41;0xff;0xc2]; (* inc    r10d *)
-  M.bytes output [0x89;0x54;0x24;0xf0]; (* mov    DWORD PTR [rsp-0x10],edx *)
+  M.bytes output [0x89;0x14;0x24]; (* mov    DWORD PTR [rsp],edx *)
   M.bytes output [0xbe;0x01;0x00;0x00;0x00]; (* mov    esi,0x1 *)
-  M.bytes output [0xda;0x44;0x24;0xf0]; (* fiadd  DWORD PTR [rsp-0x10] *)
+  M.bytes output [0xda;0x04;0x24]; (* fiadd  DWORD PTR [rsp] *)
   M.branch output [0xe9] "__xen_decimal_fraction"; (* jmp *)
   M.label output "__xen_decimal_require_digit";
   M.bytes output [0xba;0x05;0x00;0x00;0x00]; (* mov    edx,0x5 *)
@@ -249,8 +250,8 @@ let emit_float output =
   M.branch output [0x0f;0x84] "__xen_decimal_binary64"; (* je *)
   M.bytes output [0xd9;0xe0]; (* fchs *)
   M.label output "__xen_decimal_binary64";
-  M.bytes output [0xdd;0x5c;0x24;0xf0]; (* fstp   QWORD PTR [rsp-0x10] *)
-  M.bytes output [0xf2;0x0f;0x10;0x44;0x24;0xf0]; (* movsd  xmm0,QWORD PTR [rsp-0x10] *)
+  M.bytes output [0xdd;0x1c;0x24]; (* fstp   QWORD PTR [rsp] *)
+  M.bytes output [0xf2;0x0f;0x10;0x04;0x24]; (* movsd  xmm0,QWORD PTR [rsp] *)
   M.bytes output [0xb8;0xff;0x07;0x00;0x00]; (* mov    eax,0x7ff *)
   M.bytes output [0x48;0xc1;0xe0;0x34]; (* shl    rax,0x34 *)
   M.bytes output [0x66;0x48;0x0f;0x7e;0xc6]; (* movq   rsi,xmm0 *)
@@ -318,9 +319,10 @@ let emit_float output =
   M.bytes output [0xdd;0xd8]; (* fstp   st(0) *)
   M.label output "__xen_decimal_return";
   M.bytes output [0x89;0xd0]; (* mov    eax,edx *)
+  M.bytes output [0x48;0x83;0xc4;0x10];
   M.bytes output [0x5b]; (* pop    rbx *)
   M.bytes output [0x5d]; (* pop    rbp *)
-  M.bytes output [0xc3]; (* ret *)
+  M.ret output; (* ret *)
   ()
 
 let emit output =

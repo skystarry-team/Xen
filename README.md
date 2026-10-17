@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>A small language for Linux command-line programs.</strong><br>
+  <strong>A small language for command-line programs.</strong><br>
   <a href="docs/en/README.md">English guide</a> ·
   <a href="docs/ko/README.md">한국어 사용자 문서</a> ·
   <a href="examples/README.md">Examples</a> ·
@@ -18,8 +18,10 @@ and explicit error handling. Build a standalone executable or run a source file
 directly with the `xen` command.
 
 **Xen is an early release.** Syntax and APIs may change. Programs run on Linux
-x86-64 and AArch64. AArch64 support is experimental; validation on physical ARM64
-hardware is pending. macOS and Windows are unsupported.
+x86-64 and AArch64, and Windows x86-64. AArch64 and Windows support are experimental;
+validation on physical hardware is pending. Windows compiler, PE execution and
+standard library tests pass on Windows Server 2022 native CI; Windows desktop
+validation on physical hardware is still required. Windows ARM64 and macOS are unsupported.
 
 ## Write your first program
 
@@ -52,6 +54,8 @@ Debian/Ubuntu users can install the matching `xen-lang` `.deb` from
 [GitHub Releases](https://github.com/skystarry-team/Xen/releases) with
 `sudo apt install ./xen-lang_<version>_amd64.deb` (or `_arm64.deb`).
 See [packaging and OS compatibility](docs/compiler-build/en/packaging.md).
+Windows x86-64 users can use the portable ZIP; see
+[Windows installation](docs/compiler-build/en/installation.md#windows-x86-64-experimental).
 Installation and source builds are covered in the separate
 [compiler build guide](docs/compiler-build/README.md).
 From an extracted distribution use `./bin/xen`; from this repository use

@@ -9,6 +9,8 @@ import tempfile
 from packaging.archive.package import package as archive_package
 from packaging.common import ROOT, binary_architecture, parse_runner
 from packaging.debian.package import package as deb_package
+from packaging.windows.package import package as windows_package
+from packaging.windows.pe import inspect as inspect_pe
 
 
 def main() -> None:
@@ -16,18 +18,26 @@ def main() -> None:
     parser.add_argument("--name")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
-    parser.add_argument("--binary", type=Path, default=ROOT / "compiler/dist/xen")
+    parser.add_argument("--binary", type=Path)
     parser.add_argument("--platform", default="linux")
     parser.add_argument("--architecture", choices=("x86_64", "aarch64"))
     parser.add_argument("--runner", default=os.getenv("PACKAGE_RUNNER", "[]"))
     parser.add_argument("--binary-architecture", action="store_true")
     parser.add_argument("--version", default=(ROOT / "VERSION").read_text().strip())
     parser.add_argument("--source", action="store_true")
-    parser.add_argument("--formats", nargs="+", choices=("tar.gz", "deb"), default=["tar.gz"])
+    parser.add_argument("--formats", nargs="+", choices=("tar.gz", "deb", "zip"))
     args = parser.parse_args()
     try:
+        args.binary = args.binary or ROOT / ("compiler/dist/xen.exe" if args.platform == "windows" else "compiler/dist/xen")
+        args.formats = args.formats or (["zip"] if args.platform == "windows" and not args.source else ["tar.gz"])
         if args.binary_architecture:
-            print(binary_architecture(args.binary))
+            if args.platform == "windows":
+                inspect_pe(args.binary)
+                print("x86_64")
+            elif args.platform == "linux":
+                print(binary_architecture(args.binary))
+            else:
+                raise ValueError("unsupported compiler package platform")
             return
         if len(set(args.formats)) != len(args.formats):
             raise ValueError("select distinct package formats")
@@ -36,6 +46,9 @@ def main() -> None:
                 raise ValueError("source exports support tar.gz only")
             archive_package(args.name, args.output, source=True, version=args.version, output_dir=args.output_dir)
             return
+        allowed = {"linux": {"tar.gz", "deb"}, "windows": {"zip"}}.get(args.platform)
+        if allowed is None or set(args.formats) - allowed:
+            raise ValueError("supported platform/formats: linux with tar.gz/deb; windows with zip")
         if len(args.formats) > 1 and (args.output or args.name):
             raise ValueError("custom output/name requires a single package format")
         runner = parse_runner(args.runner)
@@ -44,7 +57,7 @@ def main() -> None:
         # Finish every format before replacing existing artifacts, including single mode.
         with tempfile.TemporaryDirectory(prefix=".xen-package-", dir=destination) as directory:
             for format in args.formats:
-                writer = archive_package if format == "tar.gz" else deb_package
+                writer = {"tar.gz": archive_package, "deb": deb_package, "zip": windows_package}[format]
                 writer(args.name, None, binary=args.binary, platform=args.platform,
                        architecture=args.architecture, runner=runner, version=args.version,
                        output_dir=Path(directory))

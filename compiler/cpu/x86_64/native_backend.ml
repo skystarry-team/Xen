@@ -222,7 +222,7 @@ let rec emit_rvalue env (expression:value) node =
   | Vec_lit values ->
       let stride=element_stride (match values with x::_->x.typ|[]->(match expression.typ with Vec t->t|_->assert false)) in
       List.iter (fun (value:value) ->
-        emit_value env value;M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int stride);env.stack_depth<-env.stack_depth+stride;
+        emit_value env value;R.stack_allocate output stride;env.stack_depth<-env.stack_depth+stride;
         if value.typ=Unit then ()
         else if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
         else if (match value.typ with Named _->true|_->false) then begin
@@ -321,7 +321,7 @@ let rec emit_rvalue env (expression:value) node =
       M.bytes output [0x48;0x83;0xc4;0x18];env.stack_depth<-env.stack_depth-24
   | Vec_set (target,index,value) ->
       let stride=element_stride value.typ in emit_value env target;push_rax env;emit_value env index;push_rax env;emit_value env value;
-      M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int stride);env.stack_depth<-env.stack_depth+stride;
+      R.stack_allocate output stride;env.stack_depth<-env.stack_depth+stride;
       if value.typ=Unit then ()
       else if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
       else if (match value.typ with Named _->true|_->false) then begin M.bytes output[0x48;0x89;0xc6;0x48;0x89;0xe7;0x48;0xc7;0xc1];M.u32 output(Int64.of_int(slot_size value.typ));M.bytes output[0xf3;0xa4]end
@@ -343,7 +343,7 @@ let rec emit_rvalue env (expression:value) node =
       M.bytes output[0x48;0x81;0xc4];M.u32 output(Int64.of_int(stride+16));env.stack_depth<-env.stack_depth-stride-16;mov_rax_imm output 0L
   | Vec_push (target,value) ->
       let stride=element_stride value.typ in emit_value env target;push_rax env;emit_value env value;
-      M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int stride);env.stack_depth<-env.stack_depth+stride;
+      R.stack_allocate output stride;env.stack_depth<-env.stack_depth+stride;
       if value.typ=Unit then ()
       else if is_float value.typ then M.bytes output((if value.typ=F32 then[0xf3]else[0xf2])@[0x0f;0x11;0x04;0x24])
       else if (match value.typ with Named _->true|_->false) then begin M.bytes output[0x48;0x89;0xc6;0x48;0x89;0xe7;0x48;0xc7;0xc1];M.u32 output(Int64.of_int(slot_size value.typ));M.bytes output[0xf3;0xa4]end
@@ -839,6 +839,11 @@ let rec emit_rvalue env (expression:value) node =
       let n=List.length arguments in
       R.raw_syscall output ~arity:n;
       env.stack_depth<-env.stack_depth-n*8
+  | Platform_call(service,arguments) ->
+      List.iter(fun(a:value)->emit_value env a;push_rax env)arguments;
+      (match R.platform_call output service with
+       |Ok()->env.stack_depth<-env.stack_depth-8*List.length arguments
+       |Error message->unsupported ~span:expression.span message)
   | Function_address name ->
       M.bytes output [0x48;0x8d;0x05];M.rel32 output ("fn_"^name)
   | Indirect_call (callee,arguments) ->
@@ -850,7 +855,7 @@ and emit_call env call_span target arguments =
       let output=env.output in
       List.iter (fun (argument:value) -> emit_value env argument;
         if (match argument.typ with Named _->true|_->false) then begin
-          let size=slot_size argument.typ and staged=T.align_up(slot_size argument.typ)8 in M.bytes output[0x48;0x89;0xc6;0x48;0x81;0xec];M.u32 output(Int64.of_int staged);
+          let size=slot_size argument.typ and staged=T.align_up(slot_size argument.typ)8 in M.bytes output[0x48;0x89;0xc6];R.stack_allocate output staged;
           env.stack_depth<-env.stack_depth+staged;M.bytes output[0x48;0x89;0xe7;0x48;0xc7;0xc1];M.u32 output(Int64.of_int size);M.bytes output[0xf3;0xa4]
         end
         else if is_managed argument.typ then begin
@@ -889,7 +894,7 @@ and emit_call env call_span target arguments =
        | None->M.bytes output [0x4c;0x8b;0x9c;0x24];M.u32 output(Int64.of_int total);
            let pad=if env.stack_depth mod 16=0 then 8 else 0 in
            if pad<>0 then(M.bytes output[0x48;0x83;0xec;0x08];env.stack_depth<-env.stack_depth+8);
-           M.bytes output[0x41;0xff;0xd3];
+           M.call_indirect output 11;
            if pad<>0 then(M.bytes output[0x48;0x83;0xc4;0x08];env.stack_depth<-env.stack_depth-8));
       if total > 0 then begin M.bytes output [0x48;0x81;0xc4]; M.u32 output (Int64.of_int total); env.stack_depth <- env.stack_depth - total end
 
@@ -996,7 +1001,7 @@ let emit_operation env op = match op.node with
 
 let emit_function output (func:func) =
   let epilogue=fresh "epilogue"in
-  M.label output("fn_"^func.name);M.bytes output[0x55;0x48;0x89;0xe5];
+  M.label output("fn_"^func.name);let finish=R.function_prologue output in
   if not(Numeric_math.is_helper func.name)then begin
     M.bytes output[0x48;0xff;0x05];M.rip_rel32 output M.Data "__xen_call_depth"
   end;
@@ -1004,7 +1009,7 @@ let emit_function output (func:func) =
   Array.iter(fun(l:local)->let at=T.align_up !next (descriptor l.typ).alignment in Hashtbl.add slots l.id at;next:=at+max 8(slot_size l.typ))func.locals;
   Array.iter(fun(l:local)->if l.owned then List.iter(fun(off,_)->Hashtbl.add flags(l.id,off)!next;next:= !next+8)(owned_leaves_at 0 l.typ))func.locals;
   let argument_register_base= !next in next:= !next+48;
-  let frame=T.align_up (!next-8)16 in M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int frame);
+  let frame=T.align_up (!next-8)16 in R.stack_allocate output frame;
   Hashtbl.iter(fun _ flag->M.bytes output[0x48;0xc7;0x85];M.u32 output(Int64.of_int(-flag));M.u32 output 0L)flags;
   let env={slots;flags;locals=func.locals;output;stack_depth=0;scratch=8}in
   let save_registers = [[0x48;0x89;0xbd];[0x48;0x89;0xb5];[0x48;0x89;0x95];
@@ -1063,7 +1068,7 @@ let emit_function output (func:func) =
   if not(Numeric_math.is_helper func.name)then begin
     M.bytes output[0x48;0xff;0x0d];M.rip_rel32 output M.Data "__xen_call_depth"
   end;
-  M.bytes output[0xc9;0xc3]
+  finish()
 
 let owned_leaves typ =
   let rec loop seen prefix = function
@@ -1076,7 +1081,7 @@ let owned_leaves typ =
 
 let emit_requested_vec_helper output typ = match typ with
   | Box element ->
-      M.label output(vec_helper_label typ "drop");
+      M.function_label output(vec_helper_label typ "drop");
       (* rdi addresses the owned pointer cell; rbx retains the allocation. *)
       M.bytes output[0x53;0x48;0x8b;0x1f;0x48;0xc7;0x07;0;0;0;0;0x48;0x85;0xdb];
       let done_=fresh "box_drop_done"in M.branch output[0x0f;0x84]done_;
@@ -1087,7 +1092,7 @@ let emit_requested_vec_helper output typ = match typ with
           M.branch output[0x0f;0x88]skip;R.close output;M.label output skip
         end else M.branch output[0xe8](drop_runtime leaf)) (List.rev(owned_leaves element));
       M.bytes output[0x48;0x89;0xdf;0xbe];M.u32 output(Int64.of_int(element_stride element));
-      R.unmap output;M.label output done_;M.bytes output[0x5b;0xc3]
+      R.unmap output;M.label output done_;M.bytes output[0x5b];M.ret output
 
   | Vec element ->
       let stride=element_stride element and leaves=owned_leaves element in
@@ -1096,7 +1101,7 @@ let emit_requested_vec_helper output typ = match typ with
         M.bytes output[0x48;0x69;0xc0];M.u32 output(Int64.of_int stride);
         M.bytes output(if base_indirect then[0x49;0x03;0x04;0x24]else[0x4c;0x01;0xe0]);
         if offset<>0 then(M.bytes output[0x48;0x05];M.u32 output(Int64.of_int offset)) in
-      M.label output(vec_helper_label typ "drop");
+      M.function_label output(vec_helper_label typ "drop");
       M.bytes output[0x53;0x41;0x54;0x41;0x55;0x49;0x89;0xfc;0x4d;0x8b;0x6c;0x24;8];
       let drop_loop=fresh"vec_type_drop_loop" and drop_done=fresh"vec_type_drop_done" in
       M.label output drop_loop;M.bytes output[0x4d;0x85;0xed];M.branch output[0x0f;0x84]drop_done;M.bytes output[0x49;0xff;0xcd];
@@ -1104,8 +1109,8 @@ let emit_requested_vec_helper output typ = match typ with
         address ~base_indirect:true true offset;
         if leaf=File then begin M.bytes output[0x48;0x8b;0x38;0x48;0x85;0xff];let skip=fresh"vec_type_file_skip" in M.branch output[0x0f;0x88]skip;R.close output;M.label output skip end
         else begin M.bytes output[0x48;0x89;0xc7];M.branch output[0xe8](drop_runtime leaf) end) (List.rev leaves);
-      M.branch output[0xe9]drop_loop;M.label output drop_done;M.bytes output[0x4c;0x89;0xe7];M.branch output[0xe8]"__xen_vec_drop";M.bytes output[0x41;0x5d;0x41;0x5c;0x5b;0xc3];
-      M.label output(vec_helper_label typ "clone");
+      M.branch output[0xe9]drop_loop;M.label output drop_done;M.bytes output[0x4c;0x89;0xe7];M.branch output[0xe8]"__xen_vec_drop";M.bytes output[0x41;0x5d;0x41;0x5c;0x5b];M.ret output;
+      M.function_label output(vec_helper_label typ "clone");
       if List.exists(fun(_,t)->match t with Box _->true|_->false)leaves then M.bytes output[0x0f;0x0b];
       M.bytes output[0x53;0x41;0x54;0x41;0x55;0x41;0x56;0x49;0x89;0xfc;0x4d;0x8b;0x6c;0x24;8;0x48;0xc7;0xc6];M.u32 output(Int64.of_int stride);M.branch output[0xe8]"__xen_vec_clone";
       M.bytes output[0x49;0x89;0xc4;0x49;0x89;0xd5;0x49;0x89;0xce;0x31;0xdb];
@@ -1117,7 +1122,7 @@ let emit_requested_vec_helper output typ = match typ with
         M.bytes output[0x4c;0x8b;0x04;0x24;0x48;0x8b;0x54;0x24;8;0x48;0x8b;0x4c;0x24;16;0x4c;0x89;0x00;0x48;0x89;0x50;8;0x48;0x89;0x48;16;0x48;0x83;0xc4;24]
       end)leaves;
       M.bytes output[0x48;0xff;0xc3];M.branch output[0xe9]clone_loop;M.label output clone_done;
-      M.bytes output[0x4c;0x89;0xe0;0x4c;0x89;0xea;0x4c;0x89;0xf1;0x41;0x5e;0x41;0x5d;0x41;0x5c;0x5b;0xc3]
+      M.bytes output[0x4c;0x89;0xe0;0x4c;0x89;0xea;0x4c;0x89;0xf1;0x41;0x5e;0x41;0x5d;0x41;0x5c;0x5b];M.ret output
   | _ -> assert false
 
 let emit_requested_vec_helpers output =
@@ -1157,7 +1162,7 @@ let generate checked =
     Collection.emit output ~fresh ~layouts ~runtime_type_name ~drop_runtime ~clone_runtime ~prepare_vec_stride;
     File.emit output ~fresh;
     while M.position output mod 16 <> 0 do M.u8 output 0x90 done;
-    File.emit_builtin output;Numeric_runtime.emit output;
+    File.emit_builtin output;Numeric_runtime.emit output;M.end_helpers output;
     List.iter (emit_function output) program.functions;emit_requested_vec_helpers output;
     let entry = Hashtbl.find output.labels "_start" in
     Ok (R.executable ~entry output)

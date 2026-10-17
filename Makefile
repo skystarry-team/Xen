@@ -92,10 +92,10 @@ help:
 	  'See docs/compiler-build/README.md for compiler and toolchain setup.' \
 	  'PACKAGE_TOOLCHAINS selects another configuration file.' \
 	  'PACKAGE_ARCHS selects a subset; default: x86_64 aarch64.' \
-	  'PACKAGE_FORMATS selects formats; default: tar.gz; supported: tar.gz deb.' \
+	  'PACKAGE_FORMATS selects formats; default: tar.gz; supported: tar.gz deb; package-one also supports Windows zip.' \
 	  'For package-one, select DUNE_WORKSPACE and PACKAGE_CONTEXT as needed.' \
 	  'PACKAGE_BINARY selects an existing executable without rebuilding.' \
-	  'PACKAGE_ARCH verifies the ELF architecture; PACKAGE_PLATFORM supports linux.' \
+	  'PACKAGE_ARCH verifies the image architecture; PACKAGE_PLATFORM supports linux/windows in package-one.' \
 	  'PACKAGE_RUNNER is a JSON argument array, e.g. ["qemu-aarch64","-L","/sysroot"].' \
 	  '' \
 	  'See tests/README.md for individual test suites.'

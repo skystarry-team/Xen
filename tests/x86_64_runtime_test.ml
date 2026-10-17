@@ -4,6 +4,8 @@
 module M = Xen_x86_64.Machine_ir
 let expect condition message = if not condition then failwith message
 module Probe = struct
+  let stack_allocate m size = M.bytes m[0x48;0x81;0xec];M.u32 m(Int64.of_int size)
+  let function_prologue m = M.bytes m[0x55;0x48;0x89;0xe5];fun()->M.bytes m[0xc9;0xc3]
   let events = ref []
   let machine = ref None
   let service name output =
@@ -19,6 +21,7 @@ module Probe = struct
   let open_ = service "open"
   let exit output status = service ("exit:" ^ string_of_int status) output
   let raw_syscall output ~arity = service ("raw:" ^ string_of_int arity) output
+  let platform_call _ _ = Error "platform service unavailable in probe runtime"
   let entry output =
     M.bytes output [0x90;0x90;0x90];M.label output "_start"
   let start output = entry output;service "start" output

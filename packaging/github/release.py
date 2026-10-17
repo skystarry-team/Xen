@@ -20,7 +20,7 @@ def prepare(directory: Path, version: str, tag: str | None = None) -> list[Path]
     validate_version(version)
     if tag is not None and tag != f"v{version}":
         raise ValueError(f"release tag must equal v{version}, got {tag}")
-    names = {f"xen-{version}-source.tar.gz"}
+    names = {f"xen-{version}-source.tar.gz", f"xen-{version}-windows-x86_64.zip"}
     for architecture in ("x86_64", "aarch64"):
         names.add(f"xen-{version}-linux-{architecture}.tar.gz")
         names.add(filename(version, architecture))

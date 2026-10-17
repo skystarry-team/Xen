@@ -2,6 +2,7 @@
 // AArch64 Linux UAPI; do not reuse x86 syscall numbers or flags.
 module std.platform;
 use std.platform_linux;
+use std.platform_types;
 
 #![bb]
 fn read(fd: Int, address: Int, count: Int) -> Int { return syscall3(63, fd, address, count); }
@@ -28,16 +29,16 @@ fn decode_directory(bytes: Slice<U8>) -> Result<Vec<String>, Int> {
     return std.platform_linux.decode_directory(bytes);
 }
 #![bb]
-fn metadata(path: Ptr<U8>) -> Result<std.platform_linux.Stat, Int> {
+fn metadata(path: Ptr<U8>) -> Result<std.platform_types.Stat, Int> {
     // asm-generic stat: 128 bytes, mode at byte 16, size 48, mtime 88.
     let data = raw_alloc<Int>(16);
     let mut result = syscall4(79, -100, ptr_addr(path), ptr_addr(data), 0);
     while interrupted(result) { result = syscall4(79, -100, ptr_addr(path), ptr_addr(data), 0); }
     if result < 0 {
         raw_free(data);
-        return Result<std.platform_linux.Stat, Int>.Err(-result);
+        return Result<std.platform_types.Stat, Int>.Err(-result);
     }
     let value = std.platform_linux.decode_stat(data, 2);
     raw_free(data);
-    return Result<std.platform_linux.Stat, Int>.Ok(value);
+    return Result<std.platform_types.Stat, Int>.Ok(value);
 }

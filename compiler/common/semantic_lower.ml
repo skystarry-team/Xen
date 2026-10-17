@@ -142,6 +142,7 @@ let lower (program:A.program) =
       |A.Cpu_relax->ev Cpu_relax
       |A.Memory_fence->ev Memory_fence
       |A.Foreign_call(symbol,xs)->ev(Foreign_call(symbol,List.map ex xs))
+      |A.Platform_call(service,xs)->ev(Platform_call(service,List.map ex xs))
       |A.Atomic(kind,t,success,failure,xs)->ev(Atomic(kind,t,success,failure,List.map ex xs))
       |A.Syscall xs->ev(Syscall(List.map ex xs))
       |A.Index(a,b)->binary(fun a b->Index(a,b))a b

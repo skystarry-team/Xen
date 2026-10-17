@@ -43,11 +43,16 @@ def validate_binary(binary: Path, version: str, platform: str,
     validate_version(version)
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise FileNotFoundError("compiler executable not found; run make build first")
-    if platform != "linux":
-        raise ValueError("unsupported compiler package platform; supported: linux")
-    actual = binary_architecture(binary)
+    if platform == "windows":
+        from packaging.windows.pe import inspect
+        inspect(binary)
+        actual = "x86_64"
+    elif platform == "linux":
+        actual = binary_architecture(binary)
+    else:
+        raise ValueError("unsupported compiler package platform; supported: linux windows")
     if architecture is not None and architecture != actual:
-        raise ValueError(f"compiler architecture mismatch: requested {architecture}, ELF is {actual}")
+        raise ValueError(f"compiler architecture mismatch: requested {architecture}, image is {actual}")
     embedded = subprocess.run([*(runner or []), str(binary), "version"], check=True,
                               capture_output=True, text=True, timeout=60).stdout.strip()
     if embedded != f"xen {version}":

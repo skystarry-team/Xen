@@ -111,15 +111,25 @@ let load_graph ~target ~project_root ~expected entry =
     entry :: List.rev !order
   end
 
+(* Compare canonical paths on the compiler host, independently of its output
+   target. Keep a separator boundary so /project-other is outside /project. *)
+let relative_entry ~windows ~root path =
+  let normalize path=if windows then String.map(fun c->if c='\\'then '/'else c)path else path in
+  let root=normalize root and path=normalize path in
+  let prefix=if String.ends_with ~suffix:"/" root then root else root^"/" in
+  let compare path=if windows then String.lowercase_ascii path else path in
+  if String.starts_with ~prefix:(compare prefix) (compare path) then
+    Some(String.sub path(String.length prefix)(String.length path-String.length prefix))
+  else None
+
 let load ?(target=Target.default) ?root entry_path =
   let entry=Parser.parse ~file:entry_path (read_file entry_path)in
   let project_root=Option.value ~default:(Filename.dirname entry_path)root in
   let expected=match root with None->Filename.basename entry_path |> Filename.remove_extension
-    |Some root->let absolute_root=Unix.realpath root in
-        let prefix=if absolute_root="/"then "/"else absolute_root^"/" and path=Unix.realpath entry_path in
-        if not(String.starts_with ~prefix path)then
-          raise(Error({file=entry_path;line=1;column=1},"entry is outside project root"));
-        let relative=String.sub path(String.length prefix)(String.length path-String.length prefix)in
+    |Some root->let relative=match relative_entry ~windows:Sys.win32
+            ~root:(Unix.realpath root) (Unix.realpath entry_path) with
+          |Some relative->relative
+          |None->raise(Error({file=entry_path;line=1;column=1},"entry is outside project root"))in
         String.map(fun c->if c='/'then '.'else c)(Filename.remove_extension relative)in
   load_graph ~target ~project_root ~expected entry
 

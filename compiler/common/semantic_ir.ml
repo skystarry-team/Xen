@@ -31,6 +31,7 @@ type rvalue =
   | Inline_asm of asm_spec * value list
   | Cpu_relax | Memory_fence
   | Foreign_call of foreign_symbol * value list
+  | Platform_call of Platform_service.t * value list
   | Atomic of atomic_kind * typ * memory_order * memory_order option * value list
   | Ptr_addr of typ * value | Ptr_len of value | Syscall of value list
   | Vec_lit of value list | Index of value * value | Vec_get of value * value | Vec_len of value
@@ -78,7 +79,7 @@ let rvalue_uses = function
   | Vec_pop x|File_read x|File_close x|File_is_open x -> [x]
   | Binary(_,a,b)|Raw_load(_,a,b)|Volatile_load(_,a,b)|Ptr_from_addr(_,a,b)|Index(a,b)|Vec_get(a,b)|Slice_get(a,b)|Vec_push(a,b)|File_write(a,b)|Exchange(a,b) -> [a;b]
   | Raw_store(_,a,b,c)|Volatile_store(_,a,b,c)|Slice_make(a,b,c)|Vec_set(a,b,c)|Vec_swap(a,b,c)|Vec_replace(a,b,c) -> [a;b;c]
-  | Call(_,xs)|Syscall xs|Inline_asm(_,xs)|Foreign_call(_,xs)|Atomic(_,_,_,_,xs)|Vec_lit xs -> xs
+  | Call(_,xs)|Syscall xs|Inline_asm(_,xs)|Foreign_call(_,xs)|Platform_call(_,xs)|Atomic(_,_,_,_,xs)|Vec_lit xs -> xs
   | Indirect_call(c,xs) -> c::xs
   | Struct_lit(_,fs) -> List.map snd fs
 let place_uses p = p.root :: List.filter_map(function Element v->Some v.id|_->None)p.projections
@@ -285,6 +286,9 @@ let verify program =
               |Raw_free(t,p)->require(Ptr t)p.typ;require Unit v.typ
               |Ptr_addr(t,p)->require(Ptr t)p.typ;require I64 v.typ
               |Ptr_len p->(match p.typ with Ptr _->require I64 v.typ|_->bad op.span "pointer length operand")
+              |Platform_call(service,xs)->
+                  if List.length xs<>Platform_service.arity service then bad op.span "platform service arity";
+                  List.iter index xs;require I64 v.typ
               |Syscall xs->if xs=[]||List.length xs>7 then bad op.span "syscall arity";List.iter index xs;require I64 v.typ)
          | Initialize(p,v)|Replace(p,v)->place p;value v;if p.typ<>v.typ then bad op.span "store type mismatch";
              if (owns p.typ||linear [] p.typ) && not(local v.span v.id).owned then
@@ -299,7 +303,7 @@ let verify program =
              |(id,scope)::rest when id=target && scope=op.scope->calls:=rest
              |_->bad op.span "unbalanced logical call exit")
          | Storage_live _|Storage_dead _->());
-        (match op.node with Eval(_, (Raw_alloc _|Raw_load _|Raw_store _|Raw_free _|Volatile_load _|Volatile_store _|Ptr_from_addr _|Inline_asm _|Cpu_relax|Memory_fence|Foreign_call _|Atomic _|Ptr_addr _|Ptr_len _|Syscall _))->
+        (match op.node with Eval(_, (Raw_alloc _|Raw_load _|Raw_store _|Raw_free _|Volatile_load _|Volatile_store _|Ptr_from_addr _|Inline_asm _|Cpu_relax|Memory_fence|Foreign_call _|Platform_call _|Atomic _|Ptr_addr _|Ptr_len _|Syscall _))->
           if not(List.mem Bb f.scopes.(op.scope).mode_set)then bad op.span "raw operation outside bb scope"|_->()))b.operations;
       if !calls<>[] then bad f.span "logical call crosses block terminator";
       (match b.terminator with Branch(v,_,_)->value v;if v.typ<>Bool then bad v.span "branch expects Bool"
@@ -318,7 +322,7 @@ let dump p =
         |Storage_live n->"live l"^string_of_int n|Storage_dead n->"dead l"^string_of_int n
         |Acquire(v,k,p)->Printf.sprintf "v%d = %s %s" v.id(match k with Read->"read"|Copy->"copy"|Clone->"clone"|Move->"move")(string_of_place p)
         |Borrow(v,m,r,p)->Printf.sprintf "v%d = borrow %s%s %s" v.id(if m then "mut "else "")(if r then "reserved"else "")(string_of_place p)
-        |Eval(v,r)->Printf.sprintf "v%d = %s(%s)" v.id(match r with Call(n,_)->"call "^n|Indirect_call _->"indirect-call"|Foreign_call(s,_)->"extern-call "^s.symbol|Atomic(k,_,_,_,_)->Atomic_contract.name k|Inline_asm _->"asm volatile memory=unknown"|Cpu_relax->"cpu-relax"|Memory_fence->"memory-fence"|Volatile_load _->"volatile-load"|Volatile_store _->"volatile-store"|Ptr_from_addr _->"ptr-from-addr"|_->"operation")(String.concat ","(List.map(fun(v:value)->"v"^string_of_int v.id)(rvalue_uses r)))
+        |Eval(v,r)->Printf.sprintf "v%d = %s(%s)" v.id(match r with Call(n,_)->"call "^n|Indirect_call _->"indirect-call"|Foreign_call(s,_)->"extern-call "^s.symbol|Platform_call(s,_)->"platform-call "^Platform_service.name s|Atomic(k,_,_,_,_)->Atomic_contract.name k|Inline_asm _->"asm volatile memory=unknown"|Cpu_relax->"cpu-relax"|Memory_fence->"memory-fence"|Volatile_load _->"volatile-load"|Volatile_store _->"volatile-store"|Ptr_from_addr _->"ptr-from-addr"|_->"operation")(String.concat ","(List.map(fun(v:value)->"v"^string_of_int v.id)(rvalue_uses r)))
         |Initialize(p,v)->Printf.sprintf "init %s <- v%d"(string_of_place p)v.id
         |Replace(p,v)->Printf.sprintf "replace %s <- v%d"(string_of_place p)v.id
         |Drop p->"drop "^string_of_place p|Forget p->"forget "^string_of_place p

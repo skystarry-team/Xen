@@ -3,6 +3,7 @@
 let available : (module Backend_intf.S) list = [
   (module Xen_linux_x86_64.Linux_backend);
   (module Xen_linux_arm64.Linux_backend);
+  (module Xen_windows_x86_64.Windows_backend);
 ]
 
 let select target =
@@ -25,11 +26,12 @@ let host_target ~architecture ~system =
     |"amd64"|"x86_64"->Some Target.X86_64|_->None in
   let operating_system=match system with
     |"linux"->Some Target.Linux|"macosx"|"macos"|"darwin"->Some Target.MacOS
+    |"mingw64"|"win64"->Some Target.Windows
     |_->None in
   match cpu, operating_system with
   | Some architecture, Some operating_system -> Ok {Target.architecture;operating_system}
   | _ -> Error ("unsupported compiler host '" ^ architecture ^ "-" ^ system ^
-      "'; specify --target=x86_64-linux or --target=aarch64-linux")
+      "'; specify --target=x86_64-linux, --target=aarch64-linux or --target=x86_64-windows")
 let default_target () = host_target ~architecture:Host_config.architecture ~system:Host_config.system
 (* Legacy library fallback is fixed, independent of registration order. The CLI
    uses default_target/select directly and never falls back on an unsupported OS. *)

@@ -1,6 +1,6 @@
 # Command-line tools
 
-Commands assume `xen` is on `PATH`. From a distribution directory, substitute `./bin/xen`; from the repository, use `compiler/dist/xen`.
+Commands assume `xen` is on `PATH`. From a distribution directory, substitute `./bin/xen`; from the repository, use `compiler/dist/xen`. On Windows PowerShell, use `.\bin\xen.exe` or `.\compiler\dist\xen.exe`.
 
 | Command | Purpose |
 | --- | --- |
@@ -10,7 +10,7 @@ Commands assume `xen` is on `PATH`. From a distribution directory, substitute `.
 | `xen build file.xen -o app` | Make a standalone executable |
 | `xen test [file.xen or directory or std.module]` | Run tests |
 
-Successful `check` and `build` commands produce no output. Without `-o`, `build` writes `a.out` in the working directory. An existing output file is overwritten. `run` uses the current working directory and standard input/output, removing its temporary executable when the program exits.
+Successful `check` and `build` commands produce no output. Without `-o`, `build` writes `a.out` for a Linux target or `a.exe` for a Windows target in the working directory, regardless of the compiler's host OS. An existing output file is overwritten. `run` uses the current working directory and standard input/output, removing its temporary executable when the program exits.
 
 ## Program arguments
 
@@ -24,13 +24,13 @@ Before `--` are Xen options; after it are your program's arguments. Read them wi
 
 ## Choose the execution environment
 
-The default target is your installed Xen compiler's Linux architecture. `check`, `build`, `run`, and `test` accept `--target=x86_64-linux` and `--target=aarch64-linux`. `arm64-linux` is an alias for the latter.
+The default target follows the installed compiler's OS and architecture. `check`, `build`, `run`, and `test` accept `--target=x86_64-linux`, `--target=aarch64-linux` and `--target=x86_64-windows`. `arm64-linux` is an alias for `aarch64-linux`.
 
 ```sh
 xen build hello.xen --target=aarch64-linux -o hello-arm64
 ```
 
-Run the output on a compatible Linux machine. Selecting another CPU does not automatically make it executable on the current machine. AArch64 support is experimental and validation on physical devices is ongoing. macOS and Windows are unsupported.
+Run the output on a compatible OS and CPU. Selecting another target does not make it executable on the current machine. AArch64 and Windows x86-64 support are experimental; physical hardware validation is pending. Windows compiler, PE execution and standard library tests pass on Windows Server 2022 native CI; Windows desktop hardware validation is still required. Windows ARM64 and macOS are unsupported. Windows raw syscalls and `extern_call` are unavailable. In PowerShell, build with `-o hello.exe` and execute `.\hello.exe`.
 
 ## Select tests
 

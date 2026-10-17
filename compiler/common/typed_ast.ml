@@ -19,6 +19,7 @@ and expr_node =
   | Inline_asm of asm_spec * expr list
   | Cpu_relax | Memory_fence
   | Foreign_call of foreign_symbol * expr list
+  | Platform_call of Platform_service.t * expr list
   | Atomic of atomic_kind * typ * memory_order * memory_order option * expr list
   | Ptr_addr of typ * expr | Ptr_len of expr | Syscall of expr list
   | Vec_lit of expr list | Index of expr * expr

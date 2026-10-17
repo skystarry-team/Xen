@@ -46,6 +46,8 @@ def package(name: str | None, output: Path | None, *, version: str | None = None
             binary: Path | None = None, platform: str = "linux",
             architecture: str | None = None, runner: list[str] | None = None,
             output_dir: Path | None = None) -> Path:
+    if platform != "linux":
+        raise ValueError("unsupported Debian package platform; deb supports linux only")
     version = version if version is not None else (ROOT / "VERSION").read_text().strip()
     deb_version = debian_version(version)
     binary = (binary if binary is not None else ROOT / "compiler/dist/xen").resolve()

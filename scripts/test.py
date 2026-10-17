@@ -26,7 +26,7 @@ def prototype() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("all", "arm64", "host", "macos-prototype", "quickcheck", "semantic", "packaging"), default="all")
+    parser.add_argument("--suite", choices=("all", "arm64", "host", "windows", "macos-prototype", "quickcheck", "semantic", "packaging"), default="all")
     parser.add_argument("--mode", default="all")
     parser.add_argument("--depth", default="standard")
     parser.add_argument("--seed")
@@ -35,6 +35,16 @@ def main() -> None:
         run("dune", "build", "@release")
     if args.suite == "macos-prototype":
         prototype()
+    elif args.suite == "windows":
+        run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe", "tests/windows_abi_fixture.exe", "tests/windows_runtime_fixture.exe")
+        run("dune", "exec", "tests/pe_writer_test.exe")
+        run("dune", "exec", "tests/win64_test.exe")
+        run("dune", "exec", "tests/backend_contract_test.exe")
+        run("dune", "exec", "tests/platform_service_test.exe")
+        integration("windows", *(["--require-native"] if os.name == "nt" else []))
+        integration("windows_abi", *(["--require-native"] if os.name == "nt" else []))
+        integration("windows_runtime", *(["--require-native"] if os.name == "nt" else []))
+        integration("windows_package")
     elif args.suite == "arm64":
         run("dune", "exec", "tests/arm64_machine_test.exe")
         integration("arm64", XEN_REQUIRE_ARM64="1")
@@ -45,13 +55,18 @@ def main() -> None:
     elif args.suite == "packaging":
         integration("package_build")
         integration("package_distribution")
+        integration("windows_package")
     elif args.suite in ("all", "quickcheck", "semantic"):
         if args.suite == "all":
             run("dune", "runtest")
+            run("dune", "build", "tests/windows_fixture.exe", "tests/windows_runner_fixture.exe", "tests/windows_abi_fixture.exe", "tests/windows_runtime_fixture.exe")
+            integration("windows")
+            integration("windows_abi")
+            integration("windows_runtime")
             run("dune", "build", "tests/mach_o_fixture.exe", "tests/darwin_fixture.exe", "tests/darwin_abi_fixture.exe")
             integration("mach_o")
             run("dune", "exec", "tests/native_core_test.exe", XEN_TEST_OPT="basic")
-            for name in ("optimization", "operators", "power_remainder", "scoped_opt", "aot_fusion", "low_level", "low_level_extended", "x86_64_runtime", "toolchain", "package_build", "package_distribution", "arm64", "host", "stdlib"):
+            for name in ("optimization", "operators", "power_remainder", "scoped_opt", "aot_fusion", "low_level", "low_level_extended", "x86_64_runtime", "toolchain", "package_build", "package_distribution", "windows_package", "arm64", "host", "stdlib"):
                 integration(name)
             integration("stdlib", "--arm64")
             integration("test_workflow")

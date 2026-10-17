@@ -1,6 +1,6 @@
 # 명령어 안내
 
-이 문서의 명령은 `xen`이 `PATH`에 있다는 전제입니다. 배포 디렉터리에서는 `./bin/xen`, 저장소에서는 `compiler/dist/xen`으로 바꾸어도 됩니다.
+이 문서의 명령은 `xen`이 `PATH`에 있다는 전제입니다. 배포 디렉터리에서는 `./bin/xen`, 저장소에서는 `compiler/dist/xen`으로 바꾸어도 됩니다. Windows PowerShell에서는 `.\bin\xen.exe` 또는 `.\compiler\dist\xen.exe`를 사용합니다.
 
 | 명령 | 사용하는 때 |
 | --- | --- |
@@ -10,7 +10,7 @@
 | `xen build file.xen -o app` | 독립 실행 파일 만들기 |
 | `xen test [file.xen 또는 디렉터리 또는 std.module]` | 테스트 실행 |
 
-`check`와 `build`는 성공하면 출력하지 않습니다. `build`에서 `-o`를 생략하면 현재 디렉터리에 `a.out`을 만듭니다. 같은 출력 경로가 이미 있으면 덮어씁니다. `run`은 현재 작업 디렉터리와 표준 입출력을 사용하며 프로그램이 끝나면 임시 실행 파일을 지웁니다.
+`check`와 `build`는 성공하면 출력하지 않습니다. `build`에서 `-o`를 생략하면 현재 디렉터리에 Linux 타깃은 `a.out`, Windows 타깃은 `a.exe`를 만듭니다. 출력 이름은 호스트 OS와 관계없이 선택한 타깃을 따릅니다. 같은 출력 경로가 이미 있으면 덮어씁니다. `run`은 현재 작업 디렉터리와 표준 입출력을 사용하며 프로그램이 끝나면 임시 실행 파일을 지웁니다.
 
 ## 프로그램 인자
 
@@ -24,13 +24,13 @@ xen build word_count.xen -o word-count
 
 ## 실행 환경 선택
 
-기본 실행 환경은 설치한 Xen의 Linux 아키텍처입니다. `check`, `build`, `run`, `test`에 `--target=x86_64-linux` 또는 `--target=aarch64-linux`을 지정할 수 있습니다. `arm64-linux`은 후자의 별명입니다.
+기본 실행 환경은 설치한 Xen의 OS와 CPU를 따릅니다. `check`, `build`, `run`, `test`에 `--target=x86_64-linux`, `--target=aarch64-linux`, `--target=x86_64-windows`를 지정할 수 있습니다. `arm64-linux`은 `aarch64-linux`의 별명입니다.
 
 ```sh
 xen build hello.xen --target=aarch64-linux -o hello-arm64
 ```
 
-만든 파일은 호환되는 Linux 머신에서 실행하세요. 옵션으로 다른 CPU를 고른다고 현재 머신에서 자동 실행할 수 있게 되는 것은 아닙니다. AArch64는 실험적 지원이며 실제 장치에서의 검증이 진행 중입니다. macOS와 Windows는 지원하지 않습니다.
+만든 파일은 호환되는 OS와 CPU에서 실행하세요. 다른 타깃을 골라도 현재 머신에서 자동으로 실행되지는 않습니다. AArch64와 Windows x86-64는 실험적 지원이며 실 하드웨어 검증이 필요합니다. Windows 컴파일러·PE 실행·표준 라이브러리는 Windows Server 2022 네이티브 CI를 통과했지만, Windows 데스크톱 실기기 검증은 추가로 필요합니다. Windows ARM64와 macOS는 미지원입니다. Windows의 원시 syscall과 `extern_call`은 지원하지 않습니다. PowerShell에서는 `-o hello.exe`로 빌드하고 `.\hello.exe`로 실행합니다.
 
 ## 테스트 선택
 

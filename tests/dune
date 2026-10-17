@@ -11,6 +11,11 @@
  (libraries unix xen_common))
 
 (test
+ (name platform_service_test)
+ (modules platform_service_test)
+ (libraries xen_common))
+
+(test
  (name operators_test)
  (modules operators_test)
  (libraries unix xen_common))
@@ -33,6 +38,36 @@
 (test
  (name backend_contract_test)
  (modules backend_contract_test)
+ (libraries unix xen_compiler))
+
+(test
+ (name pe_writer_test)
+ (modules pe_writer_test)
+ (libraries xen_windows))
+
+(test
+ (name win64_test)
+ (modules win64_test)
+ (libraries xen_x86_64))
+
+(executable
+ (name windows_runtime_fixture)
+ (modules windows_runtime_fixture)
+ (libraries xen_common xen_x86_64 xen_windows_x86_64))
+
+(executable
+ (name windows_fixture)
+ (modules windows_fixture)
+ (libraries xen_windows xen_x86_64))
+
+(executable
+ (name windows_abi_fixture)
+ (modules windows_abi_fixture)
+ (libraries xen_x86_64 xen_windows xen_windows_x86_64))
+
+(executable
+ (name windows_runner_fixture)
+ (modules windows_runner_fixture)
  (libraries unix xen_compiler))
 
 (test

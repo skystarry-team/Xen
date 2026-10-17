@@ -5,6 +5,10 @@
 module M = Xen_x86_64.Machine_ir
 let open_read_flags = 0
 let open_write_flags = 577
+let stack_allocate output size =
+  if size>0 then (M.bytes output[0x48;0x81;0xec];M.u32 output(Int64.of_int size))
+let function_prologue output =
+  M.bytes output[0x55;0x48;0x89;0xe5];fun()->M.bytes output[0xc9;0xc3]
 let trap output = M.bytes output [0x0f;0x05]
 let syscall output number = M.u8 output 0xb8;M.u32 output (Int64.of_int number);trap output
 let read output = M.bytes output [0x31;0xc0];trap output
@@ -19,6 +23,8 @@ let alloc output =
 let open_ output =
   M.bytes output [0x48;0x89;0xf2;0x48;0x89;0xfe;0x48;0xc7;0xc7;0x9c;0xff;0xff;0xff;
     0x41;0xba;0xa4;1;0;0];syscall output 257
+let platform_call _ service = Error("platform service '"^Platform_service.name service^
+  "' is unavailable through this target's intrinsic; use std.platform")
 let raw_syscall output ~arity =
   let load displacement bytes=M.bytes output bytes;M.u32 output(Int64.of_int displacement)in
   load((arity-1)*8)[0x48;0x8b;0x84;0x24];

@@ -2,18 +2,13 @@
 // Shared Linux record decoders, used only by explicit Linux target services.
 module std.platform_linux;
 
-struct Stat {
-    size: Int,
-    modified_seconds: Int,
-    is_directory: Bool,
-    is_file: Bool,
-}
+use std.platform_types;
 
 #![bb]
-fn decode_stat(data: Ptr<Int>, mode_word: Int) -> Stat {
+fn decode_stat(data: Ptr<Int>, mode_word: Int) -> std.platform_types.Stat {
     let mode = (raw_load(data, mode_word) % 65536 + 65536) % 65536;
     let kind = mode / 4096;
-    return Stat {
+    return std.platform_types.Stat {
         size: raw_load(data, 6),
         modified_seconds: raw_load(data, 11),
         is_directory: kind == 4,

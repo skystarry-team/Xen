@@ -10,6 +10,7 @@ and tar.gz packages. This guide covers building the compiler from source.
 | --- | --- |
 | Linux x86_64, building an x86_64 compiler | Native x86_64 OCaml |
 | Linux AArch64, building an AArch64 compiler | Native AArch64 OCaml |
+| Windows x86_64, building `xen.exe` | Native Windows x64 OCaml (MinGW) |
 | Linux x86_64, building an AArch64 compiler | Native x86_64 OCaml and an AArch64 cross OCaml toolchain |
 
 Cross OCaml runs on the build host and emits code for another CPU. Installing an
@@ -20,7 +21,7 @@ See [AArch64 cross compilation](aarch64.md).
 
 - Native OCaml with `ocamlc` and `ocamlopt` on `PATH`; OCaml 5.5.0 is the reference toolchain.
 - Dune 3.18 or later; Dune 3.24.2 is the reference build version.
-- GNU Make for the repository's build commands.
+- GNU Make for the Linux repository commands; Windows uses Dune directly.
 - Python 3.10 or later for packaging and test scripts; `dpkg-dev` for `.deb` creation.
 
 The cross toolchain must match the native OCaml version exactly. Compiler tests
@@ -90,6 +91,30 @@ compiler/dist/xen run examples/demo.xen
 `compiler/dist/xen`. Native Linux AArch64 uses the same commands without a cross
 workspace. The CLI default target follows the compiler's OCaml build architecture;
 both Linux targets use scoped AOT optimization.
+
+## Windows x86_64 (experimental)
+
+Use an initialized native Windows x64 opam switch with OCaml 5.5.0 and Dune
+3.24.2. `ocamlc -config` must report `architecture: amd64`, `system: mingw64`
+(or `win64`) and `os_type: Win32`; a Cygwin-targeting compiler is not equivalent.
+From the repository root in PowerShell:
+
+```powershell
+opam exec -- ocamlc -config
+opam install dune.3.24.2
+opam exec -- dune build '@release'
+.\compiler\dist\xen.exe version
+.\compiler\dist\xen.exe run examples\demo.xen
+opam exec -- python scripts/test.py --suite windows
+opam exec -- python -m packaging.cli --platform windows --formats zip
+```
+
+Quote `'@release'` in PowerShell. The release executable is `compiler/dist/xen.exe`;
+the default generated program is `a.exe` for `x86_64-windows`. Windows Server 2022
+native CI has passed compiler, PE/loader, runtime and standard library checks.
+Windows desktop validation on physical hardware is still required. Windows ARM64,
+raw syscalls and `extern_call` are unsupported. Python is required for packaging
+and verification, not for use of an installed compiler.
 
 ## Compiler version
 
